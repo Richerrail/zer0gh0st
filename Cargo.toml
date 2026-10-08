@@ -1,9 +1,11 @@
 [package]
 name = "zer0"
-version = "0.1.0"
+version = "0.5.0"
 edition = "2021"
-description = "Zer0 - a terminal-native AI agent (CLI-only)"
+description = "ZER0|GH0ST - a terminal-native AI agent (CLI-only, Rust)"
+authors = ["richerrail"]
 license = "MIT"
+readme = "README.md"
 
 [[bin]]
 name = "zer0"
