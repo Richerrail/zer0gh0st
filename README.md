@@ -70,7 +70,10 @@ cargo build --release        # ~5 min la première fois
 
 ### Mode 100 % local (aucune clé API)
 
+Place un modèle `.gguf` dans `models/` (ou pointe-le) :
+
 ```bash
+export ZER0_MODEL=/chemin/vers/mon-modele.Q4_0.gguf   # optionnel (défaut dans serve.sh)
 ./scripts/serve.sh           # démarre llama-server (2 cœurs sur 4)
 ./scripts/run.sh
 ```

@@ -9,15 +9,6 @@ Zer0v1 lance certains modules **dans une fenêtre séparée** depuis ce dossier 
 | `/retro` | `mods/Zer0-Retr0/index.html` | HTML/JS (jeux) |
 
 Ces programmes ne sont **pas fournis** ici (droits/licences propres, assets volumineux).
-Si un module est absent, la commande affiche simplement `introuvable` — le reste de l'agent
-fonctionne normalement.
+Si un module est absent, la commande affiche `introuvable` — le reste fonctionne.
 
-## Ajouter un module
-
-1. Dépose le programme dans un sous-dossier, p. ex. `mods/mon-module/`.
-2. Ajoute un lanceur dans `src/mods.rs` (résout déjà la racine du projet).
-
-## Modules intégrés (rien à faire)
-
-`/radio` (lecteur audio terminal), `/bintime` (horloge), `/pong` sont **natifs en Rust**
-dans `src/fun/` — pas dans `mods/`.
+Les modules **natifs** (`/radio`, `/bintime`, `/pong`) sont en Rust dans `src/fun/`.
