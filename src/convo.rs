@@ -42,8 +42,31 @@ pub fn append(msg: &ChatMessage) -> Result<()> {
     Ok(())
 }
 
-/// Efface l'historique.
+/// Charge les messages depuis un chemin arbitraire.
+pub fn load_from_path(p: &std::path::Path) -> Vec<ChatMessage> {
+    let Ok(s) = std::fs::read_to_string(p) else {
+        return Vec::new();
+    };
+    s.lines()
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect()
+}
+
+/// Archive et efface l'historique actif.
 pub fn clear() -> Result<()> {
-    let _ = std::fs::remove_file(path());
+    let p = path();
+    if p.exists() {
+        let msgs = load(0);
+        if !msgs.is_empty() {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            let archive = p.with_file_name(format!("conversation_{now}.jsonl"));
+            let _ = std::fs::rename(&p, &archive);
+        } else {
+            let _ = std::fs::remove_file(&p);
+        }
+    }
     Ok(())
 }

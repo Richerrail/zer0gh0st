@@ -116,8 +116,8 @@ Détail complet du modèle de menace : [`SAFETY.md`](./SAFETY.md).
 | **Rôles** | `main/code/reasoning/writing/vision/fast/utility/review`, sélection auto par catégorie |
 | **Mémoire** | store JSONL, recherche sémantique optionnelle, **enveloppe d'honnêteté** |
 | **Connaissance** | base **SQLite + FTS5** (hybride), **injection auto** dans le prompt (+ outil `knowledge_search`) |
-| **Zero-chan** | assistante vocale **intégrée à la TUI** : bloc d'état à droite du banner + boutons `0chan`/`micro` à droite de la saisie. **Réutilise le chat et l'input de l'agent**. STT[...] |
-| **Historique** | **conversation persistée** (JSONL), rechargée au démarrage ; `/history`, `/new` |
+| **Zero-chan** | assistante vocale **intégrée à la TUI** : bloc d'état à droite du banner + boutons `0chan`/`micro` à droite de la saisie. **Réutilise le chat et l'input de l'agent**. STT = Whisper local. |
+| **Historique** | **conversation persistée** (JSONL), rechargée au démarrage ; `/history`, `/new` (archive la session) ; **F6** liste et recharge les sessions passées |
 | **Sélection** | clic + glisser dans le chat/saisie → surbrillance + **copie presse-papier** auto |
 | **Contexte** | compaction automatique (~4000 tokens) via le rôle `utility` |
 | **Tâches** | liste Markdown `.zer0/tasks.md`, `claim/done`, boucle `/work` par sous-agent |
@@ -185,6 +185,8 @@ Zer0 agit : tu décris un but, il appelle les outils nécessaires.
 | `↑` `↓` | historique de saisie |
 | `PgUp` `PgDn` | faire défiler la conversation |
 | `F4` | activer/désactiver `code_exec` |
+| `F6` | gérer les conversations (sessions sauvegardées) |
+| `F7` | relancer/poursuivre l'agent (nudge) |
 | `F8` / `F10` | zero-chan (assistante) / micro |
 | `Ctrl+C` / `/stop` | interrompre la génération |
 | souris | clic + glisser → sélection, relâcher → copie |

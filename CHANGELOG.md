@@ -84,6 +84,17 @@
   (modèles de raisonnement type `meta/muse-glimmer-30b`), le raisonnement est utilisé comme
   réponse au lieu d'échouer.
 
+## Sessions de conversation : F6 / F7 (2026-10-08)
+
+- **F6 — Chats** : pop-up listant les sessions sauvegardées (`conversation_*.jsonl`),
+  navigation ↑↓, `Entrée` pour charger, `Esc`/`q`/`F6` pour fermer. Charger une session
+  archive l'actuelle puis la rend active (rien n'est perdu).
+- **F7 — Nudge** : relance l'agent (« Continue ton raisonnement ou ton exécution. »)
+  sans rien taper — utile après un arrêt, un stream vide ou une coupure.
+- `/new` **archive** désormais la conversation active (`conversation_<timestamp>.jsonl`)
+  au lieu de la supprimer ; les fichiers vides ne sont pas conservés.
+- Refactor : `send_message` délègue à `start_turn` (réutilisé par le nudge).
+
 ## Nom : ZER0│GH0ST (2026-10-08)
 
 - Le bandeau passe de « AGENT ZERO » à **`ZER0│GH0ST`**, avec le sous-titre **`ghost in the shell`**.

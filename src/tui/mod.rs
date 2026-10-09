@@ -85,6 +85,8 @@ pub struct App {
     pub sel_anchor: Option<(u16, u16)>,
     pub sel_head: Option<(u16, u16)>,
     pub screen: Vec<String>,
+    /// Si Some, affiche le pop-up d'anciennes conversations avec (liste des fichiers, index sélectionné).
+    pub chats_popup: Option<(Vec<std::path::PathBuf>, usize)>,
 }
 
 impl App {
@@ -181,6 +183,7 @@ pub async fn run(
         sel_anchor: None,
         sel_head: None,
         screen: Vec::new(),
+        chats_popup: None,
         thinking: options.thinking,
         max_tokens: options.max_tokens,
         temperature: options.temperature,
@@ -283,25 +286,7 @@ async fn event_loop(
     Ok(())
 }
 
-fn send_message(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
-    let text = app.input.trim().to_string();
-    if text.is_empty() || app.streaming {
-        return;
-    }
-    app.input.clear();
-
-    // Historique d'entrée (↑ le rappelle).
-    if !app.history.last().map(|h| h == &text).unwrap_or(false) {
-        app.history.push(text.clone());
-    }
-    app.hist_pos = None;
-    app.hist_draft.clear();
-
-    if text.starts_with('/') {
-        handle_command(app, &text, ui_tx);
-        return;
-    }
-
+fn start_turn(app: &mut App, text: String, ui_tx: &UnboundedSender<UiEvent>) {
     let role = match &app.forced_role {
         Some(r) => r.clone(),
         None => route::auto_role(&text).to_string(),
@@ -396,6 +381,37 @@ fn send_message(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
         }
         crate::agent::turn::run_turn(endpoints, system, base, tools, options, ui).await;
     });
+}
+
+fn send_message(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
+    let text = app.input.trim().to_string();
+    if text.is_empty() || app.streaming {
+        return;
+    }
+    app.input.clear();
+
+    // Historique d'entrée (↑ le rappelle).
+    if !app.history.last().map(|h| h == &text).unwrap_or(false) {
+        app.history.push(text.clone());
+    }
+    app.hist_pos = None;
+    app.hist_draft.clear();
+
+    if text.starts_with('/') {
+        handle_command(app, &text, ui_tx);
+        return;
+    }
+
+    start_turn(app, text, ui_tx);
+}
+
+fn nudge(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
+    if app.streaming {
+        return;
+    }
+    app.messages.push(ChatMessage::notice("👉 Coup de coude (Nudge)"));
+    let text = "Continue ton raisonnement ou ton exécution.".to_string();
+    start_turn(app, text, ui_tx);
 }
 
 fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
@@ -1445,6 +1461,97 @@ fn cmd_select(problem: &str, ui_tx: &UnboundedSender<UiEvent>) {
     });
 }
 
+/// Liste les fichiers de conversation (active + archives), plus récents d'abord.
+fn scan_chats() -> Vec<std::path::PathBuf> {
+    let dir = config::data_dir();
+    let mut files = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
+            if path.is_file() {
+                let name = path.file_name().unwrap_or_default().to_string_lossy();
+                if name.starts_with("conversation") && name.ends_with(".jsonl") {
+                    files.push(path);
+                }
+            }
+        }
+    }
+    files.sort_by(|a, b| {
+        let ma = a.metadata().and_then(|m| m.modified()).ok();
+        let mb = b.metadata().and_then(|m| m.modified()).ok();
+        mb.cmp(&ma)
+    });
+    files
+}
+
+/// Touches du pop-up Chats. Retourne `true` s'il faut le fermer.
+fn handle_chats_key(app: &mut App, code: KeyCode) -> bool {
+    let len = app.chats_popup.as_ref().map(|(f, _)| f.len()).unwrap_or(0);
+    match code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some((_, s)) = app.chats_popup.as_mut() {
+                *s = s.saturating_sub(1);
+            }
+            false
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some((_, s)) = app.chats_popup.as_mut() {
+                *s = (*s + 1).min(len.saturating_sub(1));
+            }
+            false
+        }
+        KeyCode::Esc | KeyCode::Char('q') | KeyCode::F(6) => true,
+        KeyCode::Enter => {
+            let pick = app
+                .chats_popup
+                .as_ref()
+                .and_then(|(f, s)| f.get(*s).cloned());
+            if let Some(path) = pick {
+                load_chat_session(app, &path);
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Charge une session depuis un fichier et la rend active (archive l'actuelle).
+fn load_chat_session(app: &mut App, path: &std::path::Path) {
+    let active = crate::convo::path();
+    if path != active.as_path() {
+        if active.exists() {
+            let current = crate::convo::load(0);
+            if !current.is_empty() {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let archive = active.with_file_name(format!("conversation_{now}.jsonl"));
+                let _ = std::fs::rename(&active, &archive);
+            }
+        }
+        let _ = std::fs::copy(path, &active);
+    }
+    let loaded = crate::convo::load_from_path(&active);
+    let conv: Vec<ChatMessage> = loaded
+        .iter()
+        .filter(|m| m.role != "notice")
+        .cloned()
+        .collect();
+    app.conversation = conv;
+    app.messages = loaded;
+    app.display_mark = app.messages.len();
+    app.scroll = 0;
+    app.auto_scroll = true;
+    let name = path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    app.messages
+        .push(ChatMessage::notice(format!("📝 session chargée : {name}")));
+}
+
 fn handle_input(
     ev: Event,
     app: &mut App,
@@ -1523,6 +1630,13 @@ fn handle_input(
             }
             return;
         }
+        // Pop-up « Chats » (F6) : capture les touches tant qu'il est ouvert.
+        if app.chats_popup.is_some() {
+            if handle_chats_key(app, k.code) {
+                app.chats_popup = None;
+            }
+            return;
+        }
         // Side panel focus (right pane).
         if app.side_mode.is_some() && app.focus_panel {
             let is_radio = app.side_mode == Some(crate::fun::Mode::Radio);
@@ -1575,8 +1689,8 @@ fn handle_input(
             KeyCode::F(5) => handle_command(app, "/help", ui_tx),
             KeyCode::F(8) => app.zc.toggle_on(),
             KeyCode::F(10) => toggle_mic(app, ui_tx),
-            KeyCode::F(6) => app.messages.push(ChatMessage::notice("Chats: à venir")),
-            KeyCode::F(7) => app.messages.push(ChatMessage::notice("Nudge: à venir")),
+            KeyCode::F(6) => app.chats_popup = Some((scan_chats(), 0)),
+            KeyCode::F(7) => nudge(app, ui_tx),
             KeyCode::Up => history_up(app),
             KeyCode::Down => history_down(app),
             KeyCode::PageUp => {
@@ -1698,6 +1812,7 @@ fn draw(f: &mut Frame, app: &mut App) {
     }
 
     draw_agent(f, area, app);
+    draw_chats_popup(f, area, app);
     finalize_buffer(f, app);
 }
 
@@ -1738,6 +1853,89 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &App, mode: crate::fun::Mode) {
         crate::fun::Mode::Radio => app.radio.draw(f, area),
         _ => {}
     }
+}
+
+fn centered_rect(pct_x: u16, pct_y: u16, r: Rect) -> Rect {
+    let vert = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - pct_y) / 2),
+            Constraint::Percentage(pct_y),
+            Constraint::Percentage((100 - pct_y) / 2),
+        ])
+        .split(r);
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - pct_x) / 2),
+            Constraint::Percentage(pct_x),
+            Constraint::Percentage((100 - pct_x) / 2),
+        ])
+        .split(vert[1])[1]
+}
+
+/// Convertit un timestamp Unix (UTC) en `YYYY-MM-DD HH:MM`.
+fn fmt_time(secs: u64) -> String {
+    let days = (secs / 86_400) as i64;
+    let rem = secs % 86_400;
+    let (h, mi) = (rem / 3600, (rem % 3600) / 60);
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    format!("{y:04}-{m:02}-{d:02} {h:02}:{mi:02}")
+}
+
+/// Pop-up de gestion des sessions (F6).
+fn draw_chats_popup(f: &mut Frame, area: Rect, app: &App) {
+    let Some((files, selected)) = &app.chats_popup else {
+        return;
+    };
+    let rect = centered_rect(66, 60, area);
+    f.render_widget(ratatui::widgets::Clear, rect);
+    let mut lines: Vec<Line> = Vec::new();
+    if files.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "Aucune session enregistrée",
+            Style::default().fg(Color::DarkGray),
+        )));
+    } else {
+        for (i, p) in files.iter().enumerate() {
+            let name = p.file_name().unwrap_or_default().to_string_lossy().to_string();
+            let label = if name == "conversation.jsonl" {
+                "● Session active".to_string()
+            } else {
+                let ts = name
+                    .trim_start_matches("conversation_")
+                    .trim_end_matches(".jsonl");
+                match ts.parse::<u64>() {
+                    Ok(t) => format!("🕒 {}", fmt_time(t)),
+                    Err(_) => format!("📁 {ts}"),
+                }
+            };
+            let style = if i == *selected {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+            let marker = if i == *selected { "▶ " } else { "  " };
+            lines.push(Line::from(Span::styled(format!("{marker}{label}"), style)));
+        }
+    }
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Chats — ↑↓ naviguer · Entrée charger · Esc fermer ")
+        .style(Style::default().bg(Color::Rgb(15, 15, 25)).fg(Color::Cyan));
+    f.render_widget(Paragraph::new(lines).block(block), rect);
 }
 
 fn draw_agent(f: &mut Frame, area: Rect, app: &mut App) {
