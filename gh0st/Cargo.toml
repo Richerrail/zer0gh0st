@@ -1,0 +1,39 @@
+[package]
+name = "zer0"
+version = "0.5.0"
+edition = "2021"
+description = "ZER0|GH0ST - a terminal-native AI agent (CLI-only, Rust)"
+authors = ["richerrail"]
+license = "MIT"
+readme = "README.md"
+
+[[bin]]
+name = "zer0"
+path = "src/main.rs"
+
+[dependencies]
+ratatui = "0.29"
+crossterm = "0.28"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+eventsource-stream = "0.2"
+futures-util = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+directories = "5"
+toml = "0.8"
+urlencoding = "2"
+rusqlite = { version = "0.32", features = ["bundled"] }
+chacha20poly1305 = "0.10"
+argon2 = "0.5"
+rand = "0.8"
+base64 = "0.22"
+rpassword = "7"
+lopdf = "0.34"
+pdf-extract = "0.8"
+
+[profile.release]
+opt-level = 3
+lto = true
