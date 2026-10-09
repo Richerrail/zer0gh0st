@@ -84,6 +84,15 @@
   (modèles de raisonnement type `meta/muse-glimmer-30b`), le raisonnement est utilisé comme
   réponse au lieu d'échouer.
 
+## Contexte du modèle (2026-10-09)
+
+- Le compteur `ctx N%/XXX` utilise désormais la **vraie fenêtre de contexte** du modèle,
+  au lieu de 200k codé en dur (NVIDIA ne la rapporte pas → Kimi-k3 s'affichait à tort à 200k).
+- Résolution par priorité : **override manuel** (`/ctx`) > fenêtre rapportée par le
+  provider (`/models`) > **table de modèles connus** (Kimi-k2/k3 = 1M, Gemini = 1M,
+  Claude = 200k, GPT-4o/4.1 = 128k…) > 200k.
+- Nouvelle commande **`/ctx [N|1M|200k|auto]`** (affiche, force et persiste le contexte).
+
 ## UI « Pi-like » (2026-10-09)
 
 - **Chat** : suppression du cadre ; messages rendus en blocs — `❯` (fond panneau) pour

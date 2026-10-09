@@ -24,4 +24,6 @@ pub enum UiEvent {
     Info(String),
     /// Zero-chan a transcrit une commande vocale.
     Voice(String),
+    /// Fenêtre de contexte rapportée par le provider (tokens).
+    ContextWindow(u64),
 }

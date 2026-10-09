@@ -29,6 +29,9 @@ pub struct GlobalConfig {
     /// Optional embedding backend for semantic memory.
     #[serde(default)]
     pub embeddings: Option<EmbeddingConfig>,
+    /// Contexte du modèle en tokens (override manuel ; abs. = auto).
+    #[serde(default)]
+    pub context_window: Option<u64>,
 }
 
 /// Optional embedding backend, OpenAI-compatible (`/embeddings`).

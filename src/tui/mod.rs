@@ -100,6 +100,10 @@ pub struct App {
     pub screen: Vec<String>,
     /// Si Some, affiche le pop-up d'anciennes conversations avec (liste des fichiers, index sélectionné).
     pub chats_popup: Option<(Vec<std::path::PathBuf>, usize)>,
+    /// Fenêtre de contexte du modèle actif (tokens).
+    pub context_window: u64,
+    /// L'utilisateur a forcé le contexte (/ctx) — la sonde ne l'écrase pas.
+    pub ctx_manual: bool,
 }
 
 impl App {
@@ -153,6 +157,11 @@ pub async fn run(
 
     let (ui_tx, mut ui_rx) = mpsc::unbounded_channel::<UiEvent>();
 
+    let ctx_override = config::load_global().context_window;
+    let ctx_win = ctx_override
+        .or_else(|| known_context(&settings.model))
+        .unwrap_or(200_000);
+
     let mut app = App {
         messages: vec![ChatMessage::notice("Bonjour 👋, je suis Zer0. Comment puis-je t'aider ?")],
         input: String::new(),
@@ -197,6 +206,8 @@ pub async fn run(
         sel_head: None,
         screen: Vec::new(),
         chats_popup: None,
+        context_window: ctx_win,
+        ctx_manual: ctx_override.is_some(),
         thinking: options.thinking,
         max_tokens: options.max_tokens,
         temperature: options.temperature,
@@ -213,6 +224,8 @@ pub async fn run(
             "🗂️ conversation restaurée ({n} messages) — /new pour repartir"
         )));
     }
+
+    probe_context(&app, &ui_tx);
 
     let result = event_loop(
         &mut terminal,
@@ -477,8 +490,8 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
             }
             app.messages.push(ChatMessage::notice(s));
         }
-        "/provider" => handle_provider(app, &args),
-        "/model" => handle_model(app, &args),
+        "/provider" => handle_provider(app, &args, ui_tx),
+        "/model" => handle_model(app, &args, ui_tx),
         "/route" => handle_route(app, &args, ui_tx),
         "/role" => handle_role(app, &args),
         "/project" => handle_project(app),
@@ -552,6 +565,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
             app.messages.push(ChatMessage::notice(m));
         }
         "/models" => cmd_list_models(app, ui_tx, false),
+        "/ctx" => handle_ctx(app, &args),
         "/free" => cmd_list_models(app, ui_tx, true),
         "/select" => {
             let problem = args.join(" ");
@@ -572,6 +586,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
              /model                     modèle actuel\n\
              /model use <id>            change de modèle\n\
              /models [free]             liste les modèles du provider\n\
+             /ctx [N|1M|auto]           contexte du modèle (auto/override)\n\
              /free                      liste les modèles gratuits\n\
              /route [list|add|clear]    chaîne de bascule (failover)\n\
              /route auto [n]            remplit la chaîne avec les modèles :free\n\
@@ -614,7 +629,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
     }
 }
 
-fn handle_provider(app: &mut App, args: &[&str]) {
+fn handle_provider(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
     match args.first().copied() {
         None | Some("list") => {
             let mut s = String::from("Providers (clé = variable d'env ou config):\n");
@@ -710,6 +725,7 @@ fn handle_provider(app: &mut App, args: &[&str]) {
                         app.model = d.to_string();
                     }
                     app.messages.push(ChatMessage::notice(format!("Provider actif: {}", p.name)));
+                    probe_context(app, ui_tx);
                 }
                 None => app.messages.push(ChatMessage::notice(format!("Provider inconnu: {id}"))),
             }
@@ -734,7 +750,8 @@ fn handle_provider(app: &mut App, args: &[&str]) {
     }
 }
 
-fn handle_model(app: &mut App, args: &[&str]) {    let model = match args.first().copied() {
+fn handle_model(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
+    let model = match args.first().copied() {
         Some("use") | Some("set") => args.get(1).copied(),
         None => {
             app.messages.push(ChatMessage::notice(format!("Modèle actuel: {}", app.model)));
@@ -748,6 +765,7 @@ fn handle_model(app: &mut App, args: &[&str]) {    let model = match args.first(
             g.model = Some(m.to_string());
             let _ = config::save_global(&g);
             app.model = m.to_string();
+            probe_context(app, ui_tx);
             app.messages.push(ChatMessage::notice(format!("Modèle actif: {m}")));
         }
         None => app.messages.push(ChatMessage::notice("usage: /model use <id>")),
@@ -1789,6 +1807,11 @@ fn handle_ui(ev: UiEvent, app: &mut App) {
         }
         UiEvent::Info(t) => app.messages.push(ChatMessage::notice(t)),
         UiEvent::Voice(_) => {}
+        UiEvent::ContextWindow(c) => {
+            if !app.ctx_manual {
+                app.context_window = c;
+            }
+        }
     }
 }
 
@@ -2005,7 +2028,10 @@ fn draw_agent(f: &mut Frame, area: Rect, app: &mut App) {
 fn draw_status(f: &mut Frame, area: Rect, app: &App) {
     let tokens = estimate_tokens(app);
     let line = Line::from(vec![
-        Span::styled(format!("Tokens {tokens}/200k"), Style::default().fg(Color::Gray)),
+        Span::styled(
+            format!("Tokens {tokens}/{}", ctx_window_label(app.context_window)),
+            Style::default().fg(Color::Gray),
+        ),
         Span::raw("  ·······  "),
         Span::styled("O No project", Style::default().fg(Color::DarkGray)),
         Span::raw("   "),
@@ -2285,8 +2311,109 @@ fn rule(width: usize, left: &str, right: &str, border: Color, text: Color) -> Li
 
 fn ctx_label(app: &App) -> String {
     let t = estimate_tokens(app);
-    let pct = (t * 100 / 200_000).min(100);
-    format!("{pct}%/200k")
+    let pct = (t as u64 * 100 / app.context_window.max(1)).min(100);
+    format!("{pct}%/{} ", ctx_window_label(app.context_window))
+        .trim_end()
+        .to_string()
+}
+
+fn ctx_window_label(c: u64) -> String {
+    if c >= 1_000_000 {
+        format!("{:.1}M", c as f64 / 1_000_000.0)
+    } else if c >= 1_000 {
+        format!("{}k", c / 1000)
+    } else {
+        c.to_string()
+    }
+}
+
+/// Contexte connu pour les modèles dont le provider ne le rapporte pas.
+fn known_context(model: &str) -> Option<u64> {
+    let m = model.to_ascii_lowercase();
+    let has = |s: &str| m.contains(s);
+    if has("kimi-k3") || has("kimi-k2") || has("kimi-latest") {
+        return Some(1_000_000);
+    }
+    if has("gemini") {
+        return Some(1_000_000);
+    }
+    if has("claude") {
+        return Some(200_000);
+    }
+    if has("gpt-4.1") || has("gpt-4o") || has("o3") || has("o4") {
+        return Some(128_000);
+    }
+    if has("qwen3") || has("deepseek") || has("mistral-large") {
+        return Some(128_000);
+    }
+    None
+}
+
+fn parse_ctx(s: &str) -> Option<u64> {
+    let s = s.trim().to_ascii_lowercase();
+    if let Some(x) = s.strip_suffix('m') {
+        return x.parse::<f64>().ok().map(|v| (v * 1_000_000.0) as u64);
+    }
+    if let Some(x) = s.strip_suffix('k') {
+        return x.parse::<f64>().ok().map(|v| (v * 1000.0) as u64);
+    }
+    s.parse::<u64>().ok()
+}
+
+fn handle_ctx(app: &mut App, args: &[&str]) {
+    match args.first().copied() {
+        None => app.messages.push(ChatMessage::notice(format!(
+            "ctx: {} ({} tokens) — /ctx 1M | 200k | 128000 | auto",
+            ctx_window_label(app.context_window),
+            app.context_window
+        ))),
+        Some("auto") => {
+            let mut g = config::load_global();
+            g.context_window = None;
+            let _ = config::save_global(&g);
+            app.ctx_manual = false;
+            app.context_window = known_context(&app.model).unwrap_or(200_000);
+            app.messages.push(ChatMessage::notice(format!(
+                "ctx: auto → {}",
+                ctx_window_label(app.context_window)
+            )));
+        }
+        Some(s) => match parse_ctx(s) {
+            Some(n) => {
+                let mut g = config::load_global();
+                g.context_window = Some(n);
+                let _ = config::save_global(&g);
+                app.ctx_manual = true;
+                app.context_window = n;
+                app.messages.push(ChatMessage::notice(format!("ctx: {n} tokens")));
+            }
+            None => app
+                .messages
+                .push(ChatMessage::notice("usage: /ctx <tokens|200k|1M|auto>")),
+        },
+    }
+}
+
+/// Interroge le provider pour la fenêtre de contexte du modèle actif.
+fn probe_context(app: &App, ui_tx: &UnboundedSender<UiEvent>) {
+    let Some(provider) = providers::find(&app.provider_id) else {
+        return;
+    };
+    let model = app.model.clone();
+    let key = app.api_key.clone();
+    let ui = ui_tx.clone();
+    tokio::spawn(async move {
+        let http = reqwest::Client::new();
+        if let Ok(list) = models::list(&http, &provider, key.as_deref()).await {
+            if let Some(c) = list
+                .iter()
+                .find(|m| m.id == model)
+                .and_then(|m| m.context_length)
+            {
+                let _ = ui.send(UiEvent::ContextWindow(c));
+            }
+        }
+    });
 }
 
 /// Hauteur nécessaire pour la zone de saisie (1..=8 lignes + règles haut/bas).

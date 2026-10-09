@@ -193,7 +193,7 @@ Zer0 agit : tu décris un but, il appelle les outils nécessaires.
 
 ## 7. Commandes
 
-**TUI** (extrait) : `/help` `/think` `/provider` `/model` `/models` `/free` `/select` `/route`
+**TUI** (extrait) : `/help` `/think` `/provider` `/model` `/models` `/ctx` `/free` `/select` `/route`
 `/role` `/project` `/memory` `/recall` `/compact` `/task` `/work` `/ask` `/review` `/search`
 `/stop` `/context` `/whoami` `/vault` `/pdf` `/jev` `/kb` `/new` `/history` `/radio` `/bintime`
 `/pong` `/kristal` `/streaming` `/retro` `/panel` `/clear` `/quit`.
