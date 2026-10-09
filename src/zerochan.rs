@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
@@ -244,16 +244,15 @@ pub async fn transcribe(path: &PathBuf) -> anyhow::Result<String> {
 /// Deux boutons à droite de la barre de saisie : 0chan et micro.
 /// Retourne leurs rectangles (pour la détection de clic).
 pub fn draw_buttons(f: &mut Frame, area: Rect, zc: &ZeroChan) -> (Option<Rect>, Option<Rect>) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Magenta))
-        .title(" 0chan/mic ");
-    let inner = block.inner(area);
-    f.render_widget(block, area);
-    if inner.height < 1 || inner.width == 0 {
+    // Petit encadré compact :
+    //   ┌ 0chan/mic ┐
+    //   │ off / off │
+    //   └───────────┘
+    if area.width < 13 || area.height < 3 {
         return (None, None);
     }
-
+    let border = if zc.on { Color::Magenta } else { Color::DarkGray };
+    let dim = Style::default().fg(border);
     let on_color = if zc.on { Color::LightGreen } else { Color::Gray };
     let mic_color = if zc.is_recording() {
         Color::LightRed
@@ -262,31 +261,52 @@ pub fn draw_buttons(f: &mut Frame, area: Rect, zc: &ZeroChan) -> (Option<Rect>, 
     } else {
         Color::Gray
     };
-
-    let r1 = Rect { x: inner.x, y: inner.y, width: inner.width, height: 1 };
-    let r2 = Rect {
-        x: inner.x,
-        y: inner.y + 1,
-        width: inner.width,
-        height: 1,
-    };
-    f.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            if zc.on { "[0chan ON ]" } else { "[0chan off]" },
-            Style::default().fg(on_color),
-        ))),
-        r1,
+    let s0 = format!("{:<3}", if zc.on { "on" } else { "off" });
+    let s1 = format!(
+        "{:<3}",
+        if zc.is_recording() {
+            "REC"
+        } else if zc.on {
+            "on"
+        } else {
+            "off"
+        }
     );
-    if inner.height >= 2 {
-        f.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                if zc.is_recording() { "[MIC  REC]" } else if zc.on { "[MIC  on ]" } else { "[MIC  off]" },
-                Style::default().fg(mic_color),
-            ))),
-            r2,
-        );
-    }
-    (Some(r1), if inner.height >= 2 { Some(r2) } else { None })
+
+    let title = " 0chan/mic ";
+    let top = Line::from(vec![
+        Span::styled("┌", dim),
+        Span::styled(
+            title,
+            Style::default().fg(border).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("─".repeat(area.width as usize - 2 - title.chars().count()), dim),
+        Span::styled("┐", dim),
+    ]);
+    let mid = Line::from(vec![
+        Span::styled("│ ", dim),
+        Span::styled(s0, Style::default().fg(on_color)),
+        Span::styled(" / ", dim),
+        Span::styled(s1, Style::default().fg(mic_color)),
+        Span::styled(" │", dim),
+    ]);
+    let bottom = Line::from(vec![
+        Span::styled("└", dim),
+        Span::styled("─".repeat(area.width as usize - 2), dim),
+        Span::styled("┘", dim),
+    ]);
+    let block_area = Rect {
+        x: area.x,
+        y: area.y,
+        width: area.width,
+        height: 3,
+    };
+    f.render_widget(Paragraph::new(vec![top, mid, bottom]), block_area);
+
+    // Régions cliquables : « off » (0chan) à gauche, « off » (mic) à droite.
+    let r1 = Rect { x: area.x + 2, y: area.y + 1, width: 3, height: 1 };
+    let r2 = Rect { x: area.x + 8, y: area.y + 1, width: 3, height: 1 };
+    (Some(r1), Some(r2))
 }
 
 /// Zone du bloc d'état à droite du banner (largeur fixe).

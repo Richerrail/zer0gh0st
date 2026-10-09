@@ -93,6 +93,8 @@
   `ctx N%/200k · cwd` à droite. Plus de ligne « modèle » séparée, saisie resserrée.
 - **Historique restauré affiché** (avant : chargé en mémoire seulement, invisible).
 - Palette alignée sur le thème Pi « omarchy-system ».
+- **Badge 0chan/mic** compact en encadré (`┌ 0chan/mic ┐` / `│ off / off │` / `└──┘`)
+  au lieu de deux boutons empilés ; les deux `off` restent cliquables (0chan / micro).
 
 ## Sessions de conversation : F6 / F7 (2026-10-08)
 
