@@ -22,6 +22,19 @@ use crate::route;
 use crate::select;
 use crate::tools::ToolSpec;
 
+/// Palette inspirée du thème Pi « omarchy-system ».
+mod theme {
+    use ratatui::style::Color;
+    pub const ACCENT: Color = Color::Rgb(255, 113, 206);
+    pub const PANEL: Color = Color::Rgb(34, 23, 51);
+    pub const BORDER: Color = Color::Rgb(84, 72, 103);
+    pub const MUTED: Color = Color::Rgb(160, 144, 181);
+    pub const DIM: Color = Color::Rgb(122, 108, 142);
+    pub const TEXT: Color = Color::Rgb(232, 213, 255);
+    pub const CODE: Color = Color::Rgb(122, 232, 255);
+    pub const BLUE: Color = Color::Rgb(138, 158, 255);
+}
+
 pub struct App {
     pub messages: Vec<ChatMessage>,
     pub input: String,
@@ -189,11 +202,13 @@ pub async fn run(
         temperature: options.temperature,
     };
 
-    // Restaure la conversation précédente.
+    // Restaure la conversation précédente (affichée aussi).
     let restored = crate::convo::load(200);
     if !restored.is_empty() {
         let n = restored.len();
+        app.messages = restored.clone();
         app.conversation = restored;
+        app.display_mark = app.messages.len();
         app.messages.push(ChatMessage::notice(format!(
             "🗂️ conversation restaurée ({n} messages) — /new pour repartir"
         )));
@@ -1947,8 +1962,7 @@ fn draw_agent(f: &mut Frame, area: Rect, app: &mut App) {
             Constraint::Length(6), // banner
             Constraint::Length(1), // location
             Constraint::Min(3),    // chat
-            Constraint::Length(1), // model line
-            Constraint::Length(input_h), // input (multi-ligne)
+            Constraint::Length(input_h), // input (règles haut/bas)
             Constraint::Length(1), // footer
         ])
         .split(area);
@@ -1969,24 +1983,23 @@ fn draw_agent(f: &mut Frame, area: Rect, app: &mut App) {
 
     draw_location(f, chunks[2]);
     draw_chat(f, chunks[3], app);
-    draw_model(f, chunks[4], app);
 
     // Barre de saisie + boutons 0chan / micro à droite (visibles dès 60 colonnes).
-    if chunks[5].width >= 60 {
+    if chunks[4].width >= 60 {
         let cols = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Min(30), Constraint::Length(13)])
-            .split(chunks[5]);
+            .split(chunks[4]);
         draw_input(f, cols[0], app);
         let (r1, r2) = crate::zerochan::draw_buttons(f, cols[1], &app.zc);
         app.btn_0chan = r1;
         app.btn_mic = r2;
     } else {
-        draw_input(f, chunks[5], app);
+        draw_input(f, chunks[4], app);
         app.btn_0chan = None;
         app.btn_mic = None;
     }
-    draw_footer(f, chunks[6]);
+    draw_footer(f, chunks[5]);
 }
 
 fn draw_status(f: &mut Frame, area: Rect, app: &App) {
@@ -2042,28 +2055,28 @@ fn draw_location(f: &mut Frame, area: Rect) {
 }
 
 fn draw_chat(f: &mut Frame, area: Rect, app: &mut App) {
-    let inner_w = area.width.saturating_sub(2) as usize;
+    let w = area.width as usize;
     let mut lines: Vec<Line> = Vec::new();
+    lines.push(Line::from(""));
 
     for m in &app.messages {
-        let (label, color) = role_label(&m.role);
         let text = m.content.clone().unwrap_or_default();
-        push_message(&mut lines, label, color, &text, inner_w);
+        push_message(&mut lines, &m.role, &text, w);
     }
 
     if app.streaming {
         if !app.reasoning_text.is_empty() {
-            push_message(&mut lines, "···", Color::DarkGray, &app.reasoning_text, inner_w);
+            push_block(&mut lines, " ··· ", theme::DIM, &app.reasoning_text, w, None, true);
         }
         let text = if app.streaming_text.is_empty() {
             "…".to_string()
         } else {
             app.streaming_text.clone()
         };
-        push_message(&mut lines, "Zer0", Color::Cyan, &text, inner_w);
+        push_block(&mut lines, " ◕ ", theme::ACCENT, &text, w, None, false);
     }
 
-    let inner_h = area.height.saturating_sub(2) as usize;
+    let inner_h = area.height as usize;
     let max_scroll = lines.len().saturating_sub(inner_h).min(u16::MAX as usize) as u16;
     app.max_scroll = max_scroll;
     let scroll = if app.auto_scroll {
@@ -2073,79 +2086,213 @@ fn draw_chat(f: &mut Frame, area: Rect, app: &mut App) {
     };
     app.scroll = scroll;
 
-    let title = if app.auto_scroll {
-        " Chat ".to_string()
-    } else {
-        format!(" Chat  ↑↓  (ligne {}/{}) ", scroll + 1, max_scroll + 1)
-    };
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::DarkGray))
-        .title(title);
-    let paragraph = Paragraph::new(lines).block(block).scroll((scroll, 0));
+    let paragraph = Paragraph::new(lines).scroll((scroll, 0));
     f.render_widget(paragraph, area);
 }
 
-fn push_message(lines: &mut Vec<Line>, label: &str, color: Color, text: &str, inner_w: usize) {
-    let indent = label.chars().count() + 1;
-    let wrapped = wrap_text(text, inner_w.saturating_sub(indent).max(1));
-    for (i, w) in wrapped.iter().enumerate() {
-        if i == 0 {
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("{label} "),
-                    Style::default().fg(color).add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(w.clone()),
-            ]));
-        } else {
-            lines.push(Line::from(vec![Span::raw(" ".repeat(indent)), Span::raw(w.clone())]));
+fn push_message(lines: &mut Vec<Line>, role: &str, text: &str, w: usize) {
+    match role {
+        "user" => push_block(lines, " ❯ ", theme::ACCENT, text, w, Some(theme::PANEL), false),
+        "assistant" => push_block(lines, " ◕ ", theme::ACCENT, text, w, None, false),
+        "tool" => push_block(lines, " ⚙ ", theme::BLUE, text, w, None, true),
+        "system" => push_block(lines, " ⚙ ", theme::DIM, text, w, None, true),
+        _ => push_block(lines, " · ", theme::DIM, text, w, None, true),
+    }
+}
+
+/// Rend un message : marqueur coloré + texte, avec fond optionnel (bloc) et
+/// coloration légère (`code` et **gras**). Les blocs ``` sont affichés en surbrillance.
+fn push_block(
+    lines: &mut Vec<Line>,
+    prefix: &str,
+    pcolor: Color,
+    text: &str,
+    w: usize,
+    bg: Option<Color>,
+    dim_text: bool,
+) {
+    let indent = prefix.chars().count();
+    let mut first = true;
+    let mut in_code = false;
+    let fill = |n: usize| {
+        let s = Style::default();
+        Span::styled(" ".repeat(n), match bg {
+            Some(b) => s.bg(b),
+            None => s,
+        })
+    };
+    for seg in wrap_text(text, w.saturating_sub(indent).max(1)) {
+        if seg.trim_start().starts_with("```") {
+            in_code = !in_code;
+            continue;
         }
+        let mut spans: Vec<Span> = Vec::new();
+        let pstyle = {
+            let s = Style::default().fg(pcolor).add_modifier(Modifier::BOLD);
+            match bg {
+                Some(b) => s.bg(b),
+                None => s,
+            }
+        };
+        if first {
+            spans.push(Span::styled(prefix.to_string(), pstyle));
+            first = false;
+        } else {
+            spans.push(fill(indent));
+        }
+        let base = {
+            let s = Style::default().fg(if in_code {
+                theme::CODE
+            } else if dim_text {
+                theme::DIM
+            } else {
+                theme::TEXT
+            });
+            match bg {
+                Some(b) => s.bg(b),
+                None => s,
+            }
+        };
+        let mut used = indent;
+        if in_code {
+            used += seg.chars().count();
+            spans.push(Span::styled(seg, base));
+        } else {
+            let sp = inline_spans(&seg, base);
+            for s in &sp {
+                used += s.content.chars().count();
+            }
+            spans.extend(sp);
+        }
+        if bg.is_some() && used < w {
+            spans.push(fill(w - used));
+        }
+        lines.push(Line::from(spans));
     }
     lines.push(Line::from(""));
 }
 
-fn draw_model(f: &mut Frame, area: Rect, app: &App) {
-    let line = Line::from(vec![
-        Span::styled("Main  ", Style::default().fg(Color::DarkGray)),
-        Span::styled(format!("{}/{}", app.provider_id, app.model), Style::default().fg(Color::Cyan)),
-        Span::raw("    "),
-        Span::styled("Utility  ", Style::default().fg(Color::DarkGray)),
-        Span::styled(app.model.clone(), Style::default().fg(Color::Cyan)),
-    ]);
-    f.render_widget(Paragraph::new(line), area);
+/// Découpe `\`code\`` et `**gras**` en spans stylés.
+fn inline_spans(text: &str, base: Style) -> Vec<Span<'static>> {
+    let mut out: Vec<Span<'static>> = Vec::new();
+    let mut buf = String::new();
+    let mut code = false;
+    let mut bold = false;
+    let mut it = text.chars().peekable();
+    let styled = |buf: &str, code: bool, bold: bool| {
+        let mut s = base;
+        if code {
+            s = s.fg(theme::CODE);
+        }
+        if bold {
+            s = s.add_modifier(Modifier::BOLD);
+        }
+        Span::styled(buf.to_string(), s)
+    };
+    while let Some(c) = it.next() {
+        if c == '`' {
+            if !buf.is_empty() {
+                out.push(styled(&std::mem::take(&mut buf), code, bold));
+            }
+            code = !code;
+        } else if c == '*' && it.peek() == Some(&'*') {
+            it.next();
+            if !buf.is_empty() {
+                out.push(styled(&std::mem::take(&mut buf), code, bold));
+            }
+            bold = !bold;
+        } else {
+            buf.push(c);
+        }
+    }
+    if !buf.is_empty() {
+        out.push(styled(&buf, code, bold));
+    }
+    out
 }
 
 fn draw_input(f: &mut Frame, area: Rect, app: &App) {
-    let title = if app.streaming {
-        " Zer0 réfléchit… "
-    } else {
-        " Type a message... (/help · ↑↓ historique) "
-    };
-    let inner_w = area.width.saturating_sub(2).max(1) as usize;
-    let lines = wrap_text(&app.input, inner_w);
+    let w = area.width as usize;
+    let border = if app.streaming { theme::BORDER } else { theme::ACCENT };
+    let pad = 1usize;
+    let inner_w = w.saturating_sub(pad * 2).max(1);
+    let text_lines = wrap_text(&app.input, inner_w);
     let max_lines = area.height.saturating_sub(2).max(1) as usize;
-    let start = lines.len().saturating_sub(max_lines);
-    let shown: Vec<Line> = lines[start..].iter().map(|s| Line::from(s.clone())).collect();
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(if app.streaming { Color::DarkGray } else { Color::Cyan }))
-        .title(title);
-    f.render_widget(Paragraph::new(shown).block(block), area);
+    let start = text_lines.len().saturating_sub(max_lines);
 
-    if !app.streaming && area.width > 2 && area.height > 2 {
-        let last = lines.last().map(|l| l.chars().count()).unwrap_or(0) as u16;
-        let row = lines.len().saturating_sub(1).saturating_sub(start) as u16;
-        let x = (area.x + 1 + last).min(area.x + area.width.saturating_sub(2));
+    let mut lines: Vec<Line> = Vec::new();
+    // Règle du haut (indicateur de gauche si l'agent travaille).
+    let top_left = if app.streaming { " zer0… " } else { "" };
+    lines.push(rule(w, top_left, "", border, theme::MUTED));
+    // Texte saisi.
+    for seg in &text_lines[start..] {
+        lines.push(Line::from(Span::styled(
+            format!("{}{}", " ".repeat(pad), seg),
+            Style::default().fg(theme::TEXT),
+        )));
+    }
+    // Règle du bas : modèle/think à gauche, ctx + dossier à droite (style Pi).
+    let left = format!(
+        " {}/{} · think:{} ",
+        app.provider_id,
+        app.model,
+        if app.thinking { "on" } else { "off" }
+    );
+    let cwd = std::env::current_dir()
+        .map(|p| {
+            let s = p.display().to_string();
+            if let Ok(home) = std::env::var("HOME") {
+                if let Some(rest) = s.strip_prefix(&home) {
+                    return format!("~{rest}");
+                }
+            }
+            s
+        })
+        .unwrap_or_default();
+    let right = format!(" ctx {} · {} ", ctx_label(app), cwd);
+    lines.push(rule(w, &left, &right, border, theme::MUTED));
+
+    f.render_widget(Paragraph::new(lines), area);
+
+    if !app.streaming && w > 2 && area.height > 2 {
+        let last = text_lines.last().map(|l| l.chars().count()).unwrap_or(0) as u16;
+        let row = text_lines.len().saturating_sub(1).saturating_sub(start) as u16;
+        let x = (area.x + pad as u16 + last).min(area.x + area.width.saturating_sub(2));
         let y = area.y + 1 + row;
         f.set_cursor_position(Position::new(x, y));
     }
 }
 
-/// Hauteur nécessaire pour la zone de saisie (2..=8 lignes + bordures).
+/// `à la Pi : `─── left ─── right` sur toute la largeur.
+fn rule(width: usize, left: &str, right: &str, border: Color, text: Color) -> Line<'static> {
+    let mut left = left.to_string();
+    let mut right = right.to_string();
+    while left.chars().count() + right.chars().count() + 1 > width && !right.is_empty() {
+        right.pop();
+    }
+    while left.chars().count() + right.chars().count() + 1 > width && !left.is_empty() {
+        left.pop();
+    }
+    let lw = left.chars().count();
+    let rw = right.chars().count();
+    let fill = width.saturating_sub(lw + rw);
+    Line::from(vec![
+        Span::styled(left, Style::default().fg(text)),
+        Span::styled("─".repeat(fill), Style::default().fg(border)),
+        Span::styled(right, Style::default().fg(text)),
+    ])
+}
+
+fn ctx_label(app: &App) -> String {
+    let t = estimate_tokens(app);
+    let pct = (t * 100 / 200_000).min(100);
+    format!("{pct}%/200k")
+}
+
+/// Hauteur nécessaire pour la zone de saisie (1..=8 lignes + règles haut/bas).
 fn input_height(app: &App, width: u16) -> u16 {
     let inner_w = width.saturating_sub(2).max(1) as usize;
-    let lines = wrap_text(&app.input, inner_w).len().clamp(2, 8);
+    let lines = wrap_text(&app.input, inner_w).len().clamp(1, 8);
     lines as u16 + 2
 }
 
@@ -2272,16 +2419,6 @@ fn draw_footer(f: &mut Frame, area: Rect) {
         Span::styled(" Mic ", txt),
     ];
     f.render_widget(Paragraph::new(Line::from(spans)), area);
-}
-
-fn role_label(role: &str) -> (&'static str, Color) {
-    match role {
-        "user" => ("You ", Color::Green),
-        "assistant" => ("Zer0", Color::Cyan),
-        "tool" => ("⚙   ", Color::Yellow),
-        "system" => ("sys ", Color::DarkGray),
-        _ => ("·   ", Color::DarkGray),
-    }
 }
 
 fn estimate_tokens(app: &App) -> usize {

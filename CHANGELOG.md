@@ -84,6 +84,16 @@
   (modèles de raisonnement type `meta/muse-glimmer-30b`), le raisonnement est utilisé comme
   réponse au lieu d'échouer.
 
+## UI « Pi-like » (2026-10-09)
+
+- **Chat** : suppression du cadre ; messages rendus en blocs — `❯` (fond panneau) pour
+  l'utilisateur, `◕` pour l'assistant, `⚙`/`·` discrets. Coloration `code`, **gras**,
+  et blocs ``` en surbrillance.
+- **Saisie** : règles haut/bas façn Pi (`─`), infos `provider/model · think` à gauche et
+  `ctx N%/200k · cwd` à droite. Plus de ligne « modèle » séparée, saisie resserrée.
+- **Historique restauré affiché** (avant : chargé en mémoire seulement, invisible).
+- Palette alignée sur le thème Pi « omarchy-system ».
+
 ## Sessions de conversation : F6 / F7 (2026-10-08)
 
 - **F6 — Chats** : pop-up listant les sessions sauvegardées (`conversation_*.jsonl`),

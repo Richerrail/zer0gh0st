@@ -7,8 +7,6 @@
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)
 ![CLI only](https://img.shields.io/badge/interface-CLI%20%2F%20TUI-black.svg)
 
-![Capture du projet](./screenshot-2026-10-09_02-44-19.png)
-
 **Version** : 0.5.0 · **Licence** : MIT · **Interface** : terminal uniquement (pas de GUI web).
 
 **Zer0** est un agent d'ingénierie qui vit dans un terminal. Réécrit de zéro en **Rust**,
@@ -75,9 +73,9 @@ L'inférence est **déléguée** (llama-server local ou n'importe quel provider 
 Zer0 ne réimplémente **aucun** modèle.
 
 ```
-┌───────────────────────────────────────────── TUI (ratatui) ──────────────�[...]
+┌───────────────────────────────────────────── TUI (ratatui) ─────────────────────────────────────────────┐
 │  status · banner ZER0│GH0ST · chat · input · footer            │  panneau latéral (/radio, /bintime)      │
-└────────────────────────────────────────────────────────────────�[...]
+└────────────────────────────────────────────────────────────────┴──────────────────────────────────────────┘
         │ Entrée
         ▼
    boucle d'agent ──► sélection de rôle ──► chaîne d'endpoints ──► modèle (SSE) ──► outils ──► …
@@ -107,7 +105,7 @@ Détail complet du modèle de menace : [`SAFETY.md`](./SAFETY.md).
 
 | Domaine | Détail |
 |---|---|
-| **TUI** | banner `ZER0│GH0ST` (`ghost in the shell`) animé, statut, scroll, raisonnement affiché, **panneau latéral**, **input multi-ligne** (1–8 lignes), **historique ↑↓** |
+| **TUI** | banner `ZER0│GH0ST` (`ghost in the shell`) animé, statut, scroll, raisonnement affiché, **panneau latéral**, **saisie style Pi** (règles haut/bas + `ctx · cwd`, blocs de messages), **historique ↑↓** |
 | **Boucle d'agent** | appels d'outils, streaming SSE, max 8 itérations, budget 24 outils/tour, détection de boucle |
 | **Containment** | réponse coupée à 1 Mo, timeout d'inactivité 120 s, `/stop` |
 | **Multi-provider** | 9 providers intégrés + personnalisés, clés en config ou **coffre chiffré** |
