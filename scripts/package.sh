@@ -20,6 +20,11 @@ cd "$ROOT"
 # Code et scripts
 cp -r src scripts "$OUT/"
 
+# CI (GitHub Actions)
+if [ -d .github ]; then
+  cp -r .github "$OUT/"
+fi
+
 # Sources / manifestes / licences / docs
 cp Cargo.toml Cargo.lock LICENSE config.example.toml \
    README.md SPEC.md SAFETY.md ARCHITECTURE.md ECOSYSTEM.md CHANGELOG.md \

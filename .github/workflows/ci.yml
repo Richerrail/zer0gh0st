@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    name: build + clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build (release)
+        run: cargo build --release
+
+      # Clippy : signale les pièges sans échouer le build (warnings tolérés).
+      - name: Clippy
+        run: cargo clippy --all-targets
+
+      # Formatage : informatif seulement (le code n'est pas encore rustfmt-strict).
+      - name: Format (informatif)
+        continue-on-error: true
+        run: cargo fmt --all -- --check
