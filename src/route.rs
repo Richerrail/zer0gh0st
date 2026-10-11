@@ -268,3 +268,15 @@ pub async fn auto_free_routes(
         })
         .collect())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_route_rejects_bad() {
+        assert!(parse_route("no-slash").is_none());
+        assert!(parse_route("unknownprovider/foo").is_none());
+        assert!(parse_route("openrouter/").is_none());
+    }
+}

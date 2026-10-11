@@ -662,3 +662,17 @@ async fn run_loop(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chunk_preserves_and_bounds() {
+        assert_eq!(chunk("hello", 10), vec!["hello"]);
+        let text = "ligne\n".repeat(500);
+        let chunks = chunk(&text, 300);
+        assert!(chunks.iter().all(|c| c.chars().count() <= 300));
+        assert_eq!(chunks.concat(), text);
+    }
+}

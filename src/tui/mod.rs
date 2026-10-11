@@ -2710,3 +2710,49 @@ fn wrap_text(s: &str, width: usize) -> Vec<String> {
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_ctx_units() {
+        assert_eq!(parse_ctx("1M"), Some(1_000_000));
+        assert_eq!(parse_ctx("1.5M"), Some(1_500_000));
+        assert_eq!(parse_ctx("200k"), Some(200_000));
+        assert_eq!(parse_ctx(" 128000 "), Some(128_000));
+        assert_eq!(parse_ctx("abc"), None);
+    }
+
+    #[test]
+    fn known_context_models() {
+        assert_eq!(known_context("moonshotai/kimi-k3"), Some(1_000_000));
+        assert_eq!(known_context("gemini-3.5-flash-lite"), Some(1_000_000));
+        assert_eq!(known_context("claude-3-opus"), Some(200_000));
+        assert_eq!(known_context("gpt-4o-mini"), Some(128_000));
+        assert_eq!(known_context("qwen3-coder"), Some(128_000));
+        assert_eq!(known_context("some-unknown-model"), None);
+    }
+
+    #[test]
+    fn ctx_window_format() {
+        assert_eq!(ctx_window_label(1_000_000), "1.0M");
+        assert_eq!(ctx_window_label(2_000_000), "2.0M");
+        assert_eq!(ctx_window_label(200_000), "200k");
+        assert_eq!(ctx_window_label(128_000), "128k");
+        assert_eq!(ctx_window_label(500), "500");
+    }
+
+    #[test]
+    fn wrap_text_behavior() {
+        assert_eq!(wrap_text("abcdef", 3), vec!["abc", "def"]);
+        assert_eq!(wrap_text("ab\ncd", 10), vec!["ab", "cd"]);
+        assert_eq!(wrap_text("héllo", 2).len(), 3); // comptage par caractères
+    }
+
+    #[test]
+    fn fmt_time_epochs() {
+        assert_eq!(fmt_time(0), "1970-01-01 00:00");
+        assert_eq!(fmt_time(1_000_000_000), "2001-09-09 01:46");
+    }
+}

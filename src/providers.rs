@@ -188,3 +188,17 @@ pub fn default_model(id: &str) -> Option<&'static str> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_aliases() {
+        assert_eq!(normalize("kimi"), "moonshotai");
+        assert_eq!(normalize("Open-Router"), "openrouter");
+        assert_eq!(normalize("gemini"), "google");
+        assert_eq!(normalize("ollama"), "local");
+        assert_eq!(normalize("openai"), "openai");
+    }
+}

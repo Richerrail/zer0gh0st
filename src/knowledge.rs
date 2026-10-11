@@ -424,3 +424,19 @@ pub fn format_hits(hits: &[Hit], degraded: &Option<String>) -> String {
     }
     s
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tokens_filters_short_and_stopwords() {
+        // Mots longs non-stopwords conservés.
+        assert_eq!(tokens("algorithmique boussole"), vec!["algorithmique", "boussole"]);
+        // Tokens < 3 lettres ignorés.
+        assert!(tokens("a bb ccc").contains(&"ccc".to_string()));
+        assert!(!tokens("a bb").iter().any(|t| t.len() < 3));
+        // Stopwords connus retirés.
+        assert!(!tokens("les des dans").iter().any(|t| t == "les"));
+    }
+}

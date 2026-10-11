@@ -29,6 +29,9 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
 
+      - name: Tests
+        run: cargo test --all-targets
+
       # Formatage : informatif seulement (pas encore rustfmt-strict).
       - name: Format (informatif)
         continue-on-error: true

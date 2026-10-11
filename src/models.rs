@@ -153,3 +153,20 @@ async fn list_google(http: &reqwest::Client, key: Option<&str>) -> Result<Vec<Mo
         })
         .collect())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn m(json: &str) -> ModelEntry {
+        serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn free_detection() {
+        assert!(is_free(&m(r#"{"id":"meta/llama:free"}"#)));
+        assert!(!is_free(&m(r#"{"id":"openai/gpt-4o"}"#)));
+        assert!(is_free(&m(r#"{"id":"x","pricing":{"prompt":"0","completion":"0"}}"#)));
+        assert!(!is_free(&m(r#"{"id":"y","pricing":{"prompt":"0.1","completion":"0.2"}}"#)));
+    }
+}

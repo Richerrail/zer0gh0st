@@ -62,3 +62,20 @@ fn truncate(mut s: String, max: usize) -> String {
     }
     s
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncate_short_unchanged() {
+        assert_eq!(truncate("hello".into(), 100), "hello");
+    }
+
+    #[test]
+    fn truncate_long_marked() {
+        let out = truncate("x".repeat(50), 10);
+        assert!(out.starts_with("xxxxxxxxxx"));
+        assert!(out.contains("tronquée"));
+    }
+}
