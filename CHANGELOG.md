@@ -84,6 +84,14 @@
   (modèles de raisonnement type `meta/muse-glimmer-30b`), le raisonnement est utilisé comme
   réponse au lieu d'échouer.
 
+## `/jev` lit le code complet (2026-10-11)
+
+- **Correction** : `/jev` (et `zer0 jev`) **tronquait à 20 000 octets** → analyse partielle
+  et score erroné. Il envoie désormais **tout le fichier**.
+- Fichiers volumineux : **découpage en parties** (par **caractères**, jamais par octets →
+  plus de risque de panic UTF-8), puis **score global = moyenne** des parties.
+- Nouvelle fonction `agent::subagent::run_jev` + parsing `SCORE:` (testé).
+
 ## Ergonomie saisie & corrections (2026-10-11)
 
 - **Saisie simplifiée** : plus de cadre/règles autour de la zone de saisie — juste

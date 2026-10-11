@@ -484,15 +484,6 @@ fn pdf_cmd(action: PdfAction) -> Result<()> {
 
 async fn jev_cmd(file: String) -> Result<()> {
     let content = std::fs::read_to_string(&file)?;
-    let excerpt: &str = if content.len() > 20_000 {
-        &content[..20_000]
-    } else {
-        &content
-    };
-    let task = format!(
-        "Évalue la qualité de ce code sur une échelle de 0 à 3 (0 faible, 1 moyen, 2 bon, 3 excellent). \
-         Réponds EXACTEMENT au format:\nSCORE: <n>\nJUSTIFICATION: <2 phrases>\n\nFichier {file}:\n\n{excerpt}"
-    );
     let settings = config::resolve();
     let endpoints = route::chain_for_role(&settings, "review");
     let system = DEFAULT_SYSTEM.to_string();
@@ -501,7 +492,9 @@ async fn jev_cmd(file: String) -> Result<()> {
         thinking: false,
         temperature: 0.2,
     };
-    let res = agent::subagent::run_subagent(endpoints, system, task, Vec::new(), options).await;
+    let nchars = content.chars().count();
+    eprintln!("📊 jev : {file} ({nchars} caractères)…");
+    let res = agent::subagent::run_jev(endpoints, system, &file, &content, options).await;
     println!("{res}");
     Ok(())
 }

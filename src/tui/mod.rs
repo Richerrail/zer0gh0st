@@ -1180,15 +1180,6 @@ fn cmd_jev(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
             return;
         }
     };
-    let excerpt: &str = if content.len() > 20_000 {
-        &content[..20_000]
-    } else {
-        &content
-    };
-    let task = format!(
-        "Évalue la qualité de ce code sur 0-3 (0 faible, 1 moyen, 2 bon, 3 excellent). \
-         Réponds EXACTEMENT :\nSCORE: <n>\nJUSTIFICATION: <2 phrases>\n\n{excerpt}"
-    );
     let endpoints = route::chain_for_role(&app.settings(), "review");
     let system = app.system.clone();
     let options = ChatOptions {
@@ -1198,10 +1189,13 @@ fn cmd_jev(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
     };
     let ui = ui_tx.clone();
     let path_s = path.to_string();
+    let nchars = content.chars().count();
+    app.messages.push(ChatMessage::notice(format!(
+        "📊 jev : {path_s} ({nchars} caractères) → analyse du code complet…"
+    )));
     tokio::spawn(async move {
-        let res =
-            crate::agent::subagent::run_subagent(endpoints, system, task, Vec::new(), options)
-                .await;
+        let res = crate::agent::subagent::run_jev(endpoints, system, &path_s, &content, options)
+            .await;
         let _ = ui.send(UiEvent::Info(format!("📊 [jev {path_s}]\n{res}")));
     });
 }
