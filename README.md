@@ -43,8 +43,8 @@ le **shell** est ton terminal Unix, le **ghost** est l'IA dedans.
 ## 1. Démarrage rapide
 
 ```bash
-git clone https://github.com/<toi>/zer0gh0st.git && cd zer0gh0st
-cargo build --release          # ~5 min la première fois
+git clone https://github.com/Richerrail/zer0gh0st.git && cd zer0gh0st
+./scripts/install.sh           # dépendances + build (ou : cargo build --release)
 ./target/release/zer0          # ou : ./scripts/run.sh
 ```
 
@@ -143,10 +143,10 @@ micro via `pw-record` (PipeWire) → `parecord` (PulseAudio) → `arecord` (ALSA
 > Fedora/Arch/openSUSE) : `./scripts/install.sh` (ou `--minimal` pour compiler seulement).
 
 ```bash
-git clone https://github.com/<toi>/zer0gh0st.git
+git clone https://github.com/Richerrail/zer0gh0st.git
 cd zer0gh0st
-cargo build --release        # ~5 min la première fois
-./scripts/run.sh             # ou directement : ./target/release/zer0
+./scripts/install.sh         # dépendances + build (ou : cargo build --release)
+./target/release/zer0        # ou : ./scripts/run.sh
 ```
 
 ### Mode 100 % local (aucune clé API)
