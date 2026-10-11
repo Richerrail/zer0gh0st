@@ -25,6 +25,11 @@ if [ -d .github ]; then
   cp -r .github "$OUT/"
 fi
 
+# Site web (GitHub Pages)
+if [ -d site ]; then
+  cp -r site "$OUT/"
+fi
+
 # Sources / manifestes / licences / docs
 cp Cargo.toml Cargo.lock LICENSE config.example.toml \
    README.md SPEC.md SAFETY.md ARCHITECTURE.md ECOSYSTEM.md CHANGELOG.md \

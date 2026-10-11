@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ZER0│GH0ST — agent IA en terminal</title>
+<meta name="description" content="ZER0│GH0ST : un agent IA qui vit dans ton terminal. Rust, TUI, outils (shell, fichiers, web), multi-provider, vocal, Telegram. Local ou cloud.">
+<style>
+  :root{
+    --bg:#150b26; --bg2:#1c1030; --panel:#221733; --border:#544867;
+    --text:#e8d5ff; --muted:#a090b5; --dim:#7a6c8e;
+    --accent:#ff71ce; --cyan:#7ae8ff; --green:#7dffb0; --yellow:#ffe97a;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    background:var(--bg); color:var(--text); line-height:1.6;
+    background-image:radial-gradient(ellipse at 50% -10%,rgba(255,113,206,.18),transparent 60%),
+                     radial-gradient(ellipse at 90% 20%,rgba(122,232,255,.10),transparent 50%);
+  }
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:1040px;margin:0 auto;padding:0 20px}
+  header{display:flex;justify-content:space-between;align-items:center;padding:18px 0}
+  .brand{font-weight:700;letter-spacing:2px;color:var(--cyan);text-shadow:0 0 14px rgba(122,232,255,.6)}
+  nav a{color:var(--muted);margin-left:18px;font-size:.9rem}
+  nav a:hover{color:var(--text)}
+  .hero{text-align:center;padding:48px 0 24px}
+  .hero h1{
+    font-size:clamp(2.2rem,7vw,4.4rem);letter-spacing:6px;
+    background:linear-gradient(90deg,var(--cyan),var(--accent));
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+    text-shadow:0 0 40px rgba(255,113,206,.25);
+  }
+  .tag{color:var(--muted);margin-top:8px;font-size:1.05rem}
+  .hero img{width:100%;max-width:900px;margin:28px auto 0;border-radius:14px;
+    border:1px solid var(--border);box-shadow:0 0 60px rgba(255,113,206,.18)}
+  .btns{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:26px}
+  .btn{display:inline-block;padding:11px 20px;border-radius:10px;border:1px solid var(--border);
+    background:var(--panel);color:var(--text);font-weight:600;transition:.15s}
+  .btn:hover{border-color:var(--accent);transform:translateY(-2px);text-decoration:none}
+  .btn.primary{background:linear-gradient(90deg,var(--accent),#b366ff);color:#170a22;border:none}
+  section{padding:44px 0;border-top:1px solid rgba(84,72,103,.4)}
+  h2{color:var(--cyan);font-size:1.5rem;margin-bottom:18px;letter-spacing:1px}
+  h2::before{content:"# ";color:var(--dim)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:18px}
+  .card h3{color:var(--accent);font-size:1rem;margin-bottom:6px}
+  .card p{color:var(--muted);font-size:.9rem}
+  pre{background:#100819;border:1px solid var(--border);border-radius:10px;padding:14px 16px;
+    overflow:auto;font-size:.9rem;color:var(--green)}
+  pre .c{color:var(--dim)}
+  .cmds{color:var(--yellow);font-size:.88rem;line-height:2}
+  code{color:var(--cyan);background:rgba(122,232,255,.08);padding:1px 5px;border-radius:5px}
+  .shot img{width:100%;border-radius:12px;border:1px solid var(--border)}
+  footer{text-align:center;color:var(--dim);padding:30px 0 50px;font-size:.85rem}
+  .bmc{display:block;margin:18px auto 0;width:200px}
+  .kbd{color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">ZER0│GH0ST</div>
+    <nav>
+      <a href="#features">Features</a>
+      <a href="#install">Installer</a>
+      <a href="#cmd">Commandes</a>
+      <a href="https://github.com/Richerrail/zer0gh0st">GitHub ↗</a>
+    </nav>
+  </header>
+
+  <div class="hero">
+    <h1>ZER0│GH0ST</h1>
+    <p class="tag">Un agent IA qui vit dans ton terminal — <em>ghost in the shell</em>.</p>
+    <img src="zer0-ghost.png" alt="ZER0│GH0ST — illustration">
+    <div class="btns">
+      <a class="btn primary" href="https://github.com/Richerrail/zer0gh0st/releases/latest">⬇ Télécharger</a>
+      <a class="btn" href="https://github.com/Richerrail/zer0gh0st">★ GitHub</a>
+      <a class="btn" href="#install">Installer (source)</a>
+    </div>
+    <p class="kbd" style="margin-top:14px">Rust · TUI · local ou cloud · aucune clé requise · MIT</p>
+  </div>
+
+  <section id="features">
+    <h2>Ce que c'est</h2>
+    <div class="grid">
+      <div class="card"><h3>Boucle d'agent</h3><p>utilisateur → modèle → outils → réponse, avec streaming et détection de boucle.</p></div>
+      <div class="card"><h3>Outils réels</h3><p><code>code_exec</code> (shell), <code>text_editor</code> (fichiers), <code>web_search</code>, mémoire, tâches.</p></div>
+      <div class="card"><h3>Multi-provider</h3><p>9 providers + custom, failover, backoff 429, modèles <code>:free</code>.</p></div>
+      <div class="card"><h3>Zero-chan (voix)</h3><p>Assistante vocale intégrée : STT Whisper local, avatar kawaii animé.</p></div>
+      <div class="card"><h3>Telegram</h3><p>Converse à distance : texte, vocal, fichiers, progression. Long polling, aucune exposition.</p></div>
+      <div class="card"><h3>Menu cliquable</h3><p>Toutes les commandes à droite de la TUI, dépliables — sans rien taper.</p></div>
+    </div>
+  </section>
+
+  <section class="shot">
+    <h2>Aperçu</h2>
+    <img src="screenshot.png" alt="ZER0│GH0ST — TUI">
+  </section>
+
+  <section id="install">
+    <h2>Installer</h2>
+    <p style="color:var(--muted);margin-bottom:12px">Binaires Linux, macOS et Windows à chaque release.</p>
+    <pre><span class="c"># depuis les sources (partout)</span>
+git clone https://github.com/Richerrail/zer0gh0st.git
+cd zer0gh0st
+./scripts/install.sh          <span class="c"># dépendances + build</span>
+./target/release/zer0         <span class="c"># ou ./scripts/run.sh</span></pre>
+    <pre style="margin-top:12px"><span class="c"># mode 100% local (aucune clé API)</span>
+export ZER0_MODEL=/chemin/mon-modele.gguf
+./scripts/serve.sh            <span class="c"># llama-server sur :8080</span>
+./target/release/zer0         <span class="c"># puis, dans la TUI : /provider local</span></pre>
+  </section>
+
+  <section id="cmd">
+    <h2>Quelques commandes</h2>
+    <p class="cmds">
+      /help · /think · /provider · /model · /ctx · /route · /role<br>
+      /memory · /task · /work · /ask · /review · /search · /kb<br>
+      /telegram on|off · /whoami · /vault · /pdf · /radio · /bintime · /pong<br>
+      F3 Read&amp;Write · F4 Code-exec · F6 Chats · F7 Nudge · F8 0chan · F10 Mic
+    </p>
+  </section>
+
+  <section>
+    <h2>Crédits</h2>
+    <p style="color:var(--muted)">
+      Inspiré par <b>Agent Zero</b> (Python), <b>Spynel</b> et <b>pi.dev</b>.<br>
+      Merci appuyé à <a href="https://github.com/kioptix">kioptix</a> pour
+      <a href="https://github.com/kioptix/synnoesis">Synnoesis</a>
+      (<a href="https://synnoesis.dev">synnoesis.dev</a>) — c'est de sa philosophie
+      d'honnêteté que ZER0 s'inspire.
+    </p>
+    <a class="bmc" href="https://www.buymeacoffee.com/richerrailk" target="_blank" rel="noopener noreferrer">
+      <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="width:200px">
+    </a>
+  </section>
+
+  <footer>
+    ZER0│GH0ST · MIT © 2026 richerrail ·
+    <a href="https://github.com/Richerrail/zer0gh0st">github.com/Richerrail/zer0gh0st</a>
+  </footer>
+</div>
+</body>
+</html>
