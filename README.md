@@ -156,6 +156,14 @@ cd zer0gh0st
 À chaque tag `v*`, la CI publie des binaires **Linux (x86_64)**, **macOS (Intel + Apple
 Silicon)** et **Windows (x86_64)** dans [Releases](https://github.com/Richerrail/zer0gh0st/releases).
 
+### Plateformes
+
+| OS | Prérequis | Notes |
+|---|---|---|
+| 🐧 **Linux** | `build-essential pkg-config` · audio `pipewire`/`pulseaudio-utils` · `wl-clipboard`\|`xclip` · `mpv`/`ffmpeg` | cible principale (testé) |
+| 🍎 **macOS** | Xcode CLT · `brew install sox mpv ffmpeg` | via `pbcopy`, micro via `sox` |
+| 🪟 **Windows** | **Visual Studio Build Tools (C++)** · `choco install sox ffmpeg` | `code_exec` = `cmd /C` → Git Bash/WSL conseillé |
+
 ### Mode 100 % local (aucune clé API)
 
 Place un modèle `.gguf` dans `models/` (ou pointe-le) :

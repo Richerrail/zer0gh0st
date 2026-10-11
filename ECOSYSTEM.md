@@ -3,7 +3,7 @@
 > Délimite le **noyau** (l'agent) des **outils intégrés** et de l'**écosystème** (modules fun),
 > et documente la portabilité. Complète le README.
 
-**Version** : 1.0 (2026-10-06) · **Projet** : 0.5
+**Version** : 1.1 (2026-10-11) · **Projet** : 0.5
 
 ---
 
@@ -38,7 +38,7 @@ Détails et historique : [`ROADMAP_FUN.md`](./ROADMAP_FUN.md).
 Résout la racine projet depuis l'exécutable (`target/release/zer0` → `ZER0v1`) puis lance :
 - `/kristal` → `mods/zer0-kristal/zer0-kristal`
 - `/streaming` → `python3 mods/streaming/zero_video.py`
-- `/retro` → `xdg-open mods/Zer0-Retr0/index.html`
+- `/retro` → ouvre `mods/Zer0-Retr0/index.html` (via le navigateur par défaut, multiplateforme)
 
 ---
 
@@ -53,6 +53,8 @@ Résout la racine projet depuis l'exécutable (`target/release/zer0` → `ZER0v1
 | `xdg-open` (+ navigateur) | `/retro` |
 | Qt6 (`Qt6Widgets`, `Qt6Multimedia`) | compilation de `mods/zer0-kristal` |
 | `taskset` (Linux) | limite 2 cœurs du serveur local |
+| `sox` | enregistrement micro (macOS/Windows, et Linux sans PipeWire/Pulse) |
+| `pbcopy` / `clip` | presse-papier macOS / Windows |
 
 ---
 
@@ -65,25 +67,39 @@ Formats : `mp3 wav ogg flac m4a opus aac wma`. Lecture en **playlist** (enchaîn
 
 ## 5. Portabilité
 
-**État : Linux (testé). macOS et Windows : analyse, non testé.**
+**État : Linux, macOS et Windows — compilés et vérifiés par la CI**
+(`.github/workflows/ci.yml`, matrice 3 OS). Des **binaires précompilés** sont publiés à chaque
+`tag` (`release.yml`). Tout passe par `src/platform.rs`.
 
 | | Linux | macOS | Windows |
 |---|---|---|---|
-| Noyau Rust (TUI, client LLM, mémoire, coffre, PDF) | ✅ | ✅ | ✅ (unix `chmod` cfg-gardé) |
-| `code_exec` (`bash -lc`) | ✅ | ✅ (`/bin/bash`) | ❌ (→ `cmd`/`powershell`) |
-| `/bintime` (`date +%H %M %S`) | ✅ | ✅ (date BSD) | ❌ (→ lib temps Rust) |
-| `/radio` | ✅ | ⚠️ sans `paplay` (ffplay/mpv OK) | ⚠️ sans `paplay` |
-| `/kristal` | ✅ | ❌ recompiler Qt6 | ❌ recompiler Qt6 |
-| `/streaming` (`python3`) | ✅ | ⚠️ `python3` parfois absent | ❌ `python` |
-| `/retro` (`xdg-open`) | ✅ | ❌ `open` | ❌ `explorer`/`start` |
-| `scripts/serve.sh` (`taskset`) | ✅ | ❌ | ❌ |
-| Effort de portage | — | **petit** | **moyen** |
+| Noyau Rust (TUI, client LLM, mémoire, coffre, PDF, Telegram) | ✅ | ✅ | ✅ |
+| `code_exec` | `bash -lc` | `bash -lc` | **`cmd /C`** |
+| Presse-papier | `wl-copy`/`xclip`/`xsel` | **`pbcopy`** | **`clip`** |
+| Ouvrir un fichier | `xdg-open`/`gio` | `open` | `cmd start` |
+| Python | `python3`/`python` | `python3` | `python` |
+| Horodatage (`/bintime`, logs) | `date` | `date` | **PowerShell** |
+| Micro (zero-chan) | pw-record / parecord / arecord | **sox** | **sox** |
+| `/radio` | ✅ | ✅ (ffplay/mpv) | ✅ (ffplay/mpv) |
+| `/kristal` | ✅ (Qt6) | ⚠️ recompiler Qt6 | ⚠️ recompiler Qt6 |
+| `/streaming` | ✅ | ⚠️ libtorrent/pygame | ⚠️ libtorrent/pygame |
+| `/retro` | ✅ | ✅ (`open`) | ✅ (`start`) |
+| `scripts/serve.sh` (`taskset`) | ✅ | ❌ (llama-server direct) | ❌ |
 
-Pistes de portage multi-OS :
-1. lanceurs par OS (`xdg-open`/`open`/`explorer`, `python3`/`python`) ;
-2. horloge bintime en Rust pur (sans `date`) ;
-3. `code_exec` selon l'OS ;
-4. scripts `run.sh` + `run.command`/`.bat`.
+### Prérequis par OS
+- **Linux (Debian/Ubuntu/Kali)** : `build-essential pkg-config` ; audio
+  `pipewire` / `pulseaudio-utils` / `alsa-utils` ; `wl-clipboard` **ou** `xclip` ; `mpv`/`ffmpeg`.
+- **macOS** : Xcode Command Line Tools (`xcode-select --install`) ; `brew install sox mpv ffmpeg`.
+- **Windows** : **Visual Studio Build Tools (C++)** ; `choco install sox ffmpeg`.
+
+### Limites connues (Windows)
+- `code_exec` utilise **`cmd /C`** : installe **Git Bash** ou **WSL** pour les commandes bash.
+- **Pas de `taskset`** → lance `llama-server` sans limite de cœurs.
+- Les modules `mods/` (Qt6, torrent) ne sont **pas prévus** pour Windows.
+
+### Installation automatique
+`./scripts/install.sh` détecte la distribution Linux (Debian/Ubuntu/Kali, Fedora, Arch,
+openSUSE) et installe les dépendances ; `--minimal` ne prend que le nécessaire à la compilation.
 
 ---
 
