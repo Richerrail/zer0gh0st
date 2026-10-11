@@ -84,6 +84,15 @@
   (modèles de raisonnement type `meta/muse-glimmer-30b`), le raisonnement est utilisé comme
   réponse au lieu d'échouer.
 
+## Portabilité Linux (2026-10-10)
+
+- **Presse-papier** : `wl-copy` (Wayland) → `xclip` / `xsel` (X11) → **OSC 52** (repli terminal).
+- **Micro** : `pw-record` (PipeWire) → `parecord` (PulseAudio) → `arecord` (ALSA) — choisit
+  automatiquement le premier disponible. Message clair si aucun.
+- **`scripts/install.sh`** : installe les dépendances selon la distribution
+  (Debian/Ubuntu/Kali, Fedora, Arch/omarchy, openSUSE), puis Rust (rustup) et compile.
+  Mode `--minimal` pour ne prendre que le nécessaire à la compilation.
+
 ## Menu de commandes cliquable (2026-10-10)
 
 - Panneau **Commandes** à droite de la TUI, **entre** le bloc zero-chan (haut) et le badge

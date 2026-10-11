@@ -134,7 +134,13 @@ Détail complet du modèle de menace : [`SAFETY.md`](./SAFETY.md).
 Prérequis : **Rust** (cargo) + un **compilateur C** (`cc`) — `rusqlite` est compilé *bundled*,
 rien à installer côté SQLite. `llama-server` (llama.cpp) seulement pour le mode **local**.
 
+**Portabilité** : presse-papier via `wl-copy` (Wayland) → `xclip`/`xsel` (X11) → OSC 52 ;
+micro via `pw-record` (PipeWire) → `parecord` (PulseAudio) → `arecord` (ALSA).
+
 ### Depuis GitHub
+
+> 💡 **Installation automatique** (dépendances selon la distro — Debian/Ubuntu/**Kali**/
+> Fedora/Arch/openSUSE) : `./scripts/install.sh` (ou `--minimal` pour compiler seulement).
 
 ```bash
 git clone https://github.com/<toi>/zer0gh0st.git
