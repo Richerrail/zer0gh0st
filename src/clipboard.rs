@@ -1,5 +1,5 @@
 //! Copie dans le presse-papier. Ordre : `wl-copy` (Wayland) → `xclip` / `xsel`
-//! (X11) → **OSC 52** (repli supporté par de nombreux terminaux).
+//! (X11) → `pbcopy` (macOS) → `clip` (Windows) → **OSC 52** (repli terminal).
 
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -38,6 +38,13 @@ pub fn copy(text: &str) {
         return;
     }
     if has("xsel") && pipe_to("xsel", &["--clipboard", "--input"], text) {
+        return;
+    }
+    // macOS / Windows
+    if has("pbcopy") && pipe_to("pbcopy", &[], text) {
+        return;
+    }
+    if has("clip") && pipe_to("clip", &[], text) {
         return;
     }
     // Repli OSC 52 (base64) — supporté par de nombreux terminaux (SSH inclus).
