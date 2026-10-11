@@ -31,10 +31,12 @@ cp Cargo.toml Cargo.lock LICENSE config.example.toml \
    ROADMAP.md ROADMAP_FUN.md ROADMAP_PORT_SLASH.md BRAINSTORM_ZEROCHAN.md \
    "$OUT/"
 
-# Capture d'écran (optionnelle)
-if [ -f screenshot.png ]; then
-  cp screenshot.png "$OUT/"
-fi
+# Images (capture d'écran + illustration hero), optionnelles
+for img in screenshot.png zer0-ghost.png; do
+  if [ -f "$img" ]; then
+    cp "$img" "$OUT/"
+  fi
+done
 
 # Dossiers de contenu : gardés vides (placeholders)
 mkdir -p "$OUT/music" "$OUT/base_connaissance" "$OUT/mods"
