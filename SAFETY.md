@@ -24,6 +24,12 @@ dispose des **droits de l'utilisateur** : exécuter des commandes, lire/écrire/
 
 Le document n'impose pas C ; il exige que vous le sachiez et le décidiez.
 
+> ⚠️ **Responsabilité.** Zer0 agit avec **tes droits**, sans bac à sable. S'il exécute par erreur
+> une commande destructrice — un `rm -rf` sur ton disque de photos de famille, un `dd` sur le
+> mauvais disque, un `git push --force` — **c'est toi le responsable**, pas l'auteur du logiciel.
+> Activer `code_exec` (`F4` dans la TUI, `/exec on` sur Telegram) est une **acceptation en bloc
+> des risques** : tu le fais en connaissance de cause.
+
 ---
 
 ## 2. Modèle de menace (ce que ce document couvre)

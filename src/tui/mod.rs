@@ -1780,6 +1780,12 @@ fn handle_input(
                 app.code_exec = !app.code_exec;
                 let state = if app.code_exec { "ON" } else { "OFF" };
                 app.messages.push(ChatMessage::notice(format!("Code-exec: {state}")));
+                if app.code_exec {
+                    app.messages.push(ChatMessage::notice(
+                        "⚠️ shell activé : les commandes s'exécutent SANS validation — tu es \
+                         responsable des erreurs (ex. `rm -rf` sur tes photos).",
+                    ));
+                }
             }
             KeyCode::F(5) => handle_command(app, "/help", ui_tx),
             KeyCode::F(8) => app.zc.toggle_on(),

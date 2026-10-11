@@ -295,15 +295,16 @@ impl Bot {
                     Some("off") => self.exec = false,
                     _ => {}
                 }
-                let _ = self
-                    .send(
-                        chat_id,
-                        &format!(
-                            "🐚 shell (code_exec) : {}\n/exec on | /exec off",
-                            if self.exec { "ON" } else { "off" }
-                        ),
-                    )
-                    .await;
+                let msg = if self.exec {
+                    "🐚 shell (code_exec) : ON\n\
+                     ⚠️  TOUTES les commandes s'exécutent SANS validation.\n\
+                     Si l'agent fait un `rm -rf` sur ton disque de photos de famille \
+                     par erreur, c'est TOI le responsable.\n\
+                     (/exec off pour couper)"
+                } else {
+                    "🐚 shell (code_exec) : OFF\n/exec on | /exec off"
+                };
+                let _ = self.send(chat_id, msg).await;
                 return;
             }
             "/new" => {
