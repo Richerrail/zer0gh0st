@@ -27,7 +27,9 @@ cp Cargo.toml Cargo.lock LICENSE \
    "$OUT/"
 
 # Capture d'écran (optionnelle)
-[ -f screenshot.png ] && cp screenshot.png "$OUT/"
+if [ -f screenshot.png ]; then
+  cp screenshot.png "$OUT/"
+fi
 
 # Dossiers de contenu : gardés vides (placeholders)
 mkdir -p "$OUT/music" "$OUT/base_connaissance" "$OUT/mods"
@@ -84,8 +86,8 @@ Les modules **natifs** (`/radio`, `/bintime`, `/pong`) sont en Rust dans `src/fu
 EOF
 
 # Genericise les chemins personnels dans la doc
-sed -i 's#/home/[A-Za-z0-9_]*/\.local/share/zerochan#~/zerochan#g;
-        s#/home/[A-Za-z0-9_]*/\.local/share/zer0#~/zer0#g' "$OUT"/*.md || true
+sed -i 's#/home/[A-Za-z0-9_]*/\.local/share/zerochan#~/zerochan#g' "$OUT"/*.md || true
+sed -i 's#/home/[A-Za-z0-9_]*/\.local/share/zer0#~/zer0#g' "$OUT"/*.md || true
 
 echo "✅ gh0st/ régénéré : $OUT"
 du -sh "$OUT"
