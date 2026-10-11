@@ -38,6 +38,40 @@ pub fn rec_path() -> PathBuf {
     std::env::temp_dir().join("zer0_chan_mic.wav")
 }
 
+fn has(cmd: &str) -> bool {
+    std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).any(|d| d.join(cmd).exists()))
+        .unwrap_or(false)
+}
+
+/// Commande d'enregistrement WAV mono 16 kHz, selon l'écosystème audio dispo :
+/// PipeWire (`pw-record`) → PulseAudio (`parecord`) → ALSA (`arecord`).
+fn recorder(path: &std::path::Path) -> Option<Command> {
+    if has("pw-record") {
+        let mut c = Command::new("pw-record");
+        c.args(["--format", "s16", "--rate", "16000", "--channels", "1"])
+            .arg(path);
+        return Some(c);
+    }
+    if has("parecord") {
+        let mut c = Command::new("parecord");
+        c.args([
+            "--format=s16le",
+            "--rate=16000",
+            "--channels=1",
+            "--file-format=wav",
+        ])
+        .arg(path);
+        return Some(c);
+    }
+    if has("arecord") {
+        let mut c = Command::new("arecord");
+        c.args(["-f", "S16_LE", "-r", "16000", "-c", "1"]).arg(path);
+        return Some(c);
+    }
+    None
+}
+
 pub struct ZeroChan {
     pub on: bool,
     pub state: State,
@@ -85,11 +119,11 @@ impl ZeroChan {
             return false;
         }
         let path = rec_path();
-        let child = Command::new("pw-record")
-            .args([
-                "--format", "s16", "--rate", "16000", "--channels", "1",
-            ])
-            .arg(&path)
+        let Some(mut cmd) = recorder(&path) else {
+            self.last = "aucun enregistreur (installer pipewire / pulseaudio-utils / alsa-utils)".into();
+            return false;
+        };
+        let child = cmd
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
