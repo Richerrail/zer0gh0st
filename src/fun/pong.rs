@@ -89,7 +89,7 @@ impl Pong {
 
         // ball
         self.bx += self.dx;
-        if self.tick % 2 == 0 {
+        if self.tick.is_multiple_of(2) {
             self.by += self.ystep;
         }
 

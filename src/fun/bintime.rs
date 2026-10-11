@@ -57,7 +57,7 @@ impl BinTime {
 
     pub fn tick(&mut self) {
         self.ticks = self.ticks.wrapping_add(1);
-        if self.ticks % 20 == 0 {
+        if self.ticks.is_multiple_of(20) {
             self.refresh();
         }
     }
@@ -94,10 +94,8 @@ impl BinTime {
         };
 
         let bits_line = format!(
-            "{}   {}   {}",
-            format!("{:06b}", self.hms.0),
-            format!("{:06b}", self.hms.1),
-            format!("{:06b}", self.hms.2)
+            "{:06b}   {:06b}   {:06b}",
+            self.hms.0, self.hms.1, self.hms.2
         );
 
         let mut lines: Vec<Line> = Vec::new();

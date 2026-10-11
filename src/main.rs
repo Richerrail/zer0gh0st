@@ -642,8 +642,8 @@ fn provider_cmd(action: ProviderAction) -> Result<()> {
         ProviderAction::List => {
             let g = config::load_global();
             println!(
-                "{:<3}{:<13}{:<28}{:<13}{:<8}{:<24}{}",
-                "", "id", "nom", "gratuit", "clé", "variable d'env", "base_url"
+                "{:<3}{:<13}{:<28}{:<13}{:<8}{:<24}base_url",
+                "", "id", "nom", "gratuit", "clé", "variable d'env"
             );
             for p in providers::all() {
                 let active = if g.provider.as_deref() == Some(p.id.as_str()) { "*" } else { " " };

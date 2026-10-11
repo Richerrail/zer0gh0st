@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Project root, resolved from the running binary (`target/release/zer0`).
@@ -16,7 +16,7 @@ fn mod_path(rel: &str) -> PathBuf {
     project_root().join("mods").join(rel)
 }
 
-fn require(path: &PathBuf) -> Result<()> {
+fn require(path: &Path) -> Result<()> {
     if path.exists() {
         Ok(())
     } else {

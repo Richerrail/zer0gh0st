@@ -176,7 +176,7 @@ pub fn rank(problem: &str, models: &[ModelEntry], top: usize) -> (Category, Vec<
         .cloned()
         .map(|m| (score(&m, cat), m))
         .collect();
-    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    scored.sort_by_key(|a| std::cmp::Reverse(a.0));
     scored.truncate(top);
     (cat, scored)
 }

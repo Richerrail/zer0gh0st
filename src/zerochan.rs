@@ -178,21 +178,21 @@ impl ZeroChan {
         let mouth = match self.state {
             State::Speaking => ["o", "O", "‿", "_"][((f / 3) % 4) as usize],
             State::Listening => {
-                if (f / 6) % 2 == 0 {
+                if (f / 6).is_multiple_of(2) {
                     "o"
                 } else {
                     "‿"
                 }
             }
             State::Thinking => {
-                if (f / 10) % 3 == 0 {
+                if (f / 10).is_multiple_of(3) {
                     "~"
                 } else {
                     "_"
                 }
             }
             State::Idle => {
-                if (f / 22) % 4 == 0 {
+                if (f / 22).is_multiple_of(4) {
                     "_"
                 } else {
                     "‿"
@@ -201,8 +201,8 @@ impl ZeroChan {
             State::Off => "_",
         };
         // clin d'œil / clignement occasionnel
-        let left = if (f / 33) % 11 == 0 { "-" } else { "◕" };
-        let right = if (f / 24) % 8 == 0 { "¬" } else { "◕" };
+        let left = if (f / 33).is_multiple_of(11) { "-" } else { "◕" };
+        let right = if (f / 24).is_multiple_of(8) { "¬" } else { "◕" };
         format!("({left}{mouth}{right})")
     }
 

@@ -84,6 +84,14 @@
   (modèles de raisonnement type `meta/muse-glimmer-30b`), le raisonnement est utilisé comme
   réponse au lieu d'échouer.
 
+## Qualité & CI (2026-10-11)
+
+- **CI GitHub Actions** : `cargo build --release` + `cargo clippy --all-targets -- -D warnings`
+  à chaque push/PR, badge dans le README.
+- **Nettoyage clippy** : les 14 avertissements sont résolus (`is_multiple_of`, `as_chunks`,
+  `&Path` au lieu de `&PathBuf`, `sort_by_key`, `while let`, etc.) → **0 warning**.
+- **`config.example.toml`** : modèle de configuration commenté.
+
 ## Portabilité Linux (2026-10-10)
 
 - **Presse-papier** : `wl-copy` (Wayland) → `xclip` / `xsel` (X11) → **OSC 52** (repli terminal).

@@ -21,9 +21,9 @@ jobs:
       - name: Build (release)
         run: cargo build --release
 
-      # Clippy : signale les pièges sans échouer le build (warnings tolérés).
+      # Clippy : un warning échoue le build (le code est maintenu sans warning).
       - name: Clippy
-        run: cargo clippy --all-targets
+        run: cargo clippy --all-targets -- -D warnings
 
       # Formatage : informatif seulement (le code n'est pas encore rustfmt-strict).
       - name: Format (informatif)

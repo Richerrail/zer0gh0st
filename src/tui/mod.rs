@@ -154,14 +154,11 @@ pub async fn run(
     );
 
     let (input_tx, mut input_rx) = mpsc::unbounded_channel::<Event>();
-    thread::spawn(move || loop {
-        match crossterm::event::read() {
-            Ok(ev) => {
-                if input_tx.send(ev).is_err() {
-                    break;
-                }
+    thread::spawn(move || {
+        while let Ok(ev) = crossterm::event::read() {
+            if input_tx.send(ev).is_err() {
+                break;
             }
-            Err(_) => break,
         }
     });
 

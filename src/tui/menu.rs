@@ -198,13 +198,11 @@ pub fn draw(
     let visible = rows.iter().skip(start).take(inner.height as usize);
 
     let mut lines: Vec<Line> = Vec::new();
-    let mut y = inner.y;
-    for (line, hit) in visible {
+    for (y, (line, hit)) in (inner.y..).zip(visible) {
         if let Some(h) = hit {
             hits.push((Rect { x: inner.x, y, width: inner.width, height: 1 }, *h));
         }
         lines.push(line.clone());
-        y += 1;
     }
     f.render_widget(Paragraph::new(lines), inner);
 }
