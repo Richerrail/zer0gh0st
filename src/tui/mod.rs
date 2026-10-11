@@ -1,4 +1,5 @@
 mod banner;
+mod menu;
 
 use anyhow::Result;
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
@@ -104,6 +105,15 @@ pub struct App {
     pub context_window: u64,
     /// L'utilisateur a forcé le contexte (/ctx) — la sonde ne l'écrase pas.
     pub ctx_manual: bool,
+    /// Bot Telegram lancé depuis la TUI (None = arrêté).
+    pub tg: Option<crate::telegram::Handle>,
+    /// Menu latéral : groupe déplié.
+    pub menu_open: Option<&'static str>,
+    /// Zones cliquables du menu (recalculées au rendu).
+    pub menu_hits: Vec<(Rect, menu::Hit)>,
+    /// Défilement du menu + sa zone écran (pour la molette).
+    pub menu_scroll: u16,
+    pub menu_rect: Rect,
 }
 
 impl App {
@@ -208,6 +218,11 @@ pub async fn run(
         chats_popup: None,
         context_window: ctx_win,
         ctx_manual: ctx_override.is_some(),
+        tg: None,
+        menu_open: None,
+        menu_hits: Vec::new(),
+        menu_scroll: 0,
+        menu_rect: Rect::default(),
         thinking: options.thinking,
         max_tokens: options.max_tokens,
         temperature: options.temperature,
@@ -566,6 +581,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
         }
         "/models" => cmd_list_models(app, ui_tx, false),
         "/ctx" => handle_ctx(app, &args),
+        "/telegram" | "/tg" => handle_telegram(app, &args, ui_tx),
         "/free" => cmd_list_models(app, ui_tx, true),
         "/select" => {
             let problem = args.join(" ");
@@ -587,6 +603,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
              /model use <id>            change de modèle\n\
              /models [free]             liste les modèles du provider\n\
              /ctx [N|1M|auto]           contexte du modèle (auto/override)\n\
+             /telegram [on|off]         bot Telegram à distance (long polling)\n\
              /free                      liste les modèles gratuits\n\
              /route [list|add|clear]    chaîne de bascule (failover)\n\
              /route auto [n]            remplit la chaîne avec les modèles :free\n\
@@ -1608,6 +1625,31 @@ fn handle_input(
                     app.zc.toggle_on();
                 } else if inside(app.btn_mic) {
                     toggle_mic(app, ui_tx);
+                } else if let Some((code, is_group)) = app
+                    .menu_hits
+                    .iter()
+                    .find(|(r, _)| {
+                        me.column >= r.x
+                            && me.column < r.x + r.width
+                            && me.row >= r.y
+                            && me.row < r.y + r.height
+                    })
+                    .map(|(_, h)| match h {
+                        menu::Hit::Group(l) => (*l, true),
+                        menu::Hit::Cmd(c) => (*c, false),
+                    })
+                {
+                    if is_group {
+                        app.menu_open = if app.menu_open == Some(code) {
+                            None
+                        } else {
+                            Some(code)
+                        };
+                    } else if code.ends_with(' ') {
+                        app.input = code.to_string();
+                    } else {
+                        handle_command(app, code, ui_tx);
+                    }
                 } else {
                     app.sel_anchor = Some((me.column, me.row));
                     app.sel_head = Some((me.column, me.row));
@@ -1621,6 +1663,26 @@ fn handle_input(
             MouseEventKind::Up(MouseButton::Left) => {
                 if app.sel_anchor.is_some() {
                     copy_selection(app);
+                }
+            }
+            MouseEventKind::ScrollDown => {
+                let r = app.menu_rect;
+                if me.column >= r.x
+                    && me.column < r.x + r.width
+                    && me.row >= r.y
+                    && me.row < r.y + r.height
+                {
+                    app.menu_scroll = app.menu_scroll.saturating_add(3);
+                }
+            }
+            MouseEventKind::ScrollUp => {
+                let r = app.menu_rect;
+                if me.column >= r.x
+                    && me.column < r.x + r.width
+                    && me.row >= r.y
+                    && me.row < r.y + r.height
+                {
+                    app.menu_scroll = app.menu_scroll.saturating_sub(3);
                 }
             }
             _ => {}
@@ -1812,6 +1874,13 @@ fn handle_ui(ev: UiEvent, app: &mut App) {
                 app.context_window = c;
             }
         }
+        UiEvent::TelegramShutdown => {
+            if let Some(h) = app.tg.take() {
+                h.stop();
+            }
+            app.messages
+                .push(ChatMessage::notice("🤖 Telegram: OFF (demandé depuis le bot)"));
+        }
     }
 }
 
@@ -1833,23 +1902,28 @@ fn draw(f: &mut Frame, app: &mut App) {
         crate::fun::Mode::Chat => {}
     }
 
-    // Side panel (to the right of the agent), chat stays usable.
+    // Panneau latéral : le mod s'ouvre à droite du menu de commandes.
     if let Some(sm) = app.side_mode {
-        if area.width >= 110 {
+        if area.width >= 130 {
+            let cols = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Min(90), Constraint::Length(40)])
+                .split(area);
+            draw_agent(f, cols[0], app, true);
+            draw_panel(f, cols[1], app, sm);
+        } else if area.width >= 110 {
             let cols = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Min(70), Constraint::Length(40)])
                 .split(area);
-            draw_agent(f, cols[0], app);
+            draw_agent(f, cols[0], app, false);
             draw_panel(f, cols[1], app, sm);
-            return;
+        } else {
+            draw_panel(f, area, app, sm);
         }
-        // Too narrow: the panel takes the whole area.
-        draw_panel(f, area, app, sm);
-        return;
+    } else {
+        draw_agent(f, area, app, true);
     }
-
-    draw_agent(f, area, app);
     draw_chats_popup(f, area, app);
     finalize_buffer(f, app);
 }
@@ -1976,7 +2050,7 @@ fn draw_chats_popup(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(Paragraph::new(lines).block(block), rect);
 }
 
-fn draw_agent(f: &mut Frame, area: Rect, app: &mut App) {
+fn draw_agent(f: &mut Frame, area: Rect, app: &mut App, show_menu: bool) {
     let input_h = input_height(app, area.width);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -2005,7 +2079,21 @@ fn draw_agent(f: &mut Frame, area: Rect, app: &mut App) {
     }
 
     draw_location(f, chunks[2]);
-    draw_chat(f, chunks[3], app);
+    let body = chunks[3];
+    if show_menu && body.width >= 80 {
+        let cols = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(40), Constraint::Length(30)])
+            .split(body);
+        draw_chat(f, cols[0], app);
+        app.menu_rect = cols[1];
+        let open = app.menu_open;
+        menu::draw(f, cols[1], open, &mut app.menu_scroll, &mut app.menu_hits);
+    } else {
+        app.menu_hits.clear();
+        app.menu_rect = Rect::default();
+        draw_chat(f, body, app);
+    }
 
     // Barre de saisie + boutons 0chan / micro à droite (visibles dès 60 colonnes).
     if chunks[4].width >= 60 {
@@ -2358,6 +2446,44 @@ fn parse_ctx(s: &str) -> Option<u64> {
         return x.parse::<f64>().ok().map(|v| (v * 1000.0) as u64);
     }
     s.parse::<u64>().ok()
+}
+
+fn handle_telegram(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
+    match args.first().copied() {
+        Some("on") | Some("start") => {
+            if app.tg.is_some() {
+                app.messages
+                    .push(ChatMessage::notice("🤖 Telegram: déjà actif"));
+            } else {
+                match crate::telegram::spawn(None, Vec::new(), Some(ui_tx.clone())) {
+                    Ok(h) => {
+                        app.tg = Some(h);
+                        app.messages.push(ChatMessage::notice(
+                            "🤖 Telegram: ON — envoie /start au bot",
+                        ));
+                    }
+                    Err(e) => app
+                        .messages
+                        .push(ChatMessage::notice(format!("🤖 Telegram: {e}"))),
+                }
+            }
+        }
+        Some("off") | Some("stop") => {
+            if let Some(h) = app.tg.take() {
+                h.stop();
+                app.messages.push(ChatMessage::notice("🤖 Telegram: OFF"));
+            } else {
+                app.messages
+                    .push(ChatMessage::notice("🤖 Telegram: déjà inactif"));
+            }
+        }
+        _ => {
+            let state = if app.tg.is_some() { "ON" } else { "off" };
+            app.messages.push(ChatMessage::notice(format!(
+                "🤖 Telegram: {state} — /telegram on|off"
+            )));
+        }
+    }
 }
 
 fn handle_ctx(app: &mut App, args: &[&str]) {

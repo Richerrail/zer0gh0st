@@ -17,6 +17,7 @@ mod route;
 mod search;
 mod select;
 mod tasks;
+mod telegram;
 mod vault;
 mod zerochan;
 mod tools;
@@ -29,7 +30,7 @@ use agent::history::ChatMessage;
 use event::UiEvent;
 use llm::llama::ChatOptions;
 
-const DEFAULT_SYSTEM: &str = include_str!("prompts/system.md");
+pub(crate) const DEFAULT_SYSTEM: &str = include_str!("prompts/system.md");
 
 #[derive(Parser, Debug)]
 #[command(name = "zer0", version, about = "Zer0 - agent IA en terminal (CLI)")]
@@ -162,6 +163,15 @@ enum Command {
     Kb {
         #[command(subcommand)]
         action: KbAction,
+    },
+    /// Bot Telegram : converse avec Zer0 à distance (long polling).
+    Telegram {
+        /// Token du bot (sinon config ou ZER0_TELEGRAM_TOKEN).
+        #[arg(long)]
+        token: Option<String>,
+        /// Identifiants Telegram autorisés (sinon auto-claim du premier chat).
+        #[arg(long)]
+        allow: Vec<i64>,
     },
 }
 
@@ -426,6 +436,7 @@ async fn run_command(cmd: Command) -> Result<()> {
         Command::Pong => fun::run_standalone(fun::Mode::Pong),
         Command::PongFrame => fun::debug_pong_frame(),
         Command::Kb { action } => kb_cmd(action).await,
+        Command::Telegram { token, allow } => telegram::run(token, allow).await,
     }
 }
 

@@ -84,6 +84,28 @@
   (modèles de raisonnement type `meta/muse-glimmer-30b`), le raisonnement est utilisé comme
   réponse au lieu d'échouer.
 
+## Menu de commandes cliquable (2026-10-10)
+
+- Panneau **Commandes** à droite de la TUI, **entre** le bloc zero-chan (haut) et le badge
+  `0chan/mic` (bas). Tous les groupes et sous-commandes, **cliquables** :
+  - clic sur un groupe (`▸ provider`) → déplie/replie ;
+  - clic sur une commande sans argument → l'exécute ;
+  - clic sur une commande à argument (`add `, `use `) → l'insère dans la saisie.
+- **Molette** au-dessus du menu pour **défiler** (l'arbre complet dépasse la hauteur).
+- Les **mods** (`radio`, `bintime`, `pong`…) s'ouvrent **à droite du menu** (≥ 130 colonnes).
+- Nouveau fichier `src/tui/menu.rs` (arbre + rendu + zones cliquables).
+
+## Bot Telegram (2026-10-10)
+
+- **`zer0 telegram`** (mode CLI) ou **`/telegram on|off`** dans la TUI : bot **long polling**
+  (aucun port à ouvrir), **allowlist** (auto-claim du premier chat).
+- Texte, **vocal** (transcrit par Whisper), **fichiers** (dossier `drop/incoming`).
+- **Progression** : message `⏳` édité (appels d'outils), puis `✅ terminé` + réponse
+  finale dans un **nouveau message** (→ notification).
+- Commandes : `/help` `/new` `/status` `/progress` `/exec on|off` `/stop` `/shutdown`.
+- `/exec` désactive `code_exec` par défaut (shell à distance = sensible).
+- Token dans `~/.config/zer0/telegram.env` (chmod 600) — **jamais** dans le dépôt.
+
 ## Contexte du modèle (2026-10-09)
 
 - Le compteur `ctx N%/XXX` utilise désormais la **vraie fenêtre de contexte** du modèle,

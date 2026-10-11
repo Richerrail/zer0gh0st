@@ -32,6 +32,12 @@ pub struct GlobalConfig {
     /// Contexte du modèle en tokens (override manuel ; abs. = auto).
     #[serde(default)]
     pub context_window: Option<u64>,
+    /// Bot Telegram : token du bot (secret).
+    #[serde(default)]
+    pub telegram_token: Option<String>,
+    /// Bot Telegram : identifiants (user id) autorisés à parler au bot.
+    #[serde(default)]
+    pub telegram_allow: Vec<i64>,
 }
 
 /// Optional embedding backend, OpenAI-compatible (`/embeddings`).

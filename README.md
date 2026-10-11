@@ -115,6 +115,8 @@ Détail complet du modèle de menace : [`SAFETY.md`](./SAFETY.md).
 | **Mémoire** | store JSONL, recherche sémantique optionnelle, **enveloppe d'honnêteté** |
 | **Connaissance** | base **SQLite + FTS5** (hybride), **injection auto** dans le prompt (+ outil `knowledge_search`) |
 | **Zero-chan** | assistante vocale **intégrée à la TUI** : bloc d'état à droite du banner + boutons `0chan`/`micro` à droite de la saisie. **Réutilise le chat et l'input de l'agent**. STT = Whisper local. |
+| **Menu cliquable** | panneau **Commandes** à droite (entre zero-chan et le badge 0chan/mic) : tous les groupes/sous-commandes **cliquables** (dépliage, exécution, ou insertion dans la saisie). Molette pour défiler. |
+| **Telegram** | bot à distance : `/telegram on\|off` dans la TUI ; chat, **vocal** (Whisper), **fichiers**, `/progress`, `/exec on\|off`, `/shutdown`. **Long polling** (aucune exposition réseau). |
 | **Historique** | **conversation persistée** (JSONL), rechargée au démarrage ; `/history`, `/new` (archive la session) ; **F6** liste et recharge les sessions passées |
 | **Sélection** | clic + glisser dans le chat/saisie → surbrillance + **copie presse-papier** auto |
 | **Contexte** | compaction automatique (~4000 tokens) via le rôle `utility` |
@@ -193,7 +195,7 @@ Zer0 agit : tu décris un but, il appelle les outils nécessaires.
 
 ## 7. Commandes
 
-**TUI** (extrait) : `/help` `/think` `/provider` `/model` `/models` `/ctx` `/free` `/select` `/route`
+**TUI** (extrait) : `/help` `/think` `/provider` `/model` `/models` `/ctx` `/free` `/select` `/route` `/telegram` `/tg`
 `/role` `/project` `/memory` `/recall` `/compact` `/task` `/work` `/ask` `/review` `/search`
 `/stop` `/context` `/whoami` `/vault` `/pdf` `/jev` `/kb` `/new` `/history` `/radio` `/bintime`
 `/pong` `/kristal` `/streaming` `/retro` `/panel` `/clear` `/quit`.
