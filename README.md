@@ -36,7 +36,8 @@ le **shell** est ton terminal Unix, le **ghost** est l'IA dedans.
 12. [Documentation](#12-documentation)
 13. [Contribuer](#13-contribuer)
 14. [Crédits](#14-crédits)
-15. [Licence](#15-licence)
+15. [Soutenez le projet](#soutenez-le-projet)
+16. [Licence](#16-licence)
 
 ---
 
@@ -330,7 +331,17 @@ Idées ouvertes : voir `ROADMAP*.md`.
 
 ---
 
-## 15. Licence
+## Soutenez le projet
+
+<p align="center">
+  <a href="https://www.buymeacoffee.com/richerrailk" target="_blank" rel="noopener noreferrer">
+    <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee">
+  </a>
+</p>
+
+---
+
+## 16. Licence
 
 **MIT** — usage libre, modification encouragée. Copyright (c) 2026 richerrail.
 Voir [`LICENSE`](./LICENSE).
