@@ -12,6 +12,7 @@ mod models;
 mod mods;
 mod pdf;
 mod personas;
+mod platform;
 mod providers;
 mod route;
 mod search;
@@ -1011,7 +1012,7 @@ async fn select_cmd(problem: Vec<String>) -> Result<()> {
 
 /// Append workspace/file instructions to the system prompt.
 pub(crate) fn enrich_system(system: String) -> String {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/home".to_string());
+    let home = crate::platform::home();
     format!(
         "{system}\n\n## Fichiers\n\
          - Pour écrire un fichier, utilise `text_editor` (command `create`) et mets le \

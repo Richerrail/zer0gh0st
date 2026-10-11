@@ -39,13 +39,11 @@ pub fn rec_path() -> PathBuf {
 }
 
 fn has(cmd: &str) -> bool {
-    std::env::var_os("PATH")
-        .map(|p| std::env::split_paths(&p).any(|d| d.join(cmd).exists()))
-        .unwrap_or(false)
+    crate::platform::has(cmd)
 }
 
 /// Commande d'enregistrement WAV mono 16 kHz, selon l'écosystème audio dispo :
-/// PipeWire (`pw-record`) → PulseAudio (`parecord`) → ALSA (`arecord`).
+/// PipeWire (`pw-record`) → PulseAudio (`parecord`) → ALSA (`arecord`) → SoX.
 fn recorder(path: &std::path::Path) -> Option<Command> {
     if has("pw-record") {
         let mut c = Command::new("pw-record");
@@ -67,6 +65,25 @@ fn recorder(path: &std::path::Path) -> Option<Command> {
     if has("arecord") {
         let mut c = Command::new("arecord");
         c.args(["-f", "S16_LE", "-r", "16000", "-c", "1"]).arg(path);
+        return Some(c);
+    }
+    // macOS / Windows (et Linux sans PipeWire/PulseAudio) : SoX.
+    if has("sox") {
+        let mut c = Command::new("sox");
+        c.args([
+            "-d",
+            "-r",
+            "16000",
+            "-c",
+            "1",
+            "-b",
+            "16",
+            "-e",
+            "signed-integer",
+            "-t",
+            "wav",
+        ])
+        .arg(path);
         return Some(c);
     }
     None
@@ -147,8 +164,16 @@ impl ZeroChan {
     pub fn stop_rec(&mut self) {
         self.rec_started = None;
         if let Some(mut c) = self.rec.take() {
-            let pid = c.id();
-            let _ = Command::new("kill").arg("-INT").arg(pid.to_string()).status();
+            // SIGINT = finalise proprement le WAV (Unix). Windows : kill direct.
+            #[cfg(unix)]
+            {
+                let pid = c.id();
+                let _ = Command::new("kill").arg("-INT").arg(pid.to_string()).status();
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = c.kill();
+            }
             for _ in 0..20 {
                 if let Ok(Some(_)) = c.try_wait() {
                     break;
@@ -260,7 +285,7 @@ pub async fn transcribe(path: &PathBuf) -> anyhow::Result<String> {
         m = WhisperModel('base', device='cpu', compute_type='int8')\n\
         segs, _ = m.transcribe(sys.argv[1], language='fr')\n\
         print(''.join(s.text for s in segs).strip())\n";
-    let out = tokio::process::Command::new("python3")
+    let out = tokio::process::Command::new(crate::platform::python())
         .arg("-c")
         .arg(code)
         .arg(path)

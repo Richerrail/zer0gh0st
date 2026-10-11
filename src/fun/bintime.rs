@@ -22,17 +22,6 @@ impl Default for BinTime {
     }
 }
 
-fn shell(args: &[&str]) -> String {
-    std::process::Command::new(args[0])
-        .args(&args[1..])
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .unwrap_or_default()
-        .trim()
-        .to_string()
-}
-
 impl BinTime {
     pub fn new() -> Self {
         let mut b = BinTime {
@@ -45,14 +34,16 @@ impl BinTime {
     }
 
     fn refresh(&mut self) {
-        let t = shell(&["date", "+%H %M %S"]);
-        let mut it = t.split_whitespace();
+        // « YYYY-MM-DD HH:MM:SS » (portable : `date` ou PowerShell).
+        let now = crate::platform::now();
+        let mut parts = now.splitn(2, ' ');
+        self.date = parts.next().unwrap_or("").to_string();
+        let mut it = parts.next().unwrap_or("").split(':');
         self.hms = (
             it.next().and_then(|s| s.parse().ok()).unwrap_or(0),
             it.next().and_then(|s| s.parse().ok()).unwrap_or(0),
             it.next().and_then(|s| s.parse().ok()).unwrap_or(0),
         );
-        self.date = shell(&["date", "+%Y-%m-%d"]);
     }
 
     pub fn tick(&mut self) {

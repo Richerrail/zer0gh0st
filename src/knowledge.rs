@@ -375,13 +375,7 @@ pub fn log_path() -> PathBuf {
 }
 
 fn now() -> String {
-    std::process::Command::new("date")
-        .arg("+%Y-%m-%d %H:%M:%S")
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.trim().to_string())
-        .unwrap_or_default()
+    crate::platform::now()
 }
 
 /// Journalise une injection : requête + sources (fichier + score).

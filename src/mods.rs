@@ -36,7 +36,7 @@ pub fn launch_kristal() -> Result<String> {
 pub fn launch_streaming() -> Result<String> {
     let script = mod_path("streaming/zero_video.py");
     require(&script)?;
-    Command::new("python3").arg(&script).spawn()?;
+    Command::new(crate::platform::python()).arg(&script).spawn()?;
     Ok(format!("🎬 streaming lancé — {}", script.display()))
 }
 
@@ -44,6 +44,6 @@ pub fn launch_streaming() -> Result<String> {
 pub fn launch_retro() -> Result<String> {
     let html = mod_path("Zer0-Retr0/index.html");
     require(&html)?;
-    Command::new("xdg-open").arg(&html).spawn()?;
+    crate::platform::open(&html.to_string_lossy())?;
     Ok(format!("🕹️ retro ouvert — {}", html.display()))
 }

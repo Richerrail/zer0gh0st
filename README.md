@@ -151,6 +151,11 @@ cd zer0gh0st
 ./target/release/zer0        # ou : ./scripts/run.sh
 ```
 
+### Binaires précompilés
+
+À chaque tag `v*`, la CI publie des binaires **Linux (x86_64)**, **macOS (Intel + Apple
+Silicon)** et **Windows (x86_64)** dans [Releases](https://github.com/Richerrail/zer0gh0st/releases).
+
 ### Mode 100 % local (aucune clé API)
 
 Place un modèle `.gguf` dans `models/` (ou pointe-le) :

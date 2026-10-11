@@ -1,5 +1,4 @@
 use serde_json::json;
-use std::process::Command;
 
 use super::ToolSpec;
 
@@ -29,8 +28,7 @@ pub fn run(args: &str) -> String {
         return "Erreur: `command` manquant".into();
     }
 
-    let mut cmd = Command::new("bash");
-    cmd.arg("-lc").arg(command);
+    let mut cmd = crate::platform::shell_command(command);
     if let Some(dir) = v.get("cwd").and_then(|x| x.as_str()) {
         cmd.current_dir(dir);
     }

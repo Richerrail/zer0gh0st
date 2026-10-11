@@ -2358,7 +2358,8 @@ fn draw_input(f: &mut Frame, area: Rect, app: &App) {
     let cwd = std::env::current_dir()
         .map(|p| {
             let s = p.display().to_string();
-            if let Ok(home) = std::env::var("HOME") {
+            let home = crate::platform::home();
+            if !home.is_empty() {
                 if let Some(rest) = s.strip_prefix(&home) {
                     return format!("~{rest}");
                 }

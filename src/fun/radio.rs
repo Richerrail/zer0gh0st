@@ -35,9 +35,7 @@ pub fn default_music_dir() -> PathBuf {
 }
 
 fn command_exists(name: &str) -> bool {
-    std::env::var_os("PATH")
-        .map(|paths| std::env::split_paths(&paths).any(|p| p.join(name).exists()))
-        .unwrap_or(false)
+    crate::platform::has(name)
 }
 
 fn is_audio(p: &Path) -> bool {
@@ -292,7 +290,7 @@ impl Radio {
 /// Minimal `~` expansion (avoids a dependency).
 fn shellexpand(s: &str) -> String {
     if let Some(rest) = s.strip_prefix("~/") {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/home".into());
+        let home = crate::platform::home();
         return format!("{home}/{rest}");
     }
     s.to_string()
