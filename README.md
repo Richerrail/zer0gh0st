@@ -309,9 +309,21 @@ Idées ouvertes : voir `ROADMAP*.md`.
 
 ---
 
-## 14. Crédits
+## 14. Crédits & remerciements
 
-- Inspirations : **Agent Zero** (Python), **Spynel**, **Synnoesis** (principe d'honnêteté).
+**Inspirations**
+- **Agent Zero** (Python) — architecture d'agent et d'outils.
+- **Spynel** — approche modulaire.
+- **pi** — [pi.dev](https://pi.dev) — référence d'ergonomie pour la CLI/TUI.
+
+**🙏 Remerciements appuyés**
+- Un **immense merci à [kioptix](https://github.com/kioptix)**, un **ami**, pour
+  **Synnoesis**. C'est de sa **philosophie d'honnêteté** que Zer0 s'inspire directement.
+  **Soutenez son travail :**
+  [github.com/kioptix/synnoesis](https://github.com/kioptix/synnoesis) ·
+  [synnoesis.dev](https://synnoesis.dev)
+
+**Divers**
 - Nom : référence à ***Ghost in the Shell***.
 - Inférence : [llama.cpp](https://github.com/ggerganov/llama.cpp) · TUI : [ratatui](https://github.com/ratatui/ratatui).
 
