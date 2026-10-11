@@ -84,6 +84,18 @@
   (modèles de raisonnement type `meta/muse-glimmer-30b`), le raisonnement est utilisé comme
   réponse au lieu d'échouer.
 
+## Ergonomie saisie & corrections (2026-10-11)
+
+- **Saisie simplifiée** : plus de cadre/règles autour de la zone de saisie — juste
+  `❯ texte` (1..=8 lignes). L'info `ctx`/modèle reste dans la barre de statut.
+- **Collage multi-ligne corrigé** : activation du **bracketed paste** + gestion de
+  `Event::Paste` → un texte collé (avec retours à la ligne) est inséré d'un bloc au lieu
+  d'envoyer le message au premier saut de ligne.
+- **`/stop` réparé** : les commandes slash sont désormais traitées **pendant une génération**
+  (avant, la garde `streaming` bloquait `/stop`).
+- **README** : section **Désinstaller** (sources, binaires précompilés, `cargo install`,
+  dossiers de données par OS).
+
 ## Qualité & CI (2026-10-11)
 
 - **CI GitHub Actions** : `cargo build --release` + `cargo clippy --all-targets -- -D warnings`

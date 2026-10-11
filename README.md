@@ -190,6 +190,28 @@ Voir [`SPEC.md`](./SPEC.md) §1 pour le périmètre exact.
 
 ---
 
+### Désinstaller
+
+| Installation | Suppression |
+|---|---|
+| **Depuis les sources** | supprime le dossier cloné : `rm -rf zer0gh0st` |
+| **Binaire précompilé** (Releases) | supprime le fichier : `rm zer0` (`zer0.exe` sous Windows) |
+| **`cargo install --path .`** | `cargo uninstall zer0` |
+
+**Données & configuration** — pour effacer aussi mémoire, historique, clés, base de connaissance :
+
+| OS | À supprimer |
+|---|---|
+| 🐧 Linux | `rm -rf ~/.config/zer0 ~/.local/share/zer0` |
+| 🍎 macOS | `rm -rf ~/Library/Application\ Support/zer0` |
+| 🪟 Windows | `%APPDATA%\zer0` et `%LOCALAPPDATA%\zer0` |
+| 🐧🍎🪟 `cargo install` | le binaire est dans `~/.cargo/bin/zer0` (`cargo uninstall zer0`) |
+
+> `zer0` (ou `zer0.exe`) est un **binaire autonome** : le supprimer ne laisse rien derrière,
+> sauf les dossiers de données ci-dessus.
+
+---
+
 ## 6. Usage & exemples
 
 Zer0 agit : tu décris un but, il appelle les outils nécessaires.

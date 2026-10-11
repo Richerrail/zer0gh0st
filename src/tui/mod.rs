@@ -28,8 +28,6 @@ mod theme {
     use ratatui::style::Color;
     pub const ACCENT: Color = Color::Rgb(255, 113, 206);
     pub const PANEL: Color = Color::Rgb(34, 23, 51);
-    pub const BORDER: Color = Color::Rgb(84, 72, 103);
-    pub const MUTED: Color = Color::Rgb(160, 144, 181);
     pub const DIM: Color = Color::Rgb(122, 108, 142);
     pub const TEXT: Color = Color::Rgb(232, 213, 255);
     pub const CODE: Color = Color::Rgb(122, 232, 255);
@@ -150,7 +148,8 @@ pub async fn run(
     let mut terminal = ratatui::init();
     let _ = crossterm::execute!(
         std::io::stdout(),
-        crossterm::event::EnableMouseCapture
+        crossterm::event::EnableMouseCapture,
+        crossterm::event::EnableBracketedPaste
     );
 
     let (input_tx, mut input_rx) = mpsc::unbounded_channel::<Event>();
@@ -250,7 +249,8 @@ pub async fn run(
 
     let _ = crossterm::execute!(
         std::io::stdout(),
-        crossterm::event::DisableMouseCapture
+        crossterm::event::DisableMouseCapture,
+        crossterm::event::DisableBracketedPaste
     );
     ratatui::restore();
     result
@@ -425,7 +425,7 @@ fn start_turn(app: &mut App, text: String, ui_tx: &UnboundedSender<UiEvent>) {
 
 fn send_message(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
     let text = app.input.trim().to_string();
-    if text.is_empty() || app.streaming {
+    if text.is_empty() {
         return;
     }
     app.input.clear();
@@ -437,8 +437,12 @@ fn send_message(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
     app.hist_pos = None;
     app.hist_draft.clear();
 
+    // Les commandes restent disponibles PENDANT une génération (/stop, /telegram…).
     if text.starts_with('/') {
         handle_command(app, &text, ui_tx);
+        return;
+    }
+    if app.streaming {
         return;
     }
 
@@ -1604,6 +1608,11 @@ fn handle_input(
     app: &mut App,
     ui_tx: &UnboundedSender<UiEvent>,
 ) {
+    // Collage (bracketed paste) : insérer tel quel, sans déclencher d'envoi.
+    if let Event::Paste(s) = &ev {
+        app.input.push_str(s);
+        return;
+    }
     // Clics souris sur les boutons 0chan / micro.
     if let Event::Mouse(me) = ev {
         use crossterm::event::{MouseButton, MouseEventKind};
@@ -2120,7 +2129,7 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
     let tokens = estimate_tokens(app);
     let line = Line::from(vec![
         Span::styled(
-            format!("Tokens {tokens}/{}", ctx_window_label(app.context_window)),
+            format!("ctx {} · {tokens} tok", ctx_label(app)),
             Style::default().fg(Color::Gray),
         ),
         Span::raw("  ·······  "),
@@ -2329,76 +2338,38 @@ fn inline_spans(text: &str, base: Style) -> Vec<Span<'static>> {
 }
 
 fn draw_input(f: &mut Frame, area: Rect, app: &App) {
-    let w = area.width as usize;
-    let border = if app.streaming { theme::BORDER } else { theme::ACCENT };
-    let pad = 1usize;
-    let inner_w = w.saturating_sub(pad * 2).max(1);
+    // Saisie simple : juste `❯ texte` (aucun cadre ni règle).
+    let prompt = "❯ ";
+    let pad = prompt.chars().count();
+    let inner_w = (area.width as usize).saturating_sub(pad).max(1);
     let text_lines = wrap_text(&app.input, inner_w);
-    let max_lines = area.height.saturating_sub(2).max(1) as usize;
+    let max_lines = area.height.max(1) as usize;
     let start = text_lines.len().saturating_sub(max_lines);
+    let base = Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD);
 
     let mut lines: Vec<Line> = Vec::new();
-    // Règle du haut (indicateur de gauche si l'agent travaille).
-    let top_left = if app.streaming { " zer0… " } else { "" };
-    lines.push(rule(w, top_left, "", border, theme::MUTED));
-    // Texte saisi.
-    for seg in &text_lines[start..] {
-        lines.push(Line::from(Span::styled(
-            format!("{}{}", " ".repeat(pad), seg),
-            Style::default().fg(theme::TEXT),
-        )));
+    for (i, seg) in text_lines[start..].iter().enumerate() {
+        if start == 0 && i == 0 {
+            lines.push(Line::from(vec![
+                Span::styled(prompt, base),
+                Span::styled(seg.clone(), Style::default().fg(theme::TEXT)),
+            ]));
+        } else {
+            lines.push(Line::from(Span::styled(
+                format!("{}{}", " ".repeat(pad), seg),
+                Style::default().fg(theme::TEXT),
+            )));
+        }
     }
-    // Règle du bas : modèle/think à gauche, ctx + dossier à droite (style Pi).
-    let left = format!(
-        " {}/{} · think:{} ",
-        app.provider_id,
-        app.model,
-        if app.thinking { "on" } else { "off" }
-    );
-    let cwd = std::env::current_dir()
-        .map(|p| {
-            let s = p.display().to_string();
-            let home = crate::platform::home();
-            if !home.is_empty() {
-                if let Some(rest) = s.strip_prefix(&home) {
-                    return format!("~{rest}");
-                }
-            }
-            s
-        })
-        .unwrap_or_default();
-    let right = format!(" ctx {} · {} ", ctx_label(app), cwd);
-    lines.push(rule(w, &left, &right, border, theme::MUTED));
-
     f.render_widget(Paragraph::new(lines), area);
 
-    if !app.streaming && w > 2 && area.height > 2 {
+    if !app.streaming && area.width as usize > pad && area.height > 0 {
         let last = text_lines.last().map(|l| l.chars().count()).unwrap_or(0) as u16;
         let row = text_lines.len().saturating_sub(1).saturating_sub(start) as u16;
-        let x = (area.x + pad as u16 + last).min(area.x + area.width.saturating_sub(2));
-        let y = area.y + 1 + row;
+        let x = (area.x + pad as u16 + last).min(area.x + area.width.saturating_sub(1));
+        let y = area.y + row;
         f.set_cursor_position(Position::new(x, y));
     }
-}
-
-/// `à la Pi : `─── left ─── right` sur toute la largeur.
-fn rule(width: usize, left: &str, right: &str, border: Color, text: Color) -> Line<'static> {
-    let mut left = left.to_string();
-    let mut right = right.to_string();
-    while left.chars().count() + right.chars().count() + 1 > width && !right.is_empty() {
-        right.pop();
-    }
-    while left.chars().count() + right.chars().count() + 1 > width && !left.is_empty() {
-        left.pop();
-    }
-    let lw = left.chars().count();
-    let rw = right.chars().count();
-    let fill = width.saturating_sub(lw + rw);
-    Line::from(vec![
-        Span::styled(left, Style::default().fg(text)),
-        Span::styled("─".repeat(fill), Style::default().fg(border)),
-        Span::styled(right, Style::default().fg(text)),
-    ])
 }
 
 fn ctx_label(app: &App) -> String {
@@ -2548,9 +2519,9 @@ fn probe_context(app: &App, ui_tx: &UnboundedSender<UiEvent>) {
 
 /// Hauteur nécessaire pour la zone de saisie (1..=8 lignes + règles haut/bas).
 fn input_height(app: &App, width: u16) -> u16 {
+    // Saisie simple : `❯ ` puis le texte, 1..=8 lignes (pas de cadre).
     let inner_w = width.saturating_sub(2).max(1) as usize;
-    let lines = wrap_text(&app.input, inner_w).len().clamp(1, 8);
-    lines as u16 + 2
+    wrap_text(&app.input, inner_w).len().clamp(1, 8) as u16
 }
 
 fn copy_selection(app: &mut App) {
