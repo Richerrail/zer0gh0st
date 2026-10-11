@@ -9,6 +9,8 @@
 
 **Version** : 0.5.0 · **Licence** : MIT · **Interface** : terminal uniquement (pas de GUI web).
 
+![Aperçu de ZER0│GH0ST](./screenshot.png)
+
 **Zer0** est un agent d'ingénierie qui vit dans un terminal. Réécrit de zéro en **Rust**,
 inspiré d'Agent Zero, Spynel et Synnoesis. Son nom — *ghost in the shell* — dit tout :
 le **shell** est ton terminal Unix, le **ghost** est l'IA dedans.

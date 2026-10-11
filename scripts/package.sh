@@ -26,6 +26,9 @@ cp Cargo.toml Cargo.lock LICENSE \
    ROADMAP.md ROADMAP_FUN.md ROADMAP_PORT_SLASH.md BRAINSTORM_ZEROCHAN.md \
    "$OUT/"
 
+# Capture d'écran (optionnelle)
+[ -f screenshot.png ] && cp screenshot.png "$OUT/"
+
 # Dossiers de contenu : gardés vides (placeholders)
 mkdir -p "$OUT/music" "$OUT/base_connaissance" "$OUT/mods"
 touch "$OUT/music/.gitkeep" "$OUT/base_connaissance/.gitkeep"
