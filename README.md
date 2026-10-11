@@ -322,6 +322,7 @@ Idées ouvertes : voir `ROADMAP*.md`.
   **Soutenez son travail :**
   [github.com/kioptix/synnoesis](https://github.com/kioptix/synnoesis) ·
   [synnoesis.dev](https://synnoesis.dev)
+  — **fork maintenu par nous :** [github.com/Richerrail/synnoesis](https://github.com/Richerrail/synnoesis)
 
 **Divers**
 - Nom : référence à ***Ghost in the Shell***.
