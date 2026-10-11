@@ -235,7 +235,7 @@ Roadmap et détails : [`BRAINSTORM_ZEROCHAN.md`](./BRAINSTORM_ZEROCHAN.md).
 
 | Chemin | Rôle |
 |---|---|
-| `~/.config/zer0/config.toml` | clés, provider/modèle actifs, routes, rôles (chmod 600) |
+| `~/.config/zer0/config.toml` | clés, provider/modèle actifs, routes, rôles (chmod 600) — modèle fourni : [`config.example.toml`](./config.example.toml) |
 | `~/.config/zer0/vault.enc` | clés chiffrées (Argon2 + ChaCha20-Poly1305) |
 | `~/.local/share/zer0/memory.jsonl` | mémoire persistante |
 | `~/.local/share/zer0/conversation.jsonl` | historique de conversation (rechargé au démarrage) |

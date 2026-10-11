@@ -21,7 +21,7 @@ cd "$ROOT"
 cp -r src scripts "$OUT/"
 
 # Sources / manifestes / licences / docs
-cp Cargo.toml Cargo.lock LICENSE \
+cp Cargo.toml Cargo.lock LICENSE config.example.toml \
    README.md SPEC.md SAFETY.md ARCHITECTURE.md ECOSYSTEM.md CHANGELOG.md \
    ROADMAP.md ROADMAP_FUN.md ROADMAP_PORT_SLASH.md BRAINSTORM_ZEROCHAN.md \
    "$OUT/"

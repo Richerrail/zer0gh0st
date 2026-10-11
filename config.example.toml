@@ -1,0 +1,57 @@
+# ─────────────────────────────────────────────────────────────
+#  Zer0│GH0ST — exemple de configuration
+#
+#  Copie ce fichier vers :   ~/.config/zer0/config.toml
+#  puis protège-le :         chmod 600 ~/.config/zer0/config.toml
+#
+#  Ceci n'est qu'un MODÈLE : rien n'est lu ici automatiquement.
+#  Tout est optionnel. Les valeurs sont des exemples commentés.
+# ─────────────────────────────────────────────────────────────
+
+# ── Clés API ────────────────────────────────────────────────
+# Recommandé : utilise plutôt des variables d'environnement :
+#   OPENROUTER_API_KEY, NVIDIA_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, ...
+# Tu peux aussi gérer les clés en CLI :
+#   zer0 provider add openrouter <clé>
+[keys]
+# openrouter = "sk-or-..."
+# nvidia     = "nvapi-..."
+
+# ── Provider et modèle actifs ───────────────────────────────
+# provider = "openrouter"
+# model    = "nvidia/nemotron-3.5-lightning:free"
+
+# ── Chaîne de bascule (failover), essayée dans l'ordre ─────
+# routes = [
+#   "openrouter/nvidia/nemotron-3.5-lightning:free",
+#   "openrouter/liquid/lfm-2.5-2.6b:free",
+# ]
+
+# ── Rôles : un modèle par type de tâche ────────────────────
+# (main, code, reasoning, writing, vision, fast, utility, review)
+# [roles]
+# main    = "openrouter/nvidia/nemotron-3.5-lightning:free"
+# code    = "openrouter/qwen/qwen3-coder:free"
+# utility = "openrouter/liquid/lfm-2.5-2.6b:free"
+
+# ── Providers personnalisés (API OpenAI-compatible) ────────
+# [custom.mon-serveur]
+# name     = "Mon serveur local"
+# base_url = "http://localhost:8080/v1"
+# env_key  = "MON_SERVEUR_API_KEY"   # optionnel
+
+# ── Mémoire sémantique (embeddings, optionnel) ─────────────
+# [embeddings]
+# provider = "local"
+# model    = "nomic-embed-text"
+
+# ── Contexte du modèle (override manuel, en tokens) ────────
+# Utile quand le provider ne rapporte pas la fenêtre de contexte
+# (sinon : table de valeurs connues, puis 200k par défaut).
+# context_window = 1000000
+
+# ── Bot Telegram ───────────────────────────────────────────
+# Préfère ~/.config/zer0/telegram.env (chmod 600) pour le token :
+#   ZER0_TELEGRAM_TOKEN=123456:ABC...
+# telegram_token = "..."
+# telegram_allow = [123456789]
