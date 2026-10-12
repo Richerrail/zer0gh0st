@@ -129,6 +129,30 @@ pub fn set_status(id: &str, status: Status) -> Result<bool> {
     Ok(found)
 }
 
+/// Supprime une tâche par id. `true` si trouvée.
+pub fn remove(id: &str) -> Result<bool> {
+    let mut tasks = load();
+    let before = tasks.len();
+    tasks.retain(|t| t.id != id);
+    let removed = tasks.len() != before;
+    if removed {
+        save(&tasks)?;
+    }
+    Ok(removed)
+}
+
+/// Supprime toutes les tâches terminées (`[x]`). Retourne le nombre supprimé.
+pub fn clear_done() -> Result<usize> {
+    let mut tasks = load();
+    let before = tasks.len();
+    tasks.retain(|t| t.status != Status::Done);
+    let n = before - tasks.len();
+    if n > 0 {
+        save(&tasks)?;
+    }
+    Ok(n)
+}
+
 /// First pending task (for the work loop).
 pub fn next_pending() -> Option<Task> {
     load().into_iter().find(|t| t.status == Status::Pending)

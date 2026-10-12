@@ -85,6 +85,8 @@ pub const TREE: &[Node] = &[
         n("done", "/task done "),
         n("claim", "/task claim"),
         n("update", "/task update "),
+        n("rm", "/task rm "),
+        n("clear", "/task clear"),
     ]),
     g("kb", &[
         n("stats", "/kb stats"),

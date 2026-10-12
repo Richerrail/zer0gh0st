@@ -311,6 +311,10 @@ enum TaskAction {
     Done { id: String },
     /// Mark a task as in progress.
     Claim { id: String },
+    /// Remove a task by id.
+    Rm { id: String },
+    /// Remove all completed ([x]) tasks.
+    Clear,
 }
 
 #[derive(Subcommand, Debug)]
@@ -691,6 +695,17 @@ fn task_cmd(action: TaskAction) -> Result<()> {
             } else {
                 println!("Tâche {id} introuvable");
             }
+        }
+        TaskAction::Rm { id } => {
+            if tasks::remove(&id)? {
+                println!("Tâche {id} supprimée");
+            } else {
+                println!("Tâche {id} introuvable");
+            }
+        }
+        TaskAction::Clear => {
+            let n = tasks::clear_done()?;
+            println!("{n} tâche(s) terminée(s) supprimée(s)");
         }
     }
     Ok(())

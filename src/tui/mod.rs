@@ -721,7 +721,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
              /recall <requête>           recherche en mémoire\n\
              /forget <id>                supprime une entrée\n\
              /compact                    résume l'historique (rôle utility)\n\
-             /task [list|add|done|claim] liste/gère les tâches\n\
+             /task [list|add|done|claim|rm|clear] gère les tâches (rm <id>, clear = enlève les [x])\n\
              /work                       exécute la prochaine tâche (sous-agent)\n\
              /ask <role> <question>      sous-agent isolé (sans outils)\n\
              /review <fichier>           relecture par le rôle review + verdict\n\
@@ -994,6 +994,33 @@ fn handle_task(app: &mut App, args: &[&str]) {
                 }
             }
         }
+        Some("rm") | Some("del") | Some("delete") => {
+            let id = args.get(1).copied().unwrap_or("");
+            if id.is_empty() {
+                app.messages
+                    .push(ChatMessage::notice("usage: /task rm <id>"));
+                return;
+            }
+            match crate::tasks::remove(id) {
+                Ok(true) => app
+                    .messages
+                    .push(ChatMessage::notice(format!("🗑️ tâche {id} supprimée"))),
+                Ok(false) => app
+                    .messages
+                    .push(ChatMessage::notice(format!("Tâche {id} introuvable"))),
+                Err(e) => app
+                    .messages
+                    .push(ChatMessage::notice(format!("Erreur: {e}"))),
+            }
+        }
+        Some("clear") => match crate::tasks::clear_done() {
+            Ok(n) => app.messages.push(ChatMessage::notice(format!(
+                "🗑️ {n} tâche(s) terminée(s) supprimée(s)"
+            ))),
+            Err(e) => app
+                .messages
+                .push(ChatMessage::notice(format!("Erreur: {e}"))),
+        },
         Some("done") | Some("claim") => {
             let id = args.get(1).copied().unwrap_or("");
             if id.is_empty() {
