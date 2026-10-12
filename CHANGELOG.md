@@ -92,6 +92,10 @@
 - **`scripts/demo.tape`** : scénario **VHS** qui rejoue commandes, raccourcis (F3–F10),
   menu (au clavier) et une petite tâche → génère un `demo.gif`.
 - **`scripts/demo.sh`** : lance VHS (message d'installation si absent) et produit la vidéo.
+- **VHS ne gère pas les touches F ni `Escape`** → commandes équivalentes ajoutées :
+  `/menu`, `/readwrite`, `/codeexec`, `/chats`, `/nudge`, `/0chan`, `/mic` (l'aperçu vidéo
+  les utilise ; elles servent aussi sans clavier F).
+- Le `demo.gif` généré **n'est pas versionné** (`.gitignore`).
 
 ## Curseur de saisie (2026-10-11)
 

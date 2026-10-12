@@ -201,6 +201,15 @@ pub fn draw(
 
     let max_scroll = rows.len().saturating_sub(inner.height as usize) as u16;
     *scroll = (*scroll).min(max_scroll);
+    // Suivre la sélection clavier (la garder visible).
+    if let Some(s) = sel {
+        let h = inner.height as usize;
+        if s < *scroll as usize {
+            *scroll = s as u16;
+        } else if s >= *scroll as usize + h {
+            *scroll = (s + 1 - h).min(max_scroll as usize) as u16;
+        }
+    }
     let start = *scroll as usize;
     let visible = rows.iter().skip(start).take(inner.height as usize);
 

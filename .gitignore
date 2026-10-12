@@ -26,3 +26,7 @@
 .env
 *.key
 *_api_key*
+
+# Démo (générée par VHS ; non versionnée)
+/demo.gif
+/demo.mp4

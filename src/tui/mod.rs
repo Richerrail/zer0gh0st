@@ -592,6 +592,38 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
         "/models" => cmd_list_models(app, ui_tx, false),
         "/ctx" => handle_ctx(app, &args),
         "/telegram" | "/tg" => handle_telegram(app, &args, ui_tx),
+        "/menu" => {
+            app.menu_focus = true;
+            app.menu_sel = 0;
+            app.messages
+                .push(ChatMessage::notice("Menu : ↑↓ naviguer · Entrée choisir (Esc pour sortir)"));
+        }
+        "/readwrite" => {
+            match args.first().copied() {
+                Some("on") => app.read_write = true,
+                Some("off") => app.read_write = false,
+                _ => app.read_write = !app.read_write,
+            }
+            let s = if app.read_write { "ON" } else { "OFF" };
+            app.messages
+                .push(ChatMessage::notice(format!("Read&Write: {s}")));
+        }
+        "/codeexec" => {
+            app.code_exec = !app.code_exec;
+            let s = if app.code_exec { "ON" } else { "OFF" };
+            app.messages
+                .push(ChatMessage::notice(format!("Code-exec: {s}")));
+            if app.code_exec {
+                app.messages.push(ChatMessage::notice(
+                    "⚠️ shell activé : les commandes s'exécutent SANS validation — tu es \
+                     responsable des erreurs.",
+                ));
+            }
+        }
+        "/chats" => app.chats_popup = Some((scan_chats(), 0)),
+        "/nudge" => nudge(app, ui_tx),
+        "/0chan" => app.zc.toggle_on(),
+        "/mic" => toggle_mic(app, ui_tx),
         "/free" => cmd_list_models(app, ui_tx, true),
         "/select" => {
             let problem = args.join(" ");
@@ -605,6 +637,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
             "Commandes:\n\
              /help                      cette aide\n\
              /tools                     liste des outils\n\
+             /menu /chats /nudge /codeexec /readwrite /0chan /mic   (= touches F2/F6/F7/F4/F3/F8/F10)\n\
              /think                     active/desactive le raisonnement\n\
              /provider [list|add|use|remove]\n\
              /provider add <id> <clé>   enregistre une clé API\n\
@@ -1767,10 +1800,11 @@ fn handle_input(
                             menu::Hit::Cmd(code) => {
                                 if code.ends_with(' ') {
                                     input_set(app, code.to_string());
-                                    app.menu_focus = false;
                                 } else {
                                     handle_command(app, code, ui_tx);
                                 }
+                                // Après exécution, on rend la main à la saisie.
+                                app.menu_focus = false;
                             }
                         }
                     }

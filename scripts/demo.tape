@@ -1,8 +1,8 @@
 # ZER0│GH0ST — démo automatisée (VHS : github.com/charmbracelet/vhs)
-# Génère un GIF/MP4 en rejouant les commandes, les raccourcis et une tâche.
-#   ./scripts/demo.sh           (ou)   vhs scripts/demo.tape
+#   ./scripts/demo.sh        (ou)   vhs scripts/demo.tape
 #
-# Le provider/modèle utilisé est celui de la config au démarrage.
+# NOTE : VHS ne sait pas envoyer les touches F1–F12 ni Escape → on utilise les
+# commandes équivalentes (/menu, /readwrite, /codeexec, /chats, /nudge, /0chan, /mic).
 
 Output demo.gif
 Set Shell bash
@@ -53,74 +53,47 @@ Type "/whoami"
 Enter
 Sleep 1200ms
 
-# ── Menu cliquable au clavier : F2 puis ↑↓ / Entrée ───────
-Key F2
-Sleep 1s
-Key Down
-Key Down
-Key Down
-Key Down
-Key Down
-Key Down
-Key Down
-Key Down
-Key Down
-Key Down
-Key Down
-Key Down
-Key Down
-Key Down
-Key Down
-Key Down
-Key Down
-Key Down
-Key Down
-Key Down
-Key Down
-Key Down
-Key Down
-Key Down
-Key Down
-Key Enter
-Sleep 1s
-Key Down
-Key Enter
+# ── Menu « Commandes » au clavier (/menu puis ↓ / Entrée) ─
+Type "/menu"
+Enter
+Sleep 800ms
+Down 25
+Sleep 600ms
+Enter
+Sleep 800ms
+Down 2
+Enter
 Sleep 2s
-Key Escape
-Sleep 500ms
 Type "/panel"
 Enter
 Sleep 1s
 
-# ── Raccourcis clavier ────────────────────────────────────
-Key F3
+# ── Raccourcis clavier (équivalents de F3–F10) ────────────
+Type "/readwrite"
+Enter
 Sleep 1s
-Key F4
+Type "/codeexec"
+Enter
 Sleep 1s
-Key F5
-Sleep 2s
-Key F6
-Sleep 2s
-Key Escape
+Type "/chats"
+Enter
+Sleep 1500ms
+Type "q"
 Sleep 1s
-Key F7
+Type "/nudge"
+Enter
 Sleep 3s
-Key F8
+Type "/0chan"
+Enter
 Sleep 1s
-Key F10
+Type "/mic"
+Enter
 Sleep 1s
 
 # ── Une petite tâche (provider/modèle de la config) ───────
 Type "En une phrase, à quoi sert ce projet ?"
 Enter
 Sleep 25s
-
-# ── Un module fun ─────────────────────────────────────────
-Type "/bintime"
-Enter
-Sleep 2s
-Key Escape
-Sleep 500ms
 
 # ── Quitter ───────────────────────────────────────────────
 Type "/quit"

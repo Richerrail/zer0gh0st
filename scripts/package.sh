@@ -77,6 +77,10 @@ cat > "$OUT/.gitignore" <<'EOF'
 .env
 *.key
 *_api_key*
+
+# Démo (générée par VHS ; non versionnée)
+/demo.gif
+/demo.mp4
 EOF
 
 # mods/README.md public
