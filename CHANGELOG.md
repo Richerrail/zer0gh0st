@@ -84,6 +84,15 @@
   (modèles de raisonnement type `meta/muse-glimmer-30b`), le raisonnement est utilisé comme
   réponse au lieu d'échouer.
 
+## Démo automatisée + menu au clavier (2026-10-11)
+
+- **Menu « Commandes » au clavier** : **`F2`** donne le focus, **`↑`/`↓`** naviguent,
+  **`Entrée`** déplie/exécute, **`Esc`** quitte le menu. Le clic souris fonctionne toujours.
+  (Permet d'automatiser le menu dans une vidéo.)
+- **`scripts/demo.tape`** : scénario **VHS** qui rejoue commandes, raccourcis (F3–F10),
+  menu (au clavier) et une petite tâche → génère un `demo.gif`.
+- **`scripts/demo.sh`** : lance VHS (message d'installation si absent) et produit la vidéo.
+
 ## Curseur de saisie (2026-10-11)
 
 - **Déplacement du curseur** dans la barre de saisie : `←` `→`, `Suppr`, `Ctrl+A` (début),

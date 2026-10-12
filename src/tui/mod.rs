@@ -114,6 +114,9 @@ pub struct App {
     /// Défilement du menu + sa zone écran (pour la molette).
     pub menu_scroll: u16,
     pub menu_rect: Rect,
+    /// Navigation clavier du menu (F2) : focus + index sélectionné.
+    pub menu_focus: bool,
+    pub menu_sel: usize,
 }
 
 impl App {
@@ -222,6 +225,8 @@ pub async fn run(
         menu_hits: Vec::new(),
         menu_scroll: 0,
         menu_rect: Rect::default(),
+        menu_focus: false,
+        menu_sel: 0,
         thinking: options.thinking,
         max_tokens: options.max_tokens,
         temperature: options.temperature,
@@ -1629,20 +1634,23 @@ fn handle_input(
                     app.zc.toggle_on();
                 } else if inside(app.btn_mic) {
                     toggle_mic(app, ui_tx);
-                } else if let Some((code, is_group)) = app
+                } else if let Some((idx, code, is_group)) = app
                     .menu_hits
                     .iter()
-                    .find(|(r, _)| {
+                    .enumerate()
+                    .find(|(_, (r, _))| {
                         me.column >= r.x
                             && me.column < r.x + r.width
                             && me.row >= r.y
                             && me.row < r.y + r.height
                     })
-                    .map(|(_, h)| match h {
-                        menu::Hit::Group(l) => (*l, true),
-                        menu::Hit::Cmd(c) => (*c, false),
+                    .map(|(i, (_, h))| match h {
+                        menu::Hit::Group(l) => (i, *l, true),
+                        menu::Hit::Cmd(c) => (i, *c, false),
                     })
                 {
+                    app.menu_focus = true;
+                    app.menu_sel = idx;
                     if is_group {
                         app.menu_open = if app.menu_open == Some(code) {
                             None
@@ -1736,6 +1744,42 @@ fn handle_input(
             }
             return;
         }
+        // Menu « Commandes » au clavier (focus via F2).
+        if app.menu_focus {
+            match k.code {
+                KeyCode::Up => app.menu_sel = app.menu_sel.saturating_sub(1),
+                KeyCode::Down => {
+                    if !app.menu_hits.is_empty() {
+                        app.menu_sel = (app.menu_sel + 1).min(app.menu_hits.len() - 1);
+                    }
+                }
+                KeyCode::Enter => {
+                    let hit = app.menu_hits.get(app.menu_sel).map(|(_, h)| *h);
+                    if let Some(hit) = hit {
+                        match hit {
+                            menu::Hit::Group(label) => {
+                                app.menu_open = if app.menu_open == Some(label) {
+                                    None
+                                } else {
+                                    Some(label)
+                                };
+                            }
+                            menu::Hit::Cmd(code) => {
+                                if code.ends_with(' ') {
+                                    input_set(app, code.to_string());
+                                    app.menu_focus = false;
+                                } else {
+                                    handle_command(app, code, ui_tx);
+                                }
+                            }
+                        }
+                    }
+                }
+                KeyCode::Esc | KeyCode::F(2) => app.menu_focus = false,
+                _ => {}
+            }
+            return;
+        }
         // Side panel focus (right pane).
         if app.side_mode.is_some() && app.focus_panel {
             let is_radio = app.side_mode == Some(crate::fun::Mode::Radio);
@@ -1782,6 +1826,10 @@ fn handle_input(
                 app.cursor = app.input.chars().count();
             }
             KeyCode::Char(ch) => input_insert(app, ch),
+            KeyCode::F(2) => {
+                app.menu_focus = true;
+                app.menu_sel = app.menu_sel.min(app.menu_hits.len().saturating_sub(1));
+            }
             KeyCode::F(3) => {
                 app.read_write = !app.read_write;
                 let state = if app.read_write { "ON" } else { "OFF" };
@@ -2105,7 +2153,12 @@ fn draw_agent(f: &mut Frame, area: Rect, app: &mut App, show_menu: bool) {
         draw_chat(f, cols[0], app);
         app.menu_rect = cols[1];
         let open = app.menu_open;
-        menu::draw(f, cols[1], open, &mut app.menu_scroll, &mut app.menu_hits);
+        let sel = if app.menu_focus {
+            Some(app.menu_sel)
+        } else {
+            None
+        };
+        menu::draw(f, cols[1], open, &mut app.menu_scroll, &mut app.menu_hits, sel);
     } else {
         app.menu_hits.clear();
         app.menu_rect = Rect::default();

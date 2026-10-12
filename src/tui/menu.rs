@@ -135,12 +135,14 @@ pub const TREE: &[Node] = &[
 ];
 
 /// Dessine le menu et remplit `hits` (coordonnées écran). `scroll` est ajusté.
+/// `sel` = index sélectionné au clavier (surbrillance).
 pub fn draw(
     f: &mut Frame,
     area: Rect,
     open: Option<&'static str>,
     scroll: &mut u16,
     hits: &mut Vec<(Rect, Hit)>,
+    sel: Option<usize>,
 ) {
     hits.clear();
     if area.width < 10 || area.height < 3 {
@@ -182,11 +184,16 @@ pub fn draw(
         }
     }
 
+    let title = if sel.is_some() {
+        " Commandes ↑↓ ↵ Esc "
+    } else {
+        " Commandes "
+    };
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Rgb(110, 95, 140)))
         .title(Span::styled(
-            " Commandes ",
+            title,
             Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
         ));
     let inner = block.inner(area);
@@ -197,12 +204,19 @@ pub fn draw(
     let start = *scroll as usize;
     let visible = rows.iter().skip(start).take(inner.height as usize);
 
+    const SEL_BG: Color = Color::Rgb(72, 33, 75);
     let mut lines: Vec<Line> = Vec::new();
+    let mut i = 0usize;
     for (y, (line, hit)) in (inner.y..).zip(visible) {
+        let mut line = line.clone();
         if let Some(h) = hit {
             hits.push((Rect { x: inner.x, y, width: inner.width, height: 1 }, *h));
+            if sel == Some(i) {
+                line = line.style(Style::default().bg(SEL_BG));
+            }
+            i += 1;
         }
-        lines.push(line.clone());
+        lines.push(line);
     }
     f.render_widget(Paragraph::new(lines), inner);
 }
