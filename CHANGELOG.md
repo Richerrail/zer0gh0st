@@ -84,6 +84,13 @@
   (modèles de raisonnement type `meta/muse-glimmer-30b`), le raisonnement est utilisé comme
   réponse au lieu d'échouer.
 
+## Curseur de saisie (2026-10-11)
+
+- **Déplacement du curseur** dans la barre de saisie : `←` `→`, `Suppr`, `Ctrl+A` (début),
+  `Ctrl+E` (fin). L'insertion, le `Backspace` et le collage se font **au niveau du curseur**.
+- Le rendu **suit le curseur** (défilement si le texte dépasse la hauteur visible).
+- Opère par **caractères** (jamais par octets).
+
 ## `/jev` lit le code complet (2026-10-11)
 
 - **Correction** : `/jev` (et `zer0 jev`) **tronquait à 20 000 octets** → analyse partielle

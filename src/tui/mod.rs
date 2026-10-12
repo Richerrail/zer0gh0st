@@ -37,6 +37,8 @@ mod theme {
 pub struct App {
     pub messages: Vec<ChatMessage>,
     pub input: String,
+    /// Position du curseur dans `input` (index **en caractères**).
+    pub cursor: usize,
     pub should_quit: bool,
     pub streaming: bool,
     pub streaming_text: String,
@@ -171,6 +173,7 @@ pub async fn run(
     let mut app = App {
         messages: vec![ChatMessage::notice("Bonjour 👋, je suis Zer0. Comment puis-je t'aider ?")],
         input: String::new(),
+        cursor: 0,
         should_quit: false,
         streaming: false,
         streaming_text: String::new(),
@@ -281,7 +284,7 @@ async fn event_loop(
                     match ev {
                         UiEvent::Voice(t) => {
                             app.zc.state = crate::zerochan::State::Idle;
-                            app.input = t;
+                            input_set(app, t);
                             send_message(app, ui_tx);
                         }
                         other => handle_ui(other, app),
@@ -429,6 +432,7 @@ fn send_message(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
         return;
     }
     app.input.clear();
+    app.cursor = 0;
 
     // Historique d'entrée (↑ le rappelle).
     if !app.history.last().map(|h| h == &text).unwrap_or(false) {
@@ -1604,7 +1608,7 @@ fn handle_input(
 ) {
     // Collage (bracketed paste) : insérer tel quel, sans déclencher d'envoi.
     if let Event::Paste(s) = &ev {
-        app.input.push_str(s);
+        input_insert_str(app, s);
         return;
     }
     // Clics souris sur les boutons 0chan / micro.
@@ -1646,7 +1650,7 @@ fn handle_input(
                             Some(code)
                         };
                     } else if code.ends_with(' ') {
-                        app.input = code.to_string();
+                        input_set(app, code.to_string());
                     } else {
                         handle_command(app, code, ui_tx);
                     }
@@ -1767,10 +1771,17 @@ fn handle_input(
             KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => app.should_quit = true,
             KeyCode::Esc => app.should_quit = true,
             KeyCode::Enter => send_message(app, ui_tx),
-            KeyCode::Backspace => {
-                app.input.pop();
+            KeyCode::Left => app.cursor = app.cursor.saturating_sub(1),
+            KeyCode::Right => {
+                app.cursor = (app.cursor + 1).min(app.input.chars().count());
             }
-            KeyCode::Char(ch) => app.input.push(ch),
+            KeyCode::Delete => input_delete(app),
+            KeyCode::Backspace => input_backspace(app),
+            KeyCode::Char('a') if k.modifiers.contains(KeyModifiers::CONTROL) => app.cursor = 0,
+            KeyCode::Char('e') if k.modifiers.contains(KeyModifiers::CONTROL) => {
+                app.cursor = app.input.chars().count();
+            }
+            KeyCode::Char(ch) => input_insert(app, ch),
             KeyCode::F(3) => {
                 app.read_write = !app.read_write;
                 let state = if app.read_write { "ON" } else { "OFF" };
@@ -2331,18 +2342,60 @@ fn inline_spans(text: &str, base: Style) -> Vec<Span<'static>> {
     out
 }
 
+/// Découpe `s` en lignes de largeur `w` (par caractères) et renvoie la position
+/// `(ligne, colonne)` du curseur (index en caractères).
+fn wrap_with_cursor(s: &str, w: usize, cursor: usize) -> (Vec<String>, usize, usize) {
+    let w = w.max(1);
+    let mut lines: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut col = 0usize;
+    let mut idx = 0usize;
+    let (mut crow, mut ccol) = (0usize, 0usize);
+    for ch in s.chars() {
+        if idx == cursor {
+            crow = lines.len();
+            ccol = col;
+        }
+        if ch == '\n' {
+            lines.push(std::mem::take(&mut cur));
+            col = 0;
+        } else {
+            if col >= w {
+                lines.push(std::mem::take(&mut cur));
+                col = 0;
+            }
+            cur.push(ch);
+            col += 1;
+        }
+        idx += 1;
+    }
+    if idx == cursor {
+        crow = lines.len();
+        ccol = col;
+    }
+    lines.push(cur);
+    (lines, crow, ccol)
+}
+
 fn draw_input(f: &mut Frame, area: Rect, app: &App) {
     // Saisie simple : juste `❯ texte` (aucun cadre ni règle).
     let prompt = "❯ ";
     let pad = prompt.chars().count();
     let inner_w = (area.width as usize).saturating_sub(pad).max(1);
-    let text_lines = wrap_text(&app.input, inner_w);
+    let (text_lines, crow, ccol) = wrap_with_cursor(&app.input, inner_w, app.cursor);
     let max_lines = area.height.max(1) as usize;
-    let start = text_lines.len().saturating_sub(max_lines);
+    // Défilement : garder le curseur visible.
+    let mut start = text_lines.len().saturating_sub(max_lines);
+    if crow < start {
+        start = crow;
+    }
+    if crow >= start + max_lines {
+        start = crow + 1 - max_lines;
+    }
     let base = Style::default().fg(theme::ACCENT).add_modifier(Modifier::BOLD);
 
     let mut lines: Vec<Line> = Vec::new();
-    for (i, seg) in text_lines[start..].iter().enumerate() {
+    for (i, seg) in text_lines.iter().enumerate().skip(start).take(max_lines) {
         if start == 0 && i == 0 {
             lines.push(Line::from(vec![
                 Span::styled(prompt, base),
@@ -2357,13 +2410,53 @@ fn draw_input(f: &mut Frame, area: Rect, app: &App) {
     }
     f.render_widget(Paragraph::new(lines), area);
 
-    if !app.streaming && area.width as usize > pad && area.height > 0 {
-        let last = text_lines.last().map(|l| l.chars().count()).unwrap_or(0) as u16;
-        let row = text_lines.len().saturating_sub(1).saturating_sub(start) as u16;
-        let x = (area.x + pad as u16 + last).min(area.x + area.width.saturating_sub(1));
+    if !app.streaming && area.height > 0 {
+        let row = crow.saturating_sub(start) as u16;
+        let x = (area.x + pad as u16 + ccol as u16).min(area.x + area.width.saturating_sub(1));
         let y = area.y + row;
         f.set_cursor_position(Position::new(x, y));
     }
+}
+
+/// Index d'octet correspondant à un index de caractères.
+fn byte_at(s: &str, char_idx: usize) -> usize {
+    s.char_indices().nth(char_idx).map(|(b, _)| b).unwrap_or(s.len())
+}
+
+fn input_set(app: &mut App, s: String) {
+    app.cursor = s.chars().count();
+    app.input = s;
+}
+
+fn input_insert(app: &mut App, ch: char) {
+    let b = byte_at(&app.input, app.cursor);
+    app.input.insert(b, ch);
+    app.cursor += 1;
+}
+
+fn input_insert_str(app: &mut App, s: &str) {
+    let b = byte_at(&app.input, app.cursor);
+    app.input.insert_str(b, s);
+    app.cursor += s.chars().count();
+}
+
+fn input_backspace(app: &mut App) {
+    if app.cursor == 0 {
+        return;
+    }
+    let b0 = byte_at(&app.input, app.cursor - 1);
+    let b1 = byte_at(&app.input, app.cursor);
+    app.input.replace_range(b0..b1, "");
+    app.cursor -= 1;
+}
+
+fn input_delete(app: &mut App) {
+    if app.cursor >= app.input.chars().count() {
+        return;
+    }
+    let b0 = byte_at(&app.input, app.cursor);
+    let b1 = byte_at(&app.input, app.cursor + 1);
+    app.input.replace_range(b0..b1, "");
 }
 
 fn ctx_label(app: &App) -> String {
@@ -2601,7 +2694,7 @@ fn history_up(app: &mut App) {
         Some(i) => app.hist_pos = Some(i - 1),
     }
     if let Some(i) = app.hist_pos {
-        app.input = app.history[i].clone();
+        input_set(app, app.history[i].clone());
     }
 }
 
@@ -2610,11 +2703,11 @@ fn history_down(app: &mut App) {
         None => {}
         Some(i) if i + 1 < app.history.len() => {
             app.hist_pos = Some(i + 1);
-            app.input = app.history[i + 1].clone();
+            input_set(app, app.history[i + 1].clone());
         }
         Some(_) => {
             app.hist_pos = None;
-            app.input = app.hist_draft.clone();
+            input_set(app, app.hist_draft.clone());
         }
     }
 }
@@ -2719,5 +2812,16 @@ mod tests {
     fn fmt_time_epochs() {
         assert_eq!(fmt_time(0), "1970-01-01 00:00");
         assert_eq!(fmt_time(1_000_000_000), "2001-09-09 01:46");
+    }
+
+    #[test]
+    fn wrap_cursor_positions() {
+        let (l, r, c) = wrap_with_cursor("abcdef", 3, 4);
+        assert_eq!(l, vec!["abc", "def"]);
+        assert_eq!((r, c), (1, 1));
+        let (_, r, c) = wrap_with_cursor("abc", 3, 3);
+        assert_eq!((r, c), (0, 3));
+        let (_, r, c) = wrap_with_cursor("a\nb", 10, 0);
+        assert_eq!((r, c), (0, 0));
     }
 }
