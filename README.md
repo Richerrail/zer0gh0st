@@ -158,11 +158,19 @@ cd zer0gh0st
 
 **Option 1 — binaire précompilé** (le plus simple), depuis [Releases](https://github.com/Richerrail/zer0gh0st/releases/latest) :
 
+- **`.zip`** (recommandé) : clic droit → **Extraire tout** (ou 7-Zip) → `zer0.exe`.
+- **`.tar.gz`** (si tu n'as **que 7-Zip**) : **deux extractions** —
+  1. clic droit sur `….tar.gz` → **7-Zip → Extraire vers « …\ »** → tu obtiens un `.tar` ;
+  2. clic droit sur ce `.tar` → **7-Zip → Extraire ici** → tu obtiens `zer0.exe`.
+
+Puis, dans **PowerShell** (pour voir la sortie) :
+
 ```powershell
-# Windows 10+ inclut `tar` (sinon 7-Zip)
-tar -xzf zer0-x86_64-pc-windows-msvc.tar.gz
 .\zer0.exe
 ```
+
+> Windows SmartScreen peut avertir (exe non signé) : *Informations complémentaires →
+> Exécuter quand même*. Sur Windows 10+, la commande `tar -xzf …` marche aussi.
 
 **Option 2 — depuis les sources** (PowerShell) :
 

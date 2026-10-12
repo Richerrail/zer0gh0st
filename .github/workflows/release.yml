@@ -44,14 +44,14 @@ jobs:
           cd target/${{ matrix.target }}/release
           tar czf ../../../zer0-${{ matrix.target }}.tar.gz zer0
 
-      - name: Package (Windows)
+      - name: Package (Windows → .zip)
         if: matrix.os == 'windows-latest'
-        shell: bash
+        shell: pwsh
         run: |
-          cd target/${{ matrix.target }}/release
-          tar czf ../../../zer0-${{ matrix.target }}.tar.gz zer0.exe
+          Compress-Archive -Path "target/${{ matrix.target }}/release/zer0.exe" `
+            -DestinationPath "zer0-${{ matrix.target }}.zip"
 
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
-          files: zer0-${{ matrix.target }}.tar.gz
+          files: zer0-${{ matrix.target }}.*
