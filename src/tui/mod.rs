@@ -1831,6 +1831,11 @@ fn handle_input(
         if k.kind != KeyEventKind::Press {
             return;
         }
+        // Ctrl+C quitte TOUJOURS (même menu/panneau/pop-up ouverts).
+        if k.code == KeyCode::Char('c') && k.modifiers.contains(KeyModifiers::CONTROL) {
+            app.should_quit = true;
+            return;
+        }
         // Fun modes take over input.
         if app.mode != crate::fun::Mode::Chat {
             match app.mode {
@@ -1916,28 +1921,48 @@ fn handle_input(
                 _ => app.menu_focus = false,
             }
         }
-        // Side panel focus (right pane).
+        // Side panel focus (right pane). On ne consomme QUE ses touches : toute
+        // autre touche (F3–F10, etc.) relâche le focus et retombe dans la saisie.
         if app.side_mode.is_some() && app.focus_panel {
             let is_radio = app.side_mode == Some(crate::fun::Mode::Radio);
             match k.code {
-                KeyCode::Tab => app.focus_panel = false,
+                KeyCode::Tab => {
+                    app.focus_panel = false;
+                    return;
+                }
                 KeyCode::Esc | KeyCode::Char('q') => {
                     app.radio.stop();
                     app.side_mode = None;
                     app.focus_panel = false;
+                    return;
                 }
-                _ if is_radio => match k.code {
-                    KeyCode::Up | KeyCode::Char('k') => app.radio.prev(),
-                    KeyCode::Down | KeyCode::Char('j') => app.radio.next(),
-                    KeyCode::Enter => app.radio.play_selected(),
-                    KeyCode::Char('n') => app.radio.next_play(),
-                    KeyCode::Char('p') => app.radio.prev_play(),
-                    KeyCode::Char('s') => app.radio.stop(),
-                    _ => {}
-                },
-                _ => {}
+                KeyCode::Up | KeyCode::Char('k') if is_radio => {
+                    app.radio.prev();
+                    return;
+                }
+                KeyCode::Down | KeyCode::Char('j') if is_radio => {
+                    app.radio.next();
+                    return;
+                }
+                KeyCode::Enter if is_radio => {
+                    app.radio.play_selected();
+                    return;
+                }
+                KeyCode::Char('n') if is_radio => {
+                    app.radio.next_play();
+                    return;
+                }
+                KeyCode::Char('p') if is_radio => {
+                    app.radio.prev_play();
+                    return;
+                }
+                KeyCode::Char('s') if is_radio => {
+                    app.radio.stop();
+                    return;
+                }
+                // Touche non gérée : on quitte le focus et on continue plus bas.
+                _ => app.focus_panel = false,
             }
-            return;
         }
         // Tab moves focus to the side panel (when one is open).
         if app.side_mode.is_some() && k.code == KeyCode::Tab {
