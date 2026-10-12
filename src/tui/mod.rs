@@ -1780,10 +1780,15 @@ fn handle_input(
                         };
                     } else if code.ends_with(' ') {
                         input_set(app, code.to_string());
+                        app.menu_focus = false;
                     } else {
                         handle_command(app, code, ui_tx);
+                        // Après une commande, on rend la main à la saisie.
+                        app.menu_focus = false;
                     }
                 } else {
+                    // Clic hors menu : on retire le focus du menu.
+                    app.menu_focus = false;
                     app.sel_anchor = Some((me.column, me.row));
                     app.sel_head = Some((me.column, me.row));
                 }
@@ -1866,13 +1871,19 @@ fn handle_input(
             return;
         }
         // Menu « Commandes » au clavier (focus via F2).
+        // Les touches gérées (↑↓ Entrée Esc) restent dans le menu ; toute autre
+        // touche RELÂCHE le focus et retombe dans la saisie normale (pas de blocage).
         if app.menu_focus {
             match k.code {
-                KeyCode::Up => app.menu_sel = app.menu_sel.saturating_sub(1),
+                KeyCode::Up => {
+                    app.menu_sel = app.menu_sel.saturating_sub(1);
+                    return;
+                }
                 KeyCode::Down => {
                     if !app.menu_hits.is_empty() {
                         app.menu_sel = (app.menu_sel + 1).min(app.menu_hits.len() - 1);
                     }
+                    return;
                 }
                 KeyCode::Enter => {
                     let hit = app.menu_hits.get(app.menu_sel).map(|(_, h)| *h);
@@ -1891,16 +1902,19 @@ fn handle_input(
                                 } else {
                                     handle_command(app, code, ui_tx);
                                 }
-                                // Après exécution, on rend la main à la saisie.
-                                app.menu_focus = false;
                             }
                         }
                     }
+                    app.menu_focus = false;
+                    return;
                 }
-                KeyCode::Esc | KeyCode::F(2) => app.menu_focus = false,
-                _ => {}
+                KeyCode::Esc | KeyCode::F(2) => {
+                    app.menu_focus = false;
+                    return;
+                }
+                // Toute autre touche : on sort du menu et on continue dessous.
+                _ => app.menu_focus = false,
             }
-            return;
         }
         // Side panel focus (right pane).
         if app.side_mode.is_some() && app.focus_panel {
