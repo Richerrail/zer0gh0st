@@ -5,6 +5,7 @@ mod config;
 mod convo;
 mod event;
 mod fun;
+mod jimmy;
 mod knowledge;
 mod llm;
 mod memory;

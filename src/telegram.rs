@@ -328,6 +328,12 @@ impl Bot {
                     .await;
                 return;
             }
+            "/jimmy" => {
+                let _ = self
+                    .send(chat_id, &format!("🐌 Jimmy : {}", crate::jimmy::reply()))
+                    .await;
+                return;
+            }
             "/stop" => {
                 crate::cancel::request();
                 let _ = self.send(chat_id, "⏹ stop demandé").await;

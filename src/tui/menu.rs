@@ -117,6 +117,8 @@ pub const TREE: &[Node] = &[
         n("jev", "/jev "),
         n("select", "/select "),
         n("search", "/search "),
+        n("jimmy", "/jimmy"),
+        n("provoke", "/provoke "),
     ]),
     g("telegram", &[
         n("on", "/telegram on"),

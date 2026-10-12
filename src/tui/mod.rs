@@ -624,6 +624,65 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
         "/nudge" => nudge(app, ui_tx),
         "/0chan" => app.zc.toggle_on(),
         "/mic" => toggle_mic(app, ui_tx),
+        "/jimmy" => {
+            let task = args.join(" ");
+            if task.is_empty() {
+                app.messages
+                    .push(ChatMessage::notice(format!("🐌 Jimmy : {}", crate::jimmy::reply())));
+            } else {
+                app.messages.push(ChatMessage::notice(format!(
+                    "🐌 Jimmy se gratte la tête… (tâche : « {task} »)"
+                )));
+                let ui = ui_tx.clone();
+                let delay = crate::jimmy::lazy_delay();
+                tokio::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                    let _ = ui.send(UiEvent::Info(format!(
+                        "🐌 Jimmy (après {delay}s) : {}",
+                        crate::jimmy::reply()
+                    )));
+                });
+            }
+        }
+        "/provoke" => {
+            let role = args.first().copied().unwrap_or("code").to_string();
+            let task = args.get(1..).map(|a| a.join(" ")).unwrap_or_default();
+            if task.trim().is_empty() {
+                app.messages
+                    .push(ChatMessage::notice("usage: /provoke <rôle> <tâche>"));
+            } else {
+                let jab = crate::jimmy::reply();
+                app.messages.push(ChatMessage::notice(format!(
+                    "🐌 Jimmy devait « {task} » → il a répondu : « {jab} »"
+                )));
+                app.messages.push(ChatMessage::notice(format!(
+                    "⚡ provocation → rôle {role}"
+                )));
+                let prompt = format!(
+                    "Le cancre Jimmy devait « {task} » et a seulement répondu : « {jab} ». \
+                     Une IA compétente ferait mieux. Fais le travail correctement : {task}"
+                );
+                let endpoints = route::chain_for_role(&app.settings(), &role);
+                let system = app.system.clone();
+                let options = ChatOptions {
+                    max_tokens: app.max_tokens,
+                    thinking: app.thinking,
+                    temperature: app.temperature,
+                };
+                let ui = ui_tx.clone();
+                tokio::spawn(async move {
+                    let res = crate::agent::subagent::run_subagent(
+                        endpoints,
+                        system,
+                        prompt,
+                        crate::tools::all(),
+                        options,
+                    )
+                    .await;
+                    let _ = ui.send(UiEvent::Info(format!("⚡ Zer0 (piqué au vif) :\n{res}")));
+                });
+            }
+        }
         "/free" => cmd_list_models(app, ui_tx, true),
         "/select" => {
             let problem = args.join(" ");
@@ -638,6 +697,8 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
              /help                      cette aide\n\
              /tools                     liste des outils\n\
              /menu /chats /nudge /codeexec /readwrite /0chan /mic   (= touches F2/F6/F7/F4/F3/F8/F10)\n\
+             /jimmy [tâche]             le cancre (répond « je sais pas »)\n\
+             /provoke <rôle> <tâche>    Jimmy d'abord, puis provoque le vrai agent\n\
              /think                     active/desactive le raisonnement\n\
              /provider [list|add|use|remove]\n\
              /provider add <id> <clé>   enregistre une clé API\n\
