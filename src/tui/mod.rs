@@ -1136,7 +1136,11 @@ fn cmd_work(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
         return;
     };
     let _ = crate::tasks::set_status(&task.id, crate::tasks::Status::Claimed);
-    let role = task.role.clone().unwrap_or_else(|| "main".to_string());
+    // Rôle de la tâche ; sinon on l'auto-détecte depuis le texte (comme un message).
+    let role = task
+        .role
+        .clone()
+        .unwrap_or_else(|| route::auto_role(&task.text).to_string());
     let endpoints = route::chain_for_role(&app.settings(), &role);
     let system = app.system.clone();
     let tools: Vec<ToolSpec> = app
