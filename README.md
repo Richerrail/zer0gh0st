@@ -143,8 +143,9 @@ micro via `pw-record` (PipeWire) → `parecord` (PulseAudio) → `arecord` (ALSA
 
 ### Depuis GitHub
 
-> 💡 **Installation automatique** (dépendances selon la distro — Debian/Ubuntu/**Kali**/
-> Fedora/Arch/openSUSE) : `./scripts/install.sh` (ou `--minimal` pour compiler seulement).
+> 💡 **Installation automatique** Linux/macOS (dépendances selon la distro —
+> Debian/Ubuntu/**Kali**/Fedora/Arch/openSUSE) : `./scripts/install.sh`
+> (ou `--minimal` pour compiler seulement). Sous Windows, voir juste en dessous.
 
 ```bash
 git clone https://github.com/Richerrail/zer0gh0st.git
@@ -152,6 +153,36 @@ cd zer0gh0st
 ./scripts/install.sh         # dépendances + build (ou : cargo build --release)
 ./target/release/zer0        # ou : ./scripts/run.sh
 ```
+
+### Windows
+
+**Option 1 — binaire précompilé** (le plus simple), depuis [Releases](https://github.com/Richerrail/zer0gh0st/releases/latest) :
+
+```powershell
+# Windows 10+ inclut `tar` (sinon 7-Zip)
+tar -xzf zer0-x86_64-pc-windows-msvc.tar.gz
+.\zer0.exe
+```
+
+**Option 2 — depuis les sources** (PowerShell) :
+
+```powershell
+winget install Rustlang.Rustup          # Rust
+winget install Git.Git                  # git
+# Compilateur C++ requis pour rusqlite :
+winget install Microsoft.VisualStudio.2022.BuildTools
+
+git clone https://github.com/Richerrail/zer0gh0st.git
+cd zer0gh0st
+cargo build --release
+.\target\release\zer0.exe
+```
+
+> - `install.sh` est un script **bash** : sous Windows, lance-le via **Git Bash**
+>   (`bash scripts/install.sh`) ou **WSL**.
+> - `code_exec` utilise **`cmd /C`** : installe **Git Bash** ou **WSL** pour disposer
+>   des commandes bash.
+> - Optionnel (voix/média) : `choco install sox ffmpeg` (Chocolatey) ou installe-les séparément.
 
 ### Binaires précompilés
 
