@@ -163,6 +163,14 @@ enum Command {
     PongFrame,
     /// Teste la transcription STT sur un fichier audio (WAV) — sans micro.
     Stt { file: String },
+    /// Jimmy le cancre — répond « je sais pas ».
+    Jimmy { task: Vec<String> },
+    /// Jimmy d'abord, puis provoque un vrai agent (rôle `code` par défaut).
+    Provoke {
+        #[arg(default_value = "code")]
+        role: String,
+        task: Vec<String>,
+    },
     /// Knowledge base (SQLite + FTS5).
     Kb {
         #[command(subcommand)]
@@ -440,9 +448,51 @@ async fn run_command(cmd: Command) -> Result<()> {
         Command::Pong => fun::run_standalone(fun::Mode::Pong),
         Command::PongFrame => fun::debug_pong_frame(),
         Command::Stt { file } => stt_cmd(file).await,
+        Command::Jimmy { task } => jimmy_cmd(task).await,
+        Command::Provoke { role, task } => provoke_cmd(role, task).await,
         Command::Kb { action } => kb_cmd(action).await,
         Command::Telegram { token, allow } => telegram::run(token, allow).await,
     }
+}
+
+async fn jimmy_cmd(task: Vec<String>) -> Result<()> {
+    let t = task.join(" ");
+    if t.trim().is_empty() {
+        println!("🐌 Jimmy : {}", jimmy::reply());
+    } else {
+        let d = jimmy::lazy_delay();
+        println!("🐌 Jimmy se gratte la tête… (tâche : « {t} »)");
+        tokio::time::sleep(std::time::Duration::from_secs(d)).await;
+        println!("🐌 Jimmy (après {d}s) : {}", jimmy::reply());
+    }
+    Ok(())
+}
+
+async fn provoke_cmd(role: String, task: Vec<String>) -> Result<()> {
+    let t = task.join(" ");
+    if t.trim().is_empty() {
+        eprintln!("usage: zer0 provoke <rôle> <tâche>");
+        return Ok(());
+    }
+    let jab = jimmy::reply();
+    println!("🐌 Jimmy devait « {t} » → il a répondu : « {jab} »");
+    println!("⚡ provocation → rôle {role}\n");
+    let settings = config::resolve();
+    let endpoints = route::chain_for_role(&settings, &role);
+    let system = DEFAULT_SYSTEM.to_string();
+    let options = ChatOptions {
+        max_tokens: 2048,
+        thinking: false,
+        temperature: 0.3,
+    };
+    let prompt = format!(
+        "Le cancre Jimmy devait « {t} » et a seulement répondu : « {jab} ». \
+         Une IA compétente ferait mieux. Fais le travail correctement : {t}"
+    );
+    let res =
+        agent::subagent::run_subagent(endpoints, system, prompt, tools::all(), options).await;
+    println!("{res}");
+    Ok(())
 }
 
 async fn stt_cmd(file: String) -> Result<()> {
