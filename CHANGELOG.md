@@ -84,6 +84,13 @@
   (modèles de raisonnement type `meta/muse-glimmer-30b`), le raisonnement est utilisé comme
   réponse au lieu d'échouer.
 
+## STT : aide au diagnostic (2026-10-11)
+
+- **`ZER0_PYTHON`** : force l'interpréteur Python (utile si `faster-whisper` est
+  dans un **venv** plutôt que dans le Python système — Ubuntu/WSL).
+- **`zer0 stt <fichier.wav>`** : teste la transcription **sans micro** (diagnostic).
+- Message d'erreur STT plus explicite (interpréteur utilisé + piste d'installation).
+
 ## Démo automatisée + menu au clavier (2026-10-11)
 
 - **Menu « Commandes » au clavier** : **`F2`** donne le focus, **`↑`/`↓`** naviguent,

@@ -292,9 +292,12 @@ pub async fn transcribe(path: &PathBuf) -> anyhow::Result<String> {
         .output()
         .await?;
     if !out.status.success() {
+        let err: String = String::from_utf8_lossy(&out.stderr).chars().take(300).collect();
         return Err(anyhow::anyhow!(
-            "{}",
-            String::from_utf8_lossy(&out.stderr).chars().take(200).collect::<String>()
+            "Échec STT (faster-whisper). Interpréteur : `{}`.\n\
+             Installe-le : `pip install faster-whisper` (ou dans un venv, puis \
+             `ZER0_PYTHON=/chemin/venv/bin/python`).\nDétail : {err}",
+            crate::platform::python()
         ));
     }
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())

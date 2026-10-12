@@ -160,6 +160,8 @@ enum Command {
     /// Hidden: dump one Pong frame (diagnostic).
     #[command(hide = true)]
     PongFrame,
+    /// Teste la transcription STT sur un fichier audio (WAV) — sans micro.
+    Stt { file: String },
     /// Knowledge base (SQLite + FTS5).
     Kb {
         #[command(subcommand)]
@@ -436,8 +438,20 @@ async fn run_command(cmd: Command) -> Result<()> {
         Command::Bintime => fun::run_standalone(fun::Mode::BinTime),
         Command::Pong => fun::run_standalone(fun::Mode::Pong),
         Command::PongFrame => fun::debug_pong_frame(),
+        Command::Stt { file } => stt_cmd(file).await,
         Command::Kb { action } => kb_cmd(action).await,
         Command::Telegram { token, allow } => telegram::run(token, allow).await,
+    }
+}
+
+async fn stt_cmd(file: String) -> Result<()> {
+    let p = std::path::PathBuf::from(&file);
+    match zerochan::transcribe(&p).await {
+        Ok(t) => {
+            println!("{t}");
+            Ok(())
+        }
+        Err(e) => Err(e),
     }
 }
 

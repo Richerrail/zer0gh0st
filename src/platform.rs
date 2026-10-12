@@ -61,14 +61,23 @@ pub fn open(path: &str) -> std::io::Result<std::process::Child> {
     }
 }
 
-/// Nom de l'interpréteur Python disponible.
-pub fn python() -> &'static str {
+/// Interpréteur Python. Priorité : `$ZER0_PYTHON`, puis `python3`, puis `python`.
+///
+/// `$ZER0_PYTHON` permet de pointer un **venv** (utile quand `faster-whisper`
+/// n'est pas installé dans le Python système, ex. Ubuntu/WSL) :
+/// `ZER0_PYTHON=~/.venvs/whisper/bin/python`.
+pub fn python() -> String {
+    if let Ok(p) = std::env::var("ZER0_PYTHON") {
+        if !p.trim().is_empty() {
+            return p;
+        }
+    }
     if has("python3") {
-        "python3"
+        "python3".to_string()
     } else if has("python") {
-        "python"
+        "python".to_string()
     } else {
-        "python3"
+        "python3".to_string()
     }
 }
 

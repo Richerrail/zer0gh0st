@@ -4,7 +4,7 @@
 # NOTE : VHS ne sait pas envoyer les touches F1–F12 ni Escape → on utilise les
 # commandes équivalentes (/menu, /readwrite, /codeexec, /chats, /nudge, /0chan, /mic).
 
-Output demo.gif
+Output demo.mp4
 Set Shell bash
 Set FontSize 14
 Set FontFamily "JetBrains Mono"
@@ -91,7 +91,7 @@ Enter
 Sleep 1s
 
 # ── Une petite tâche (provider/modèle de la config) ───────
-Type "En une phrase, à quoi sert ce projet ?"
+Type "En une phrase, écris-moi ce que tu pense du système capitaliste."
 Enter
 Sleep 25s
 
