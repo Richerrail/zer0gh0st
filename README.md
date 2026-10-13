@@ -123,7 +123,7 @@ Détail complet du modèle de menace : [`SAFETY.md`](./SAFETY.md).
 | **Zero-chan** | assistante vocale **intégrée à la TUI** : bloc d'état à droite du banner + boutons `0chan`/`micro` à droite de la saisie. **Réutilise le chat et l'input de l'agent**. STT = Whisper local. |
 | **Menu cliquable** | panneau **Commandes** à droite (entre zero-chan et le badge 0chan/mic) : tous les groupes/sous-commandes **cliquables** (dépliage, exécution, ou insertion dans la saisie). Molette pour défiler. |
 | **Telegram** | bot à distance : `/telegram on\|off` dans la TUI ; chat, **vocal** (Whisper), **fichiers**, `/progress`, `/exec on\|off`, `/shutdown`. **Long polling** (aucune exposition réseau). |
-| **Historique** | **conversation persistée** (JSONL), rechargée au démarrage ; `/history`, `/new` (archive la session) ; **F6** liste et recharge les sessions passées |
+| **Historique** | **conversation persistée** (JSONL) ; au démarrage = **nouvelle conversation** (l'ancienne est archivée, `--resume` pour reprendre) ; `/history`, `/new` ; **F6** liste/recharge les sessions |
 | **Sélection** | clic + glisser dans le chat/saisie → surbrillance + **copie presse-papier** auto |
 | **Contexte** | compaction automatique (~4000 tokens) via le rôle `utility` |
 | **Tâches** | liste Markdown `.zer0/tasks.md`, `claim/done`, boucle `/work` par sous-agent |
