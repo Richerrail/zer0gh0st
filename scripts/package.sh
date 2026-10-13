@@ -58,6 +58,7 @@ cat > "$OUT/.gitignore" <<'EOF'
 *.bin
 
 # Runtime / user data
+/data
 /knowledge.db
 /knowledge.db-*
 /knowledge.log

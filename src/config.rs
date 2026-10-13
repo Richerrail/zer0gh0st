@@ -104,58 +104,62 @@ pub fn project_path() -> PathBuf {
     PathBuf::from(".zer0").join("project.toml")
 }
 
-/// Data directory for persistent state (memory store, conversations, personas).
+/// Data directory (conversations, mémoire, personas) : **dans le projet** (`<projet>/data`).
 ///
-/// Dossier **dédié** `~/.local/share/zer0gh0st` (avant : `…/zer0`, qui se mélangeait
-/// avec l'ancien projet Python). Migre **une fois** les fichiers de l'ancien dossier.
+/// Autonome : tu copies le dossier du projet, tu gardes tout. Seule la **config/clés**
+/// reste hors du projet (`~/.config/zer0`). Migration depuis les anciens emplacements XDG.
 pub fn data_dir() -> PathBuf {
-    let dir = directories::ProjectDirs::from("", "", "zer0gh0st")
-        .map(|d| d.data_dir().to_path_buf())
-        .unwrap_or_else(|| PathBuf::from("."));
+    let dir = crate::mods::project_root().join("data");
     migrate_old_data(&dir);
     dir
 }
 
-/// Migration unique depuis l'ancien `~/.local/share/zer0`.
+/// Migration unique depuis les anciens dossiers XDG (`…/zer0gh0st`, `…/zer0`).
 fn migrate_old_data(new: &Path) {
     static ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
     ONCE.get_or_init(|| {
-        let Some(old) = directories::ProjectDirs::from("", "", "zer0")
-            .map(|d| d.data_dir().to_path_buf())
-        else {
-            return;
-        };
-        if old == *new || !old.is_dir() {
-            return;
-        }
         let _ = fs::create_dir_all(new);
-        let copy = |name: &str| {
-            let s = old.join(name);
-            let d = new.join(name);
-            if s.is_file() && !d.exists() {
-                let _ = fs::copy(&s, &d);
+        let olds: Vec<PathBuf> = ["zer0gh0st", "zer0"]
+            .iter()
+            .filter_map(|n| {
+                directories::ProjectDirs::from("", "", n).map(|d| d.data_dir().to_path_buf())
+            })
+            .collect();
+        for old in olds {
+            if old == *new || !old.is_dir() {
+                continue;
             }
-        };
-        copy("conversation.jsonl");
-        copy("memory.jsonl");
-        let op = old.join("personas");
-        let np = new.join("personas");
-        if op.is_dir() && !np.exists() {
-            let _ = fs::create_dir_all(&np);
-            if let Ok(rd) = fs::read_dir(&op) {
-                for e in rd.flatten() {
-                    let _ = fs::copy(e.path(), np.join(e.file_name()));
+            let copy = |name: &str| {
+                let s = old.join(name);
+                let d = new.join(name);
+                if s.is_file() && !d.exists() {
+                    let _ = fs::copy(&s, &d);
+                }
+            };
+            copy("conversation.jsonl");
+            copy("memory.jsonl");
+            let op = old.join("personas");
+            let np = new.join("personas");
+            if op.is_dir() {
+                let _ = fs::create_dir_all(&np);
+                if let Ok(rd) = fs::read_dir(&op) {
+                    for e in rd.flatten() {
+                        let d = np.join(e.file_name());
+                        if !d.exists() {
+                            let _ = fs::copy(e.path(), d);
+                        }
+                    }
                 }
             }
-        }
-        if let Ok(rd) = fs::read_dir(&old) {
-            for e in rd.flatten() {
-                let name = e.file_name();
-                let ns = name.to_string_lossy();
-                if ns.starts_with("conversation_") && ns.ends_with(".jsonl") {
-                    let d = new.join(&name);
-                    if !d.exists() {
-                        let _ = fs::copy(e.path(), &d);
+            if let Ok(rd) = fs::read_dir(&old) {
+                for e in rd.flatten() {
+                    let name = e.file_name();
+                    let ns = name.to_string_lossy();
+                    if ns.starts_with("conversation_") && ns.ends_with(".jsonl") {
+                        let d = new.join(&name);
+                        if !d.exists() {
+                            let _ = fs::copy(e.path(), &d);
+                        }
                     }
                 }
             }
