@@ -70,6 +70,10 @@ struct Cli {
     #[arg(long, default_value_t = false)]
     allow_exec: bool,
 
+    /// Reprendre la conversation active au démarrage (sinon : nouvelle conversation).
+    #[arg(long, default_value_t = false)]
+    resume: bool,
+
     /// Run a single prompt headlessly, print the answer, then exit.
     #[arg(long)]
     once: Option<String>,
@@ -417,6 +421,7 @@ async fn main() -> Result<()> {
         all_tools,
         options,
         cli.allow_exec,
+        cli.resume,
     )
     .await
 }

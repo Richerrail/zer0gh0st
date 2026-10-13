@@ -148,6 +148,7 @@ pub async fn run(
     all_tools: Vec<ToolSpec>,
     options: ChatOptions,
     allow_exec: bool,
+    resume: bool,
 ) -> Result<()> {
     let system = crate::enrich_system(system);
     let mut terminal = ratatui::init();
@@ -232,16 +233,24 @@ pub async fn run(
         temperature: options.temperature,
     };
 
-    // Restaure la conversation précédente (affichée aussi).
-    let restored = crate::convo::load(200);
-    if !restored.is_empty() {
-        let n = restored.len();
-        app.messages = restored.clone();
-        app.conversation = restored;
-        app.display_mark = app.messages.len();
-        app.messages.push(ChatMessage::notice(format!(
-            "🗂️ conversation restaurée ({n} messages) — /new pour repartir"
-        )));
+    // Démarrage = NOUVELLE conversation (l'ancienne est archivée → F6).
+    // Avec `--resume`, on reprend la conversation active à la place.
+    if resume {
+        let restored = crate::convo::load(200);
+        if !restored.is_empty() {
+            let n = restored.len();
+            app.messages = restored.clone();
+            app.conversation = restored;
+            app.display_mark = app.messages.len();
+            app.messages.push(ChatMessage::notice(format!(
+                "🗂️ session reprise ({n} messages) — F6 pour les autres"
+            )));
+        }
+    } else {
+        let _ = crate::convo::clear();
+        app.messages.push(ChatMessage::notice(
+            "🗂️ nouvelle conversation (précédente archivée — F6 pour la recharger)",
+        ));
     }
 
     probe_context(&app, &ui_tx);
