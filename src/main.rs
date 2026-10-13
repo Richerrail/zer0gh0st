@@ -1099,6 +1099,7 @@ async fn select_cmd(problem: Vec<String>) -> Result<()> {
 /// Append workspace/file instructions to the system prompt.
 pub(crate) fn enrich_system(system: String) -> String {
     let home = crate::platform::home();
+    let env = environment_block();
     format!(
         "{system}\n\n## Fichiers\n\
          - Pour écrire un fichier, utilise `text_editor` (command `create`) et mets le \
@@ -1109,9 +1110,34 @@ pub(crate) fn enrich_system(system: String) -> String {
          - Si le contenu est très long, écris-le en entier d'un coup ; sinon écris puis complète \
            avec `insert`/`str_replace`.\n\
          - Pour vérifier/tester, **préfère `python3 -c \"...\"`** (ou un pipe) plutôt que de créer un \
-           fichier temporaire. Si tu crées un fichier de test (ex. `check.py`), **supprime-le avec \
-           `text_editor` (`delete`) une fois la vérification OK** : ne laisse pas traîner de fichiers temporaires.\n\
-         - Crée les fichiers sous `{home}` avec un chemin absolu."
+           fichier de test (`check.py`) ; supprime-le ensuite (`text_editor` `delete`).\n\
+         - Crée les fichiers sous `{home}` avec un chemin absolu.\n\
+         {env}"
+    )
+}
+
+/// Bloc **Environnement** injecté dans le prompt : date, OS, dossiers réels, git.
+/// Réduit les hallucinations de chemins/date (l'agent « sait où il est »).
+pub(crate) fn environment_block() -> String {
+    let now = crate::platform::now();
+    let cwd = std::env::current_dir()
+        .map(|p| p.display().to_string())
+        .unwrap_or_default();
+    let root = crate::mods::project_root().display().to_string();
+    let os = format!("{} {}", std::env::consts::OS, std::env::consts::ARCH);
+    let git = if std::path::Path::new(".git").exists() {
+        "oui"
+    } else {
+        "non"
+    };
+    format!(
+        "\n\n## Environnement (réel — ne devine pas, n'invente pas de chemins)\n\
+         - Date : {now}\n\
+         - OS : {os}\n\
+         - Dossier courant (pwd) : {cwd}\n\
+         - Racine du projet : {root} — données `{root}/data`, base `{root}/knowledge.db`, tâches `{root}/.zer0`\n\
+         - Dépôt git dans le dossier courant : {git}\n\
+         - Pour connaître autre chose (fichiers, processus…), utilise `code_exec` (`ls`, `ps`, `uname`…)."
     )
 }
 

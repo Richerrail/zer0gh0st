@@ -1,3 +1,10 @@
+## Conscience de l'environnement (2026-10-13)
+
+- Bloc **## Environnement** injecté dans le prompt : **date**, **OS/arch**, **dossier
+  courant (pwd)**, **racine du projet** (data/knowledge/tasks), **git** — plus une consigne
+  « ne devine pas les chemins ».
+- Corrige les chemins inventés (`/a0/usr/workdir`, HOME…) et les erreurs de date.
+
 ## Reprise auto + dossier de données (2026-10-13)
 
 - **Fin des réponses tronquées** : `max_tokens` par défaut **2048 → 8192**, et **reprise
