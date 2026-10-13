@@ -2429,13 +2429,16 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_location(f: &mut Frame, area: Rect) {
-    let local = std::env::current_dir().map(|p| p.display().to_string()).unwrap_or_default();
+    let local = std::env::current_dir()
+        .map(|p| p.display().to_string())
+        .unwrap_or_default();
+    let project = crate::mods::project_root().display().to_string();
     let line = Line::from(vec![
         Span::styled("Local ", Style::default().fg(Color::DarkGray)),
         Span::styled(local, Style::default().fg(Color::White)),
         Span::raw("   |   "),
-        Span::styled("Remote ", Style::default().fg(Color::DarkGray)),
-        Span::styled("/a0/usr/workdir", Style::default().fg(Color::White)),
+        Span::styled("Projet ", Style::default().fg(Color::DarkGray)),
+        Span::styled(project, Style::default().fg(Color::White)),
     ]);
     f.render_widget(Paragraph::new(line), area);
 }
