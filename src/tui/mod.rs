@@ -334,6 +334,22 @@ async fn event_loop(
     Ok(())
 }
 
+/// Base system prompt + liste explicite des outils (ce modèle ignore souvent le
+/// paramètre `tools` de l'API ; il faut le lui dire dans le prompt). Utile pour
+/// les sous-agents qui reçoivent des outils (sinon le modèle « hallucine »).
+fn system_with_tools(base: &str, tools: &[ToolSpec]) -> String {
+    let mut s = base.to_string();
+    if !tools.is_empty() {
+        s.push_str(
+            "\n\n## Outils disponibles (utilise-les pour AGIR — ne dis jamais « je ne peux pas exécuter » quand un outil le permet)\n",
+        );
+        for t in tools {
+            s.push_str(&format!("- {} : {}\n", t.name, t.description));
+        }
+    }
+    s
+}
+
 fn start_turn(app: &mut App, text: String, ui_tx: &UnboundedSender<UiEvent>) {
     let role = match &app.forced_role {
         Some(r) => r.clone(),
@@ -645,11 +661,17 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
             }
         }
         "/provoke" => {
-            let role = args.first().copied().unwrap_or("code").to_string();
-            let task = args.get(1..).map(|a| a.join(" ")).unwrap_or_default();
+            // 1er mot = rôle SEULEMENT s'il est connu ; sinon tout est la tâche (rôle auto).
+            let joined = args.join(" ");
+            let (role, task) = match args.first().copied() {
+                Some(r) if route::KNOWN_ROLES.contains(&r) && args.len() > 1 => {
+                    (r.to_string(), args[1..].join(" "))
+                }
+                _ => (route::auto_role(&joined).to_string(), joined),
+            };
             if task.trim().is_empty() {
                 app.messages
-                    .push(ChatMessage::notice("usage: /provoke <rôle> <tâche>"));
+                    .push(ChatMessage::notice("usage: /provoke [rôle] <tâche>"));
             } else {
                 let jab = crate::jimmy::reply();
                 app.messages.push(ChatMessage::notice(format!(
@@ -663,7 +685,8 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
                      Une IA compétente ferait mieux. Fais le travail correctement : {task}"
                 );
                 let endpoints = route::chain_for_role(&app.settings(), &role);
-                let system = app.system.clone();
+                let tools = crate::tools::all();
+                let system = system_with_tools(&app.system, &tools);
                 let options = ChatOptions {
                     max_tokens: app.max_tokens,
                     thinking: app.thinking,
@@ -672,11 +695,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
                 let ui = ui_tx.clone();
                 tokio::spawn(async move {
                     let res = crate::agent::subagent::run_subagent(
-                        endpoints,
-                        system,
-                        prompt,
-                        crate::tools::all(),
-                        options,
+                        endpoints, system, prompt, tools, options,
                     )
                     .await;
                     let _ = ui.send(UiEvent::Info(format!("⚡ Zer0 (piqué au vif) :\n{res}")));
@@ -1142,7 +1161,6 @@ fn cmd_work(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
         .clone()
         .unwrap_or_else(|| route::auto_role(&task.text).to_string());
     let endpoints = route::chain_for_role(&app.settings(), &role);
-    let system = app.system.clone();
     let tools: Vec<ToolSpec> = app
         .all_tools
         .iter()
@@ -1151,6 +1169,7 @@ fn cmd_work(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
         })
         .cloned()
         .collect();
+    let system = system_with_tools(&app.system, &tools);
     let options = ChatOptions {
         max_tokens: app.max_tokens,
         thinking: app.thinking,

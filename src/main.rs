@@ -473,9 +473,17 @@ async fn jimmy_cmd(task: Vec<String>) -> Result<()> {
 }
 
 async fn provoke_cmd(role: String, task: Vec<String>) -> Result<()> {
-    let t = task.join(" ");
+    // Le 1er mot n'est un rôle que s'il est connu ; sinon il fait partie de la tâche.
+    let (role, t) = if route::KNOWN_ROLES.contains(&role.as_str()) {
+        (role, task.join(" "))
+    } else {
+        let mut all = vec![role];
+        all.extend(task);
+        let joined = all.join(" ");
+        (route::auto_role(&joined).to_string(), joined)
+    };
     if t.trim().is_empty() {
-        eprintln!("usage: zer0 provoke <rôle> <tâche>");
+        eprintln!("usage: zer0 provoke [rôle] <tâche>");
         return Ok(());
     }
     let jab = jimmy::reply();
