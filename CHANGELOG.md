@@ -1,3 +1,10 @@
+## Reprise auto + dossier de données (2026-10-13)
+
+- **Fin des réponses tronquées** : `max_tokens` par défaut **2048 → 8192**, et **reprise
+  automatique** quand `finish_reason=length` (jusqu'à 4 fois) → **plus besoin de F7**.
+- **Dossier de données dédié** : `~/.local/share/zer0gh0st` (avant `…/zer0`, qui se
+  mélangeait avec l'ancien projet Python). Migration auto (conversations, mémoire, personas).
+
 # Zer0 — CHANGELOG
 
 > Même court, il doit exister. Format : versions du projet (`ROADMAP.md`).

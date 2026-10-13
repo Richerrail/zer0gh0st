@@ -59,7 +59,7 @@ struct Cli {
     /// Cap the number of tokens generated per model call.
     /// Kept low by default: many providers count the *reserved* output against
     /// the rate limit, so a huge value burns free-tier quota fast.
-    #[arg(long, default_value_t = 2048)]
+    #[arg(long, default_value_t = 8192)]
     max_tokens: u32,
 
     /// Enable the model's reasoning/thinking mode (much slower on weak CPUs).

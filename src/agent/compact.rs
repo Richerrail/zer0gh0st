@@ -89,7 +89,7 @@ pub async fn compact_now(
 
     for ep in utility.iter() {
         match ep.client().stream_chat(system, &req, &[], &options, &tx).await {
-            Ok((summary, _)) if !summary.trim().is_empty() => {
+            Ok((summary, _, _)) if !summary.trim().is_empty() => {
                 let summary = summary.trim().to_string();
                 let mut out = Vec::with_capacity(recent.len() + 1);
                 out.push(ChatMessage::assistant(

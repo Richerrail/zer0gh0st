@@ -80,7 +80,7 @@ impl ApiClient {
         tools: &[ToolSpec],
         options: &ChatOptions,
         ui: &UnboundedSender<UiEvent>,
-    ) -> Result<(String, Vec<ToolCall>), ChatError> {
+    ) -> Result<(String, Vec<ToolCall>, Option<String>), ChatError> {
         let mut msgs: Vec<serde_json::Value> = Vec::with_capacity(messages.len() + 1);
         msgs.push(json!({ "role": "system", "content": system }));
         for m in messages {
@@ -266,7 +266,7 @@ impl ApiClient {
             })
             .collect();
 
-        Ok((content, calls))
+        Ok((content, calls, finish_reason))
     }
 }
 
