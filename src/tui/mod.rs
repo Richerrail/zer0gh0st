@@ -685,7 +685,16 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
                      Une IA compétente ferait mieux. Fais le travail correctement : {task}"
                 );
                 let endpoints = route::chain_for_role(&app.settings(), &role);
-                let tools = crate::tools::all();
+                // Respecte les toggles F3 (Read&Write) et F4 (Code-exec).
+                let tools: Vec<ToolSpec> = app
+                    .all_tools
+                    .iter()
+                    .filter(|t| {
+                        (t.name != "text_editor" || app.read_write)
+                            && (t.name != "code_exec" || app.code_exec)
+                    })
+                    .cloned()
+                    .collect();
                 let system = system_with_tools(&app.system, &tools);
                 let options = ChatOptions {
                     max_tokens: app.max_tokens,
