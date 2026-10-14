@@ -33,7 +33,7 @@ fi
 # Sources / manifestes / licences / docs
 cp Cargo.toml Cargo.lock LICENSE config.example.toml \
    README.md SPEC.md SAFETY.md ARCHITECTURE.md ECOSYSTEM.md CHANGELOG.md \
-   ROADMAP.md ROADMAP_FUN.md ROADMAP_PORT_SLASH.md BRAINSTORM_ZEROCHAN.md \
+   ROADMAP.md ROADMAP_FUN.md ROADMAP_PORT_SLASH.md BRAINSTORM_ZEROCHAN.md 0BOX-TEST.md \
    "$OUT/"
 
 # Images (capture d'écran + illustration hero), optionnelles

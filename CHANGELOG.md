@@ -1,3 +1,9 @@
+## Projet test 0box (2026-10-13)
+
+- **`0BOX-TEST.md`** : projet test « compteur » (8 tâches, 1 par rôle) pour valider le
+  module `0box` de @darkdober4 — dispatch, dépendances, livrables vérifiables, verdict
+  final du rôle `review`.
+
 ## Conscience de l'environnement (2026-10-13)
 
 - Bloc **## Environnement** injecté dans le prompt : **date**, **OS/arch**, **dossier
