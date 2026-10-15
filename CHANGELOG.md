@@ -1,3 +1,23 @@
+## Projet test 0box (2026-10-13)
+
+- **`0BOX-TEST.md`** : projet test « compteur » (8 tâches, 1 par rôle) pour valider le
+  module `0box` de @darkdober4 — dispatch, dépendances, livrables vérifiables, verdict
+  final du rôle `review`.
+
+## Conscience de l'environnement (2026-10-13)
+
+- Bloc **## Environnement** injecté dans le prompt : **date**, **OS/arch**, **dossier
+  courant (pwd)**, **racine du projet** (data/knowledge/tasks), **git** — plus une consigne
+  « ne devine pas les chemins ».
+- Corrige les chemins inventés (`/a0/usr/workdir`, HOME…) et les erreurs de date.
+
+## Reprise auto + dossier de données (2026-10-13)
+
+- **Fin des réponses tronquées** : `max_tokens` par défaut **2048 → 8192**, et **reprise
+  automatique** quand `finish_reason=length` (jusqu'à 4 fois) → **plus besoin de F7**.
+- **Dossier de données dédié** : `~/.local/share/zer0gh0st` (avant `…/zer0`, qui se
+  mélangeait avec l'ancien projet Python). Migration auto (conversations, mémoire, personas).
+
 # Zer0 — CHANGELOG
 
 > Même court, il doit exister. Format : versions du projet (`ROADMAP.md`).

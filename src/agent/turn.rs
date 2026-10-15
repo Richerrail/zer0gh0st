@@ -11,6 +11,8 @@ const MAX_ITERATIONS: usize = 8;
 const MAX_429_RETRIES: u32 = 2;
 /// Hard ceiling on tool calls within a single turn.
 const MAX_TOOL_CALLS: usize = 24;
+/// Reprises automatiques après une réponse tronquée (`finish_reason = length`).
+const MAX_CONTINUATIONS: u32 = 4;
 
 /// Run one user turn over an ordered endpoint chain.
 ///
@@ -33,7 +35,8 @@ pub async fn run_turn(
     crate::cancel::clear();
 
     // --- first call, with failover across the ordered chain ---
-    let mut chosen: Option<(ApiClient, String, Vec<crate::agent::history::ToolCall>)> = None;
+    let mut chosen: Option<(ApiClient, String, Vec<crate::agent::history::ToolCall>, Option<String>)> =
+        None;
     let mut last_err = String::new();
 
     'endpoints: for ep in endpoints.iter() {
@@ -50,7 +53,7 @@ pub async fn run_turn(
 
         loop {
             match client.stream_chat(&system, &messages, &tools, &options, &ui).await {
-                Ok((content, calls)) if content.trim().is_empty() && calls.is_empty() => {
+                Ok((content, calls, _)) if content.trim().is_empty() && calls.is_empty() => {
                     // Model produced nothing usable (e.g. reasoning-only) → fail over.
                     route::mark_failed(&ep.label);
                     let _ = ui.send(UiEvent::Info(format!(
@@ -60,10 +63,10 @@ pub async fn run_turn(
                     last_err = format!("réponse vide de {}", ep.label);
                     continue 'endpoints;
                 }
-                Ok((content, calls)) => {
+                Ok((content, calls, finish)) => {
                     route::clear_failed(&ep.label);
                     let _ = ui.send(UiEvent::Active(ep.label.clone()));
-                    chosen = Some((client.clone(), content, calls));
+                    chosen = Some((client.clone(), content, calls, finish));
                     break 'endpoints;
                 }
                 Err(ChatError::Setup { err, status }) => {
@@ -104,7 +107,7 @@ pub async fn run_turn(
         }
     }
 
-    let Some((client, mut content, mut calls)) = chosen else {
+    let Some((client, mut content, mut calls, mut finish)) = chosen else {
         let _ = ui.send(UiEvent::Error(format!(
             "tous les endpoints ont échoué. dernier: {last_err}"
         )));
@@ -113,12 +116,36 @@ pub async fn run_turn(
 
     let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     let mut total_calls: usize = 0;
+    let mut continuations: u32 = 0;
 
     for _ in 0..MAX_ITERATIONS {
         let assistant = ChatMessage::assistant(content.clone(), calls.clone());
         messages.push(assistant.clone());
 
         if calls.is_empty() {
+            // Réponse tronquée (limite de tokens) → on REPREND automatiquement
+            // au lieu de laisser l'utilisateur appuyer sur F7.
+            if finish.as_deref() == Some("length") && continuations < MAX_CONTINUATIONS {
+                continuations += 1;
+                messages.push(ChatMessage::user(
+                    "Continue EXACTEMENT là où tu t'es arrêté, sans répéter ce qui précède.",
+                ));
+                let _ = ui.send(UiEvent::Info(format!(
+                    "↪ réponse tronquée → reprise automatique ({continuations}/{MAX_CONTINUATIONS})"
+                )));
+                match client.stream_chat(&system, &messages, &tools, &options, &ui).await {
+                    Ok((c, cs, f)) => {
+                        content = c;
+                        calls = cs;
+                        finish = f;
+                        continue;
+                    }
+                    Err(e) => {
+                        let _ = ui.send(UiEvent::Error(format!("{e}")));
+                        return;
+                    }
+                }
+            }
             break;
         }
 
@@ -158,9 +185,10 @@ pub async fn run_turn(
 
         // subsequent calls stay on the chosen endpoint
         match client.stream_chat(&system, &messages, &tools, &options, &ui).await {
-            Ok((c, cs)) => {
+            Ok((c, cs, f)) => {
                 content = c;
                 calls = cs;
+                finish = f;
             }
             Err(e) => {
                 let _ = ui.send(UiEvent::Error(format!("{e}")));
