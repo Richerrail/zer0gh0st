@@ -123,6 +123,14 @@ const BUILTINS: &[Builtin] = &[
         signup: "https://console.anthropic.com/settings/keys",
         free: FreeKind::Paid,
     },
+    Builtin {
+        id: "zai",
+        name: "Z.ai (Zhipu GLM)",
+        base_url: "https://api.z.ai/api/paas/v4",
+        env_key: "ZAI_API_KEY",
+        signup: "https://z.ai/manage-apikey",
+        free: FreeKind::FreeTier,
+    },
 ];
 
 /// The built-in catalog only.
@@ -169,6 +177,9 @@ pub fn find(id: &str) -> Option<Provider> {
 
 fn normalize(id: &str) -> String {
     let lower = id.trim().to_ascii_lowercase();
+    // Ancien schéma `gw-<id>` → `<id>` : un seul identifiant par provider
+    // (le transport passerelle/direct est décidé par `config::resolve`).
+    let lower = lower.strip_prefix("gw-").unwrap_or(&lower).to_string();
     match lower.as_str() {
         "open-router" | "open_router" => "openrouter".into(),
         "gemini" | "googleai" | "google-ai" => "google".into(),
@@ -176,6 +187,7 @@ fn normalize(id: &str) -> String {
         "qwen" | "dashscope" | "aliyun" => "alibaba".into(),
         "grok" => "xai".into(),
         "claude" => "anthropic".into(),
+        "z.ai" | "zhipu" | "zhipuai" | "bigmodel" | "glm" => "zai".into(),
         "ollama" | "llamacpp" | "llama.cpp" | "llama-server" => "local".into(),
         other => other.into(),
     }
@@ -200,5 +212,16 @@ mod tests {
         assert_eq!(normalize("gemini"), "google");
         assert_eq!(normalize("ollama"), "local");
         assert_eq!(normalize("openai"), "openai");
+        assert_eq!(normalize("z.ai"), "zai");
+        assert_eq!(normalize("Zhipu"), "zai");
+        assert_eq!(normalize("glm"), "zai");
+    }
+
+    #[test]
+    fn zai_is_in_catalog() {
+        let p = find("z.ai").expect("provider zai introuvable");
+        assert_eq!(p.id, "zai");
+        assert_eq!(p.base_url, "https://api.z.ai/api/paas/v4");
+        assert_eq!(p.env_key, "ZAI_API_KEY");
     }
 }

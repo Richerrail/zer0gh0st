@@ -55,3 +55,19 @@
 #   ZER0_TELEGRAM_TOKEN=123456:ABC...
 # telegram_token = "..."
 # telegram_allow = [123456789]
+
+# ── Via la passerelle zer0-gw (aucune clé côté agent) ──────
+# Déploiement durci : zer0-gw détient les clés et injecte l'en-tête
+# Authorization. L'agent n'appelle que 127.0.0.1 — exfiltrer une clé
+# devient impossible (elle n'y est jamais). Voir deploy/ + SAFETY.md §7.
+# [custom.gw-openrouter]
+# name     = "OpenRouter via zer0-gw"
+# base_url = "http://127.0.0.1:8787/openrouter/v1"
+#
+# [custom.gw-nvidia]
+# name     = "NVIDIA via zer0-gw"
+# base_url = "http://127.0.0.1:8787/nvidia/v1"
+#
+# [custom.gw-local]
+# name     = "llama-server (loopback direct)"
+# base_url = "http://127.0.0.1:8787/local/v1"

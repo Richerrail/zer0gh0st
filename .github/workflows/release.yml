@@ -43,6 +43,11 @@ jobs:
         run: |
           cd target/${{ matrix.target }}/release
           tar czf ../../../zer0-${{ matrix.target }}.tar.gz zer0
+          # Binaire brut : ce que télécharge `zer0 update` (pas d'archive à extraire).
+          cp zer0 ../../../zer0-${{ matrix.target }}
+          cd ../../..
+          sha256sum "zer0-${{ matrix.target }}" "zer0-${{ matrix.target }}.tar.gz" \
+            > "SHA256SUMS.${{ matrix.target }}"
 
       - name: Package (Windows → .zip)
         if: matrix.os == 'windows-latest'
@@ -50,8 +55,42 @@ jobs:
         run: |
           Compress-Archive -Path "target/${{ matrix.target }}/release/zer0.exe" `
             -DestinationPath "zer0-${{ matrix.target }}.zip"
+          Copy-Item "target/${{ matrix.target }}/release/zer0.exe" "zer0-${{ matrix.target }}.exe"
+          $lines = @()
+          foreach ($f in @("zer0-${{ matrix.target }}.exe", "zer0-${{ matrix.target }}.zip")) {
+            $h = (Get-FileHash $f -Algorithm SHA256).Hash.ToLower()
+            $lines += "$h  $f"
+          }
+          $lines | Out-File -Encoding ascii "SHA256SUMS.${{ matrix.target }}"
 
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
-          files: zer0-${{ matrix.target }}.*
+          files: |
+            zer0-${{ matrix.target }}.*
+            SHA256SUMS.${{ matrix.target }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sums-${{ matrix.target }}
+          path: SHA256SUMS.${{ matrix.target }}
+          retention-days: 1
+
+  checksums:
+    name: SHA256SUMS (agrégé)
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sums-*
+          merge-multiple: true
+          path: sums
+
+      - name: Fusion des checksums
+        run: cat sums/SHA256SUMS.* | sort -k2 > SHA256SUMS
+
+      - name: Publier SHA256SUMS
+        uses: softprops/action-gh-release@v2
+        with:
+          files: SHA256SUMS

@@ -1,5 +1,6 @@
 mod banner;
 mod menu;
+mod picker;
 
 use anyhow::Result;
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
@@ -76,6 +77,21 @@ pub struct App {
     pub forced_role: Option<String>,
     /// Role chosen for the last message.
     pub last_role: String,
+    /// Routage par rôle actif (miroir de la config, pour l'affichage).
+    pub roles_enabled: bool,
+    /// Sélecteur ouvert (`/model` ou `/provider` sans argument).
+    pub picker: Option<picker::Picker>,
+    /// Image en attente, jointe au prochain message envoyé (data URL).
+    pub pending_image: Option<String>,
+    pub pending_image_name: Option<String>,
+    /// Ids de modèles acceptant une image, d'après le catalogue `/models`.
+    pub vision_models: Vec<String>,
+    /// Zone du fil de conversation (clic droit, molette).
+    pub chat_rect: Rect,
+    /// Défilement réellement appliqué au fil.
+    pub chat_scroll: u16,
+    /// Blocs de sortie d'outil rendus : (1ʳᵉ ligne, dernière ligne, index message).
+    pub block_ranges: Vec<(u16, u16, usize)>,
     /// Full-screen fun mode (chat by default).
     pub mode: crate::fun::Mode,
     pub radio: crate::fun::radio::Radio,
@@ -202,6 +218,14 @@ pub async fn run(
         active_endpoint: String::new(),
         forced_role: None,
         last_role: String::new(),
+        roles_enabled: config::roles_enabled(),
+        picker: None,
+        pending_image: None,
+        pending_image_name: None,
+        vision_models: Vec::new(),
+        chat_rect: Rect::default(),
+        chat_scroll: 0,
+        block_ranges: Vec::new(),
         mode: crate::fun::Mode::Chat,
         radio: crate::fun::radio::Radio::new(),
         bintime: crate::fun::bintime::BinTime::new(),
@@ -366,7 +390,15 @@ fn start_turn(app: &mut App, text: String, ui_tx: &UnboundedSender<UiEvent>) {
     };
     app.last_role = role.clone();
     let search_text = text.clone();
-    app.conversation.push(ChatMessage::user(text.clone()));
+    let mut user_msg = ChatMessage::user(text.clone());
+    if let Some(img) = app.pending_image.take() {
+        user_msg.image = Some(img);
+        if let Some(name) = app.pending_image_name.take() {
+            app.messages
+                .push(ChatMessage::notice(format!("🖼 envoyée : {name}")));
+        }
+    }
+    app.conversation.push(user_msg);
     app.messages.push(ChatMessage::user(text));
     if let Some(m) = app.conversation.last() {
         let _ = crate::convo::append(m);
@@ -377,8 +409,11 @@ fn start_turn(app: &mut App, text: String, ui_tx: &UnboundedSender<UiEvent>) {
         .first()
         .map(|e| e.label.clone())
         .unwrap_or_else(|| "—".to_string());
-    app.messages
-        .push(ChatMessage::notice(format!("🎯 rôle {role} → {target}")));
+    app.messages.push(ChatMessage::notice(if app.roles_enabled {
+        format!("🎯 rôle {role} → {target}")
+    } else {
+        format!("🎯 modèle unique → {target} (bascule désactivée)")
+    }));
     app.display_mark = app.messages.len();
     app.streaming = true;
     app.streaming_text.clear();
@@ -546,6 +581,9 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
         "/role" => handle_role(app, &args),
         "/project" => handle_project(app),
         "/memory" => handle_memory(app),
+        "/embeddings" => handle_embeddings(app, &args),
+        "/img" => handle_img(app, &args),
+        "/update" => cmd_update(app, &args, ui_tx),
         "/remember" => cmd_remember(&args, ui_tx),
         "/recall" => cmd_recall(&args, ui_tx),
         "/forget" => handle_forget(app, &args),
@@ -734,13 +772,18 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
              /help                      cette aide\n\
              /tools                     liste des outils\n\
              /menu /chats /nudge /codeexec /readwrite /0chan /mic   (= touches F2/F6/F7/F4/F3/F8/F10)\n\
+             /                          palette de commandes (filtre en tapant)\n\
              /jimmy [tâche]             le cancre (répond « je sais pas »)\n\
              /provoke <rôle> <tâche>    Jimmy d'abord, puis provoque le vrai agent\n\
              /think                     active/desactive le raisonnement\n\
-             /provider [list|add|use|remove]\n\
-             /provider add <id> <clé>   enregistre une clé API\n\
+             /provider [list|keys|add|use|remove]  (sans arg : sélection)\n\
+             /provider add <id> <clé>   dépose la clé sur zer0-gw (sinon local)\n\
+             /provider keys             clés détenues par zer0-gw\n\
              /provider use <id>         change de provider\n\
-             /model                     modèle actuel\n\
+             /model                     modèle actuel + sélection (liste)\n\
+             /img <chemin>              joint une image au prochain message (vision)\n\
+             /update [check]            met à jour le binaire (Releases GitHub)\n\
+             Ctrl+O / clic droit        déplier CE bloc de sortie d'outil\n\
              /model use <id>            change de modèle\n\
              /models [free]             liste les modèles du provider\n\
              /ctx [N|1M|auto]           contexte du modèle (auto/override)\n\
@@ -750,10 +793,12 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
              /route auto [n]            remplit la chaîne avec les modèles :free\n\
              /route add <provider>/<model>\n\
              /role [list]               rôles et modèles associés\n\
+             /role off|on               off = un seul modèle, sans bascule ; on = routage\n\
              /role set <role> <p>/<m>   associe un modèle à un rôle\n\
              /role use <role>|auto      force un rôle ou repasse en auto\n\
              /project                   config du projet courant\n\
              /memory                    entrées + honnêteté du store\n\
+             /embeddings set <p> <m>    embedder de la mémoire sémantique\n\
              /remember <texte>           sauvegarde en mémoire\n\
              /recall <requête>           recherche en mémoire\n\
              /forget <id>                supprime une entrée\n\
@@ -789,12 +834,41 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
 
 fn handle_provider(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
     match args.first().copied() {
-        None | Some("list") => {
+        None => {
+            let gw = config::gateway_enabled();
+            let items: Vec<picker::Item> = providers::all()
+                .into_iter()
+                .map(|p| {
+                    let note = if p.free == providers::FreeKind::Local {
+                        "local".to_string()
+                    } else if gw && !p.custom {
+                        "passerelle (clé dans zer0-gw)".to_string()
+                    } else if config::key_for(&p).is_some() {
+                        "clé locale ✓".to_string()
+                    } else {
+                        "—".to_string()
+                    };
+                    picker::Item {
+                        id: p.id.clone(),
+                        label: format!("{} — {}", p.id, p.name),
+                        note,
+                    }
+                })
+                .collect();
+            app.picker = Some(picker::Picker::new(
+                "Providers",
+                items,
+                picker::Kind::Provider,
+            ));
+        }
+        Some("list") => {
             let mut s = String::from("Providers (clé = variable d'env ou config):\n");
             for p in providers::all() {
                 let active = if p.id == app.provider_id { "*" } else { " " };
                 let key = if p.free == providers::FreeKind::Local {
                     "local".to_string()
+                } else if config::gateway_enabled() && !p.custom {
+                    "gw".to_string() // clé détenue par la passerelle
                 } else if config::key_for(&p).is_some() {
                     "clé ✓".to_string()
                 } else {
@@ -811,21 +885,40 @@ fn handle_provider(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent
                     tag
                 ));
             }
-            s.push_str("\n/provider add <id> [clé]  ·  /provider use <id>  ·  /provider add-custom <id> <base_url>");
+            s.push_str("\n/provider add <id> [clé]  ·  /provider use <id>  ·  /provider keys  ·  /provider remove <id>");
             app.messages.push(ChatMessage::notice(s));
         }
         Some("add") => {
             let id = args.get(1).copied().unwrap_or("");
             let key = args.get(2).copied().unwrap_or("");
             match providers::find(id) {
-                Some(p) if !key.is_empty() => {
-                    let mut g = config::load_global();
-                    g.keys.insert(p.id.clone(), key.to_string());
-                    match config::save_global(&g) {
-                        Ok(()) => app.messages.push(ChatMessage::notice(format!("Clé enregistrée pour {}", p.name))),
-                        Err(e) => app.messages.push(ChatMessage::notice(format!("Erreur: {e}"))),
+                Some(p) if !key.is_empty() => match crate::gwclient::add_key_flow(&p.id, key) {
+                    Ok(crate::gwclient::AddRoute::ViaGateway { provider_id }) => {
+                        let mut g = config::load_global();
+                        let (name, base_url) =
+                            crate::gwclient::activate_provider(&mut g, &provider_id);
+                        app.provider_id = provider_id;
+                        app.provider_name = name.clone();
+                        app.base_url = base_url;
+                        app.api_key = None; // ← la clé n'est pas ici, et c'est voulu
+                        app.messages.push(ChatMessage::notice(format!(
+                            "🔑 Clé déposée sur zer0-gw (écriture seule). Provider actif : {name} — aucune clé stockée localement."
+                        )));
+                        probe_context(app, ui_tx);
                     }
-                }
+                    Ok(crate::gwclient::AddRoute::Local) => {
+                        let mut g = config::load_global();
+                        g.keys.insert(p.id.clone(), key.to_string());
+                        match config::save_global(&g) {
+                            Ok(()) => app.messages.push(ChatMessage::notice(format!(
+                "⚠ zer0-gw injoignable — clé stockée localement pour {} (durcissement ignoré)",
+                                p.name
+                            ))),
+                            Err(e) => app.messages.push(ChatMessage::notice(format!("Erreur: {e}"))),
+                        }
+                    }
+                    Err(e) => app.messages.push(ChatMessage::notice(format!("zer0-gw : {e}"))),
+                },
                 Some(p) => {
                     // try the provider's environment variable
                     let from_env = if p.env_key.is_empty() {
@@ -888,9 +981,30 @@ fn handle_provider(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent
                 None => app.messages.push(ChatMessage::notice(format!("Provider inconnu: {id}"))),
             }
         }
+        Some("keys") => {
+            if !crate::gwclient::probe() {
+                app.messages.push(ChatMessage::notice(
+                    "zer0-gw injoignable — lance-le (sudo systemctl start zer0-gw) pour gérer les clés hors de l'agent."
+                        .to_string(),
+                ));
+                return;
+            }
+            match crate::gwclient::list_keys() {
+                Ok(keys) => {
+                    let mut s = String::from("Clés détenues par zer0-gw (l'agent n'en a aucune) :\n");
+                    for (id, has) in keys {
+                        s.push_str(&format!(" {:<14} {}\n", id, if has { "clé ✓" } else { "—" }));
+                    }
+                    s.push_str("\nDéposer : /provider add <id> <clé>   ·   Oublier : /provider remove <id>");
+                    app.messages.push(ChatMessage::notice(s));
+                }
+                Err(e) => app.messages.push(ChatMessage::notice(format!("zer0-gw : {e}"))),
+            }
+        }
         Some("remove") => {
             let id = args.get(1).copied().unwrap_or("");
             if let Some(p) = providers::find(id) {
+                let _ = crate::gwclient::delete_key(&p.id); // oublie aussi côté zer0-gw
                 let mut g = config::load_global();
                 g.keys.remove(&p.id);
                 let removed_custom = g.custom.remove(&p.id).is_some();
@@ -904,21 +1018,236 @@ fn handle_provider(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent
                 app.messages.push(ChatMessage::notice(format!("Provider inconnu: {id}")));
             }
         }
-        _ => app.messages.push(ChatMessage::notice("usage: /provider [list|add|use|remove]")),
+        _ => app.messages.push(ChatMessage::notice("usage: /provider [list|keys|add|use|remove]")),
     }
+}
+
+/// Touches quand un sélecteur est ouvert.
+fn handle_picker_key(key: crossterm::event::KeyEvent, app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
+    match key.code {
+        KeyCode::Esc => app.picker = None,
+        KeyCode::Up => {
+            if let Some(p) = app.picker.as_mut() {
+                p.move_sel(-1)
+            }
+        }
+        KeyCode::Down => {
+            if let Some(p) = app.picker.as_mut() {
+                p.move_sel(1)
+            }
+        }
+        KeyCode::PageUp => {
+            if let Some(p) = app.picker.as_mut() {
+                p.page(-1, 10)
+            }
+        }
+        KeyCode::PageDown => {
+            if let Some(p) = app.picker.as_mut() {
+                p.page(1, 10)
+            }
+        }
+        KeyCode::Backspace => {
+            if let Some(p) = app.picker.as_mut() {
+                p.pop_char()
+            }
+        }
+        KeyCode::Char(c) => {
+            if let Some(p) = app.picker.as_mut() {
+                p.push_char(c)
+            }
+        }
+        KeyCode::Enter => {
+            let Some(p) = app.picker.take() else { return };
+            let Some(item) = p.selected().cloned() else {
+                return;
+            };
+            match p.kind {
+                picker::Kind::Model => set_model(app, &item.id, ui_tx),
+                picker::Kind::Provider => set_provider(app, &item.id, ui_tx),
+                picker::Kind::Command => {
+                    // Une commande finissant par un espace attend un argument :
+                    // on l'insère ; les autres s'exécutent.
+                    if item.id.ends_with(' ') {
+                        input_set(app, item.id.clone());
+                    } else {
+                        handle_command(app, &item.id, ui_tx);
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Applique un modèle (refuse les embedders pour le chat).
+fn set_model(app: &mut App, m: &str, ui_tx: &UnboundedSender<UiEvent>) {
+    if select::is_embedding_or_rerank(m) {
+        app.messages.push(ChatMessage::notice(format!(
+            "❌ {m} est un modèle d'embedding/rerank — inutilisable en chat \
+             (endpoint /embeddings). Modèle inchangé : {}",
+            app.model
+        )));
+        return;
+    }
+    let mut g = config::load_global();
+    g.model = Some(m.to_string());
+    let _ = config::save_global(&g);
+    app.model = m.to_string();
+    probe_context(app, ui_tx);
+    app.messages.push(ChatMessage::notice(format!("Modèle actif: {m}")));
+}
+
+/// Applique un provider (le transport passerelle/direct est recalculé).
+fn set_provider(app: &mut App, id: &str, ui_tx: &UnboundedSender<UiEvent>) {
+    match providers::find(id) {
+        Some(p) => {
+            let mut g = config::load_global();
+            g.provider = Some(p.id.to_string());
+            if let Some(d) = providers::default_model(&p.id) {
+                g.model = Some(d.to_string());
+            }
+            let _ = config::save_global(&g);
+            let s = config::resolve();
+            app.provider_id = s.provider_id.clone();
+            app.provider_name = s.provider_name.clone();
+            app.base_url = s.base_url.clone();
+            app.api_key = s.api_key.clone();
+            app.model = s.model.clone();
+            app.messages
+                .push(ChatMessage::notice(format!("Provider actif: {}", p.name)));
+            probe_context(app, ui_tx);
+        }
+        None => app.messages.push(ChatMessage::notice(format!("Provider inconnu: {id}"))),
+    }
+}
+
+/// `/update [check]` : met à jour le binaire depuis les Releases GitHub.
+fn cmd_update(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
+    let check = matches!(args.first().copied(), Some("check") | Some("--check"));
+    app.messages
+        .push(ChatMessage::notice("⏳ vérification des mises à jour…"));
+    let ui = ui_tx.clone();
+    tokio::spawn(async move {
+        let msg = match crate::update::run(check, false).await {
+            Ok(m) => m,
+            Err(e) => format!("échec : {e}"),
+        };
+        let _ = ui.send(UiEvent::Info(format!("⬆ {msg}")));
+    });
+}
+
+/// `/img <chemin>` : joint une image (PNG/JPEG/WebP/GIF) au **prochain** message.
+/// Nécessite un modèle multimodal (vision) ; avertit honnêtement sinon.
+fn handle_img(app: &mut App, args: &[&str]) {
+    match args.first().copied() {
+        None | Some("show") => match &app.pending_image_name {
+            Some(n) => app.messages.push(ChatMessage::notice(format!(
+                "🖼 en attente : {n} — jointe au prochain message · /img clear"
+            ))),
+            None => app.messages.push(ChatMessage::notice(
+                "usage: /img <chemin>  (jointe au prochain message) · /img clear",
+            )),
+        },
+        Some("clear") | Some("off") => {
+            app.pending_image = None;
+            app.pending_image_name = None;
+            app.messages.push(ChatMessage::notice("Image retirée."));
+        }
+        Some(path) => {
+            let (data_url, size) = match crate::platform::image_data_url(path) {
+                Ok(v) => v,
+                Err(e) => {
+                    app.messages.push(ChatMessage::notice(e));
+                    return;
+                }
+            };
+            app.pending_image = Some(data_url);
+            app.pending_image_name = Some(format!("{path} ({:.0} Kio)", size as f64 / 1024.0));
+
+            // Garde-fou : le modèle actif accepte-t-il les images ?
+            let note = if app.vision_models.iter().any(|id| id == &app.model) {
+                format!("✓ {} accepte les images (catalogue)", app.model)
+            } else if !app.vision_models.is_empty() {
+                format!(
+                    "⚠ {} n'accepte PAS les images d'après le catalogue — choisis un modèle 🖼 avec /model",
+                    app.model
+                )
+            } else if select::supports_images_by_name(&app.model) {
+                format!("~ {} : nom suggérant un modèle multimodal", app.model)
+            } else {
+                format!(
+                    "⚠ {} : le nom ne suggère pas un modèle multimodal — l'envoi peut échouer (le provider le dira)",
+                    app.model
+                )
+            };
+            app.messages.push(ChatMessage::notice(format!(
+                "🖼 image attachée (prochain message) : {path}\n{note}"
+            )));
+        }
+    }
+}
+
+/// Ouvre la palette de commandes (filtrable) depuis l'arbre du menu cliquable.
+fn open_command_palette(app: &mut App) {
+    let items: Vec<picker::Item> = menu::flat_commands()
+        .into_iter()
+        .map(|(code, label)| picker::Item {
+            id: code.clone(),
+            label: code,
+            note: label,
+        })
+        .collect();
+    app.picker = Some(picker::Picker::new(
+        "Commandes",
+        items,
+        picker::Kind::Command,
+    ));
+}
+
+/// Récupère la liste des modèles du provider actif puis ouvre le sélecteur.
+fn cmd_pick_model(ui_tx: &UnboundedSender<UiEvent>) {
+    let settings = config::resolve();
+    let Some(provider) = providers::find(&settings.provider_id) else {
+        return;
+    };
+    let key = settings.api_key.clone();
+    let ui = ui_tx.clone();
+    tokio::spawn(async move {
+        let http = reqwest::Client::new();
+        match models::list(&http, &provider, key.as_deref()).await {
+            Ok(list) => {
+                let _ = ui.send(UiEvent::ModelList(list));
+            }
+            Err(e) => {
+                let _ = ui.send(UiEvent::Info(format!("Erreur modèles {}: {e}", provider.name)));
+            }
+        }
+    });
 }
 
 fn handle_model(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
     let model = match args.first().copied() {
         Some("use") | Some("set") => args.get(1).copied(),
         None => {
-            app.messages.push(ChatMessage::notice(format!("Modèle actuel: {}", app.model)));
+            app.messages.push(ChatMessage::notice(format!(
+                "Modèle actuel: {} — sélection ci-dessous",
+                app.model
+            )));
+            cmd_pick_model(ui_tx);
             return;
         }
         Some(m) => Some(m),
     };
     match model {
         Some(m) => {
+            if select::is_embedding_or_rerank(m) {
+                app.messages.push(ChatMessage::notice(format!(
+                    "❌ {m} est un modèle d'embedding/rerank — inutilisable en chat \
+                     (endpoint /embeddings). Modèle inchangé : {}",
+                    app.model
+                )));
+                return;
+            }
             let mut g = config::load_global();
             g.model = Some(m.to_string());
             let _ = config::save_global(&g);
@@ -939,13 +1268,18 @@ fn handle_role(app: &mut App, args: &[&str]) {
                 None if app.last_role.is_empty() => "auto".to_string(),
                 None => format!("auto (dernier: {})", app.last_role),
             };
-            let mut s = format!("Rôles ({auto}):\n");
+            let etat = if app.roles_enabled {
+                "actifs"
+            } else {
+                "désactivés — /role on pour réactiver"
+            };
+            let mut s = format!("Rôles ({etat} · {auto}):\n");
             for r in route::KNOWN_ROLES {
                 let val = roles.get(*r).cloned().unwrap_or_else(|| "—".to_string());
                 let used = if app.forced_role.as_deref() == Some(*r) { "*" } else { " " };
                 s.push_str(&format!(" {used} {:<10} {}\n", r, val));
             }
-            s.push_str("\n/role set <role> <provider>/<model> · /role use <role> · /role auto · /role unset <role>");
+            s.push_str("\n/role on|off · /role set <role> <p>/<m> · /role use <role> · /role auto · /role unset <role>");
             app.messages.push(ChatMessage::notice(s));
         }
         Some("set") => {
@@ -969,9 +1303,32 @@ fn handle_role(app: &mut App, args: &[&str]) {
             let _ = config::unset_role(role, false);
             app.messages.push(ChatMessage::notice(format!("Rôle {role} supprimé")));
         }
+        Some("off") => match config::set_roles_enabled(false) {
+            Ok(()) => {
+                app.roles_enabled = false;
+                app.forced_role = None;
+                app.messages.push(ChatMessage::notice(
+                    "Rôles désactivés : un seul modèle (celui du provider actif) pour tout. /role on pour réactiver."
+                        .to_string(),
+                ));
+            }
+            Err(e) => app.messages.push(ChatMessage::notice(format!("Erreur: {e}"))),
+        },
+        Some("on") => match config::set_roles_enabled(true) {
+            Ok(()) => {
+                app.roles_enabled = true;
+                app.messages
+                    .push(ChatMessage::notice("Rôles réactivés (routage auto par catégorie).".to_string()));
+            }
+            Err(e) => app.messages.push(ChatMessage::notice(format!("Erreur: {e}"))),
+        },
         Some("use") => {
             let role = args.get(1).copied().unwrap_or("");
             if route::KNOWN_ROLES.contains(&role) {
+                if !app.roles_enabled {
+                    let _ = config::set_roles_enabled(true);
+                    app.roles_enabled = true;
+                }
                 app.forced_role = Some(role.to_string());
                 app.messages.push(ChatMessage::notice(format!("Rôle forcé: {role}")));
             } else {
@@ -982,7 +1339,9 @@ fn handle_role(app: &mut App, args: &[&str]) {
             app.forced_role = None;
             app.messages.push(ChatMessage::notice("Routage automatique réactivé"));
         }
-        _ => app.messages.push(ChatMessage::notice("usage: /role [list|set|use|auto|unset]")),
+        _ => app
+            .messages
+            .push(ChatMessage::notice("usage: /role [list|on|off|set|use|auto|unset]")),
     }
 }
 
@@ -1431,6 +1790,75 @@ fn handle_kb(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
     }
 }
 
+/// `/embeddings [show|set <provider> <model>|unset]` — embedder de la mémoire.
+/// Un modèle d'embedding ne sert QUE pour `/embeddings` (pas de chat).
+fn handle_embeddings(app: &mut App, args: &[&str]) {
+    match args.first().copied() {
+        None | Some("show") => match config::load_global().embeddings {
+            Some(e) => app.messages.push(ChatMessage::notice(format!(
+                "Embedder: {}/{} (mémoire sémantique active)",
+                e.provider.unwrap_or_default(),
+                e.model.unwrap_or_default()
+            ))),
+            None => app.messages.push(ChatMessage::notice(
+                "Aucun embedder — recherche par sous-chaîne (degraded=true).\n\
+                 /embeddings set <provider> <model>  ex. /embeddings set openrouter liquid/lfm-2.5-embedding-350m:free"
+                    .to_string(),
+            )),
+        },
+        Some("set") => {
+            let provider = args.get(1).copied().unwrap_or("");
+            let model = args.get(2).copied().unwrap_or("");
+            if provider.is_empty() || model.is_empty() {
+                app.messages
+                    .push(ChatMessage::notice("usage: /embeddings set <provider> <model>"));
+                return;
+            }
+            match providers::find(provider) {
+                Some(p) => {
+                    let mut g = config::load_global();
+                    g.embeddings = Some(config::EmbeddingConfig {
+                        provider: Some(p.id.clone()),
+                        model: Some(model.to_string()),
+                    });
+                    match config::save_global(&g) {
+                        Ok(()) => {
+                            let warn = if select::is_embedding_or_rerank(model) {
+                                String::new()
+                            } else {
+                                "\n⚠ ce modèle ne ressemble pas à un embedder (nom sans « embedding ») — vérifie qu'il accepte /embeddings.".to_string()
+                            };
+                            app.messages.push(ChatMessage::notice(format!(
+                                "Embedder: {}/{model}{warn}",
+                                p.id
+                            )));
+                        }
+                        Err(e) => {
+                            app.messages.push(ChatMessage::notice(format!("Erreur: {e}")))
+                        }
+                    }
+                }
+                None => app.messages.push(ChatMessage::notice(format!(
+                    "Provider inconnu: {provider}"
+                ))),
+            }
+        }
+        Some("unset") | Some("clear") | Some("off") => {
+            let mut g = config::load_global();
+            g.embeddings = None;
+            match config::save_global(&g) {
+                Ok(()) => app.messages.push(ChatMessage::notice(
+                    "Embedder retiré — recherche par sous-chaîne (degraded=true).".to_string(),
+                )),
+                Err(e) => app.messages.push(ChatMessage::notice(format!("Erreur: {e}"))),
+            }
+        }
+        _ => app.messages.push(ChatMessage::notice(
+            "usage: /embeddings [show|set <provider> <model>|unset]",
+        )),
+    }
+}
+
 fn handle_memory(app: &mut App) {
     let entries = memory::load();
     let probeable = entries.iter().filter(|e| e.trigger.is_some()).count();
@@ -1773,6 +2201,13 @@ fn handle_input(
     app: &mut App,
     ui_tx: &UnboundedSender<UiEvent>,
 ) {
+    // Sélecteur ouvert : il capte tout le clavier.
+    if let Event::Key(key) = ev {
+        if app.picker.is_some() {
+            handle_picker_key(key, app, ui_tx);
+            return;
+        }
+    }
     // Collage (bracketed paste) : insérer tel quel, sans déclencher d'envoi.
     if let Event::Paste(s) = &ev {
         input_insert_str(app, s);
@@ -1845,23 +2280,39 @@ fn handle_input(
                 }
             }
             MouseEventKind::ScrollDown => {
-                let r = app.menu_rect;
-                if me.column >= r.x
-                    && me.column < r.x + r.width
-                    && me.row >= r.y
-                    && me.row < r.y + r.height
-                {
+                if let Some(p) = app.picker.as_mut() {
+                    p.move_sel(1);
+                } else if inside(Some(app.menu_rect)) {
                     app.menu_scroll = app.menu_scroll.saturating_add(3);
+                } else {
+                    let (s, auto) = wheel_scroll(app.scroll, app.max_scroll, false);
+                    app.scroll = s;
+                    app.auto_scroll = auto;
                 }
             }
             MouseEventKind::ScrollUp => {
-                let r = app.menu_rect;
+                if let Some(p) = app.picker.as_mut() {
+                    p.move_sel(-1);
+                } else if inside(Some(app.menu_rect)) {
+                    app.menu_scroll = app.menu_scroll.saturating_sub(3);
+                } else {
+                    let (s, auto) = wheel_scroll(app.scroll, app.max_scroll, true);
+                    app.scroll = s;
+                    app.auto_scroll = auto;
+                }
+            }
+            // Clic droit sur une sortie d'outil : déplier/replier CE bloc.
+            MouseEventKind::Down(MouseButton::Right) => {
+                let r = app.chat_rect;
                 if me.column >= r.x
                     && me.column < r.x + r.width
                     && me.row >= r.y
                     && me.row < r.y + r.height
                 {
-                    app.menu_scroll = app.menu_scroll.saturating_sub(3);
+                    let line = app.chat_scroll.saturating_add(me.row.saturating_sub(r.y));
+                    if let Some(idx) = block_at(&app.block_ranges, line) {
+                        app.messages[idx].expanded = !app.messages[idx].expanded;
+                    }
                 }
             }
             _ => {}
@@ -2023,11 +2474,21 @@ fn handle_input(
             }
             KeyCode::Delete => input_delete(app),
             KeyCode::Backspace => input_backspace(app),
+            KeyCode::Char('o') if k.modifiers.contains(KeyModifiers::CONTROL) => {
+                toggle_last_tool_block(app);
+            }
             KeyCode::Char('a') if k.modifiers.contains(KeyModifiers::CONTROL) => app.cursor = 0,
             KeyCode::Char('e') if k.modifiers.contains(KeyModifiers::CONTROL) => {
                 app.cursor = app.input.chars().count();
             }
-            KeyCode::Char(ch) => input_insert(app, ch),
+            KeyCode::Char(ch) => {
+                // `/` en début de saisie ouvre la palette de commandes filtrante.
+                if ch == '/' && app.picker.is_none() && app.input.trim().is_empty() {
+                    open_command_palette(app);
+                } else {
+                    input_insert(app, ch);
+                }
+            }
             KeyCode::F(2) => {
                 app.menu_focus = true;
                 app.menu_sel = app.menu_sel.min(app.menu_hits.len().saturating_sub(1));
@@ -2093,10 +2554,48 @@ fn handle_ui(ev: UiEvent, app: &mut App) {
                 app.reasoning_text.push_str(&t);
             }
         }
+        UiEvent::ModelList(list) => {
+            // Retient qui accepte les images (garde-fou de /img)…
+            app.vision_models = list
+                .iter()
+                .filter(|m| {
+                    m.architecture
+                        .as_ref()
+                        .and_then(|a| a.input_modalities.as_ref())
+                        .map(|v| v.iter().any(|x| x.contains("image")))
+                        .unwrap_or(false)
+                })
+                .map(|m| m.id.clone())
+                .collect();
+            // … puis ouvre le sélecteur.
+            let items: Vec<picker::Item> = list
+                .into_iter()
+                .map(|m| {
+                    let vis = app.vision_models.iter().any(|v| v == &m.id);
+                    let mut note = String::new();
+                    if vis {
+                        note.push_str("🖼 images");
+                    }
+                    if let Some(c) = m.context_length {
+                        if !note.is_empty() {
+                            note.push_str(" · ");
+                        }
+                        note.push_str(&format!("ctx {c}"));
+                    }
+                    picker::Item {
+                        label: m.id.clone(),
+                        note,
+                        id: m.id,
+                    }
+                })
+                .collect();
+            app.picker = Some(picker::Picker::new("Modèles", items, picker::Kind::Model));
+        }
         UiEvent::Active(label) => app.active_endpoint = label,
-        UiEvent::ToolCall { name, args } => app
-            .messages
-            .push(ChatMessage::notice(format!("⚙ appel {name} {args}"))),
+        UiEvent::ToolCall { name, args } => app.messages.push(ChatMessage::notice(format!(
+            "⚙ {name} · {}",
+            summarize_tool_call(&name, &args)
+        ))),
         UiEvent::ToolResult(r) => {
             let first = r.lines().next().unwrap_or("").to_string();
             app.messages.push(ChatMessage::notice(format!("⚙ → {first}")));
@@ -2193,6 +2692,11 @@ fn draw(f: &mut Frame, app: &mut App) {
     }
     draw_chats_popup(f, area, app);
     finalize_buffer(f, app);
+
+    // Sélecteur (/model, /provider) par-dessus tout le reste.
+    if let Some(p) = &app.picker {
+        picker::draw(f, area, p);
+    }
 }
 
 /// Capture le texte affiché (pour la sélection) et surligne la sélection.
@@ -2403,15 +2907,23 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
         Span::styled(
             format!(
                 "role:{}",
-                app.forced_role.clone().unwrap_or_else(|| {
-                    if app.last_role.is_empty() {
-                        "auto".to_string()
-                    } else {
-                        format!("auto/{}", app.last_role)
-                    }
-                })
+                if app.roles_enabled {
+                    app.forced_role.clone().unwrap_or_else(|| {
+                        if app.last_role.is_empty() {
+                            "auto".to_string()
+                        } else {
+                            format!("auto/{}", app.last_role)
+                        }
+                    })
+                } else {
+                    "off".to_string()
+                }
             ),
-            Style::default().fg(Color::Yellow),
+            Style::default().fg(if app.roles_enabled {
+                Color::Yellow
+            } else {
+                Color::DarkGray
+            }),
         ),
         Span::raw("   "),
         Span::styled(
@@ -2448,9 +2960,43 @@ fn draw_chat(f: &mut Frame, area: Rect, app: &mut App) {
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(""));
 
-    for m in &app.messages {
-        let text = m.content.clone().unwrap_or_default();
-        push_message(&mut lines, &m.role, &text, w);
+    app.block_ranges.clear();
+    {
+        let msgs = &app.messages;
+        let ranges = &mut app.block_ranges;
+        for (mi, m) in msgs.iter().enumerate() {
+            let text = m.content.clone().unwrap_or_default();
+            // Sorties d'outils : repliées par défaut, dépliées **bloc par bloc**
+            // (clic droit dessus, ou Ctrl+O pour le dernier).
+            if m.role == "tool" {
+                let start = lines.len() as u16;
+                let total = text.lines().count();
+                if m.expanded {
+                    let capped: String = text.lines().take(200).collect::<Vec<_>>().join("\n");
+                    push_message(&mut lines, &m.role, &capped, w);
+                    if total > 200 {
+                        push_message(&mut lines, "notice", "   … (tronqué à 200 lignes)", w);
+                    }
+                } else {
+                    let preview: String = text.lines().take(3).collect::<Vec<_>>().join("\n");
+                    push_message(&mut lines, &m.role, &preview, w);
+                    if total > 3 {
+                        push_message(
+                            &mut lines,
+                            "notice",
+                            &format!(
+                                "   … {} ligne(s) de plus — clic droit ou Ctrl+O",
+                                total - 3
+                            ),
+                            w,
+                        );
+                    }
+                }
+                ranges.push((start, (lines.len() as u16).saturating_sub(1), mi));
+            } else {
+                push_message(&mut lines, &m.role, &text, w);
+            }
+        }
     }
 
     if app.streaming {
@@ -2474,9 +3020,71 @@ fn draw_chat(f: &mut Frame, area: Rect, app: &mut App) {
         app.scroll.min(max_scroll)
     };
     app.scroll = scroll;
+    app.chat_rect = area;
+    app.chat_scroll = scroll;
 
     let paragraph = Paragraph::new(lines).scroll((scroll, 0));
     f.render_widget(paragraph, area);
+}
+
+/// Index du message dépliable dont le bloc occupe `line` dans le fil.
+fn block_at(ranges: &[(u16, u16, usize)], line: u16) -> Option<usize> {
+    ranges
+        .iter()
+        .find(|(a, b, _)| line >= *a && line <= *b)
+        .map(|(_, _, i)| *i)
+}
+
+/// Ctrl+O : déplie/replie le **dernier** bloc de sortie d'outil.
+fn toggle_last_tool_block(app: &mut App) {
+    if let Some(i) = app.messages.iter().rposition(|m| m.role == "tool") {
+        app.messages[i].expanded = !app.messages[i].expanded;
+    }
+}
+
+/// Résumé compact (une ligne) d'un appel d'outil : on n'affiche **jamais** tout
+/// le contenu envoyé (ex. un fichier Python entier dans `text_editor`).
+fn summarize_tool_call(name: &str, args: &str) -> String {
+    let v: serde_json::Value = serde_json::from_str(args).unwrap_or(serde_json::Value::Null);
+    let get = |k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
+    let one = |s: &str| -> String {
+        let l = s.lines().next().unwrap_or("").trim();
+        if l.chars().count() > 100 {
+            l.chars().take(99).collect::<String>() + "…"
+        } else {
+            l.to_string()
+        }
+    };
+    match name {
+        "text_editor" => {
+            let cmd = one(&get("command"));
+            let path = one(&get("path"));
+            let lines = v
+                .get("file_text")
+                .and_then(|x| x.as_str())
+                .map(|t| t.lines().count())
+                .unwrap_or(0);
+            let extra = if lines > 0 {
+                format!(" ({lines} lignes)")
+            } else {
+                String::new()
+            };
+            format!("{cmd} {path}{extra}").trim_end().to_string()
+        }
+        "code_exec" => one(&get("command")),
+        "web_search" | "knowledge_search" => one(&get("query")),
+        _ => {
+            if let Some(o) = v.as_object() {
+                for k in o.keys() {
+                    let s = get(k);
+                    if !s.is_empty() {
+                        return format!("{k}={}", one(&s));
+                    }
+                }
+            }
+            one(args)
+        }
+    }
 }
 
 fn push_message(lines: &mut Vec<Line>, role: &str, text: &str, w: usize) {
@@ -2679,6 +3287,17 @@ fn draw_input(f: &mut Frame, area: Rect, app: &App) {
 /// Index d'octet correspondant à un index de caractères.
 fn byte_at(s: &str, char_idx: usize) -> usize {
     s.char_indices().nth(char_idx).map(|(b, _)| b).unwrap_or(s.len())
+}
+
+/// Défilement à la molette : renvoie `(offset, auto_scroll)`.
+/// 3 lignes par cran ; revenir tout en bas réactive le suivi automatique.
+fn wheel_scroll(scroll: u16, max: u16, up: bool) -> (u16, bool) {
+    if up {
+        (scroll.saturating_sub(3), false)
+    } else {
+        let s = (scroll + 3).min(max);
+        (s, s >= max)
+    }
 }
 
 fn input_set(app: &mut App, s: String) {
@@ -2989,7 +3608,9 @@ fn draw_footer(f: &mut Frame, area: Rect) {
         Span::styled(" F8 ", key),
         Span::styled(" 0chan  ", txt),
         Span::styled(" F10 ", key),
-        Span::styled(" Mic ", txt),
+        Span::styled(" Mic  ", txt),
+        Span::styled(" Ctrl+O ", key),
+        Span::styled(" détail ", txt),
     ];
     f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
@@ -3081,5 +3702,56 @@ mod tests {
         assert_eq!((r, c), (0, 3));
         let (_, r, c) = wrap_with_cursor("a\nb", 10, 0);
         assert_eq!((r, c), (0, 0));
+    }
+
+    #[test]
+    fn wheel_up_stops_auto_scroll_and_clamps() {
+        assert_eq!(super::wheel_scroll(10, 50, true), (7, false));
+        assert_eq!(super::wheel_scroll(2, 50, true), (0, false));
+    }
+
+    #[test]
+    fn wheel_down_clamps_and_reactivates_follow_at_bottom() {
+        assert_eq!(super::wheel_scroll(10, 50, false), (13, false));
+        assert_eq!(super::wheel_scroll(49, 50, false), (50, true));
+        assert_eq!(super::wheel_scroll(50, 50, false), (50, true));
+    }
+
+    #[test]
+    fn tool_call_summary_hides_full_file_content() {
+        let args = serde_json::json!({
+            "command": "create",
+            "path": "/tmp/x.py",
+            "file_text": "ligne1\nligne2\nligne3\nligne4"
+        })
+        .to_string();
+        let s = super::summarize_tool_call("text_editor", &args);
+        assert!(s.contains("create"));
+        assert!(s.contains("/tmp/x.py"));
+        assert!(s.contains("4 lignes"));
+        assert!(!s.contains("ligne1"), "le contenu ne doit pas apparaître : {s}");
+    }
+
+    #[test]
+    fn tool_call_summary_keeps_only_the_first_line() {
+        let args = serde_json::json!({ "command": "python3 - <<'EOF'\nprint(1)\nEOF" }).to_string();
+        assert_eq!(super::summarize_tool_call("code_exec", &args), "python3 - <<'EOF'");
+    }
+
+    #[test]
+    fn tool_call_summary_truncates_long_lines() {
+        let args = serde_json::json!({ "query": "x".repeat(300) }).to_string();
+        let s = super::summarize_tool_call("web_search", &args);
+        assert!(s.chars().count() <= 101, "trop long : {}", s.chars().count());
+    }
+
+    #[test]
+    fn block_at_maps_a_line_to_its_message() {
+        let ranges = [(10u16, 14u16, 3usize), (20, 25, 7)];
+        assert_eq!(super::block_at(&ranges, 10), Some(3));
+        assert_eq!(super::block_at(&ranges, 12), Some(3));
+        assert_eq!(super::block_at(&ranges, 15), None);
+        assert_eq!(super::block_at(&ranges, 22), Some(7));
+        assert_eq!(super::block_at(&[], 0), None);
     }
 }

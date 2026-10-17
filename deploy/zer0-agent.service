@@ -1,0 +1,49 @@
+# zer0 — agent en mode headless (utilisateur dédié, durci)
+#
+# Bloque le vecteur d'exfiltration le plus important : IPAddressAllow=localhost
+# rend TOUTE connexion sortante impossible, clé ou pas clé.
+# (Le trafic provider passe par zer0-gw, qui tourne sous un autre utilisateur.)
+#
+# Usage interactif (TUI) : ce profil réseau casse le micro (Whisper) et le web —
+# utilisez plutôt la règle nftables par utilisateur (deploy/20-zer0-egress.nft)
+# ou lancez la TUI dans une VM/conteneur (SAFETY.md §6).
+
+[Unit]
+Description=ZER0|GH0ST — agent headless (utilisateur zer0)
+After=zer0-gw.service
+Wants=zer0-gw.service
+
+[Service]
+Type=oneshot
+User=zer0
+Group=zer0
+WorkingDirectory=/home/zer0
+# Un tour headless ; adaptez (ex. sous-commande CLI précise).
+ExecStart=/usr/local/bin/zer0 --once
+# Aucune clé ici : l'agent parle à la passerelle sans secret.
+Environment=NO_COLOR=1
+
+# ── Réseau : loopback UNIQUEMENT (le blocage clé) ───────────────────────────
+IPAddressDeny=any
+IPAddressAllow=localhost
+# /telegram nécessiterait les plages Telegram — décommentez si utilisé :
+#IPAddressAllow=149.154.160.0/20
+#IPAddressAllow=91.108.4.0/22
+
+# ── Durcissement ────────────────────────────────────────────────────────────
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/zer0
+PrivateTmp=yes
+PrivateDevices=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+# Pas de MemoryDenyWriteExecute ici : code_exec peut invoquer des compilateurs.
+UMask=0077
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target

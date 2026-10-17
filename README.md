@@ -10,7 +10,7 @@
 ![CLI only](https://img.shields.io/badge/interface-CLI%20%2F%20TUI-black.svg)
 ![CI](https://github.com/Richerrail/zer0gh0st/actions/workflows/ci.yml/badge.svg)
 
-**Version** : 0.5.4 · **Licence** : MIT · **Interface** : terminal uniquement (pas de GUI web).
+**Version** : 0.5.5 · **Licence** : MIT · **Interface** : terminal uniquement (pas de GUI web).
 
 ![Aperçu de ZER0│GH0ST](./screenshot.png)
 
@@ -102,6 +102,11 @@ Zer0 ne réimplémente **aucun** modèle.
 - Le coffre (`/vault`) **chiffre les clés au repos** mais **ne protège pas** contre
   l'exfiltration par le processus lui-même.
 - Aucune clé API n'est stockée dans le dépôt : elles vivent dans `~/.config/zer0/` (chmod 600).
+- **Déploiement durci (recommandé)** : la passerelle `zer0-gw` garde les clés **hors du
+  processus agent**, l'egress nftables limite l'agent au loopback, et `code_exec` n'hérite
+  plus des variables secrètes — voir `deploy/` et [`SAFETY.md`](./SAFETY.md) §7.
+- `code_exec` **ne voit plus les secrets dans son environnement** : les variables
+  `*API_KEY*`, `*TOKEN*`, `*PASSPHRASE*`, … sont retirées des processus enfants.
 
 Détail complet du modèle de menace : [`SAFETY.md`](./SAFETY.md).
 
@@ -117,7 +122,7 @@ Détail complet du modèle de menace : [`SAFETY.md`](./SAFETY.md).
 | **Multi-provider** | 9 providers intégrés + personnalisés, clés en config ou **coffre chiffré** |
 | **Résilience** | bascule d'endpoints, backoff 429, blacklist d'échecs 120 s, messages par code HTTP |
 | **Gratuit** | découverte des modèles `:free` (OpenRouter public), `select` par **benchmarks réels** |
-| **Rôles** | `main/code/reasoning/writing/vision/fast/utility/review`, sélection auto par catégorie |
+| **Rôles** | `main/code/reasoning/writing/vision/fast/utility/review`, sélection auto par catégorie · `/role off` = un seul modèle, sans bascule |
 | **Mémoire** | store JSONL, recherche sémantique optionnelle, **enveloppe d'honnêteté** |
 | **Connaissance** | base **SQLite + FTS5** (hybride), **injection auto** dans le prompt (+ outil `knowledge_search`) |
 | **Zero-chan** | assistante vocale **intégrée à la TUI** : bloc d'état à droite du banner + boutons `0chan`/`micro` à droite de la saisie. **Réutilise le chat et l'input de l'agent**. STT = Whisper local. |
@@ -219,7 +224,7 @@ Puis dans la TUI : `/provider local`. Backend rapide : `./scripts/serve-fast.sh`
 ### Providers cloud (clé optionnelle)
 
 ```bash
-zer0 provider add openrouter sk-or-...     # ou export OPENROUTER_API_KEY=…
+zer0 provider add openrouter sk-or-...     # si zer0-gw tourne : déposée sur la passerelle, jamais ici
 zer0 provider use openrouter
 zer0 models --free                         # liste les modèles gratuits
 zer0 select "Écris une fonction Rust"      # recommande un modèle :free
@@ -228,6 +233,23 @@ zer0 select "Écris une fonction Rust"      # recommande un modèle :free
 Voir [`SPEC.md`](./SPEC.md) §1 pour le périmètre exact.
 
 ---
+
+### Mise à jour
+
+```bash
+zer0 update                 # télécharge et remplace le binaire (Releases GitHub)
+zer0 update --check         # vérifie sans installer
+zer0 update --force         # réinstalle même si à jour
+./scripts/update.sh         # (depuis les sources) installe/rafraîchit ~/.local/bin/zer0gh0st
+```
+
+Le binaire est choisi selon la plateforme, le **SHA256 est vérifié** quand la release
+publie `SHA256SUMS` (sinon c'est dit explicitement), et le remplacement est **atomique**.
+Limites assumées : API GitHub non authentifiée (60 req/h), checksum issu du même dépôt
+(protège d'une corruption, pas d'un dépôt compromis), et Windows ne peut pas écraser un
+`.exe` en cours d'exécution (l'ancien est renommé puis supprimé). Si le binaire tourne
+depuis `target/` (build Cargo), `zer0 update` **refuse** de le remplacer : pour un dev,
+c'est `cargo build --release` qui fait foi (`--force` pour passer outre).
 
 ### Désinstaller
 
@@ -269,7 +291,7 @@ Zer0 agit : tu décris un but, il appelle les outils nécessaires.
 |---|---|
 | `Entrée` | envoyer · `Maj+Entrée` / `Alt+Entrée` : nouvelle ligne |
 | `↑` `↓` | historique de saisie |
-| `PgUp` `PgDn` | faire défiler la conversation |
+| `PgUp` `PgDn` · **molette** | faire défiler la conversation |
 | `F4` | activer/désactiver `code_exec` |
 | `F6` | gérer les conversations (sessions sauvegardées) |
 | `F7` | relancer/poursuivre l'agent (nudge) |

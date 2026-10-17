@@ -1,0 +1,46 @@
+#!/usr/sbin/nft -f
+# ─────────────────────────────────────────────────────────────────────────────
+# ZER0│GH0ST — contrôle d'egress par utilisateur
+#
+# Principe : la sortie réseau est un privilège, pas un défaut. L'exfiltration
+# d'un secret nécessite une connexion sortante — on la refuse au niveau noyau :
+#
+#   - utilisateur `zer0`    (agent + code_exec) : loopback UNIQUEMENT
+#     (zer0-gw, llama-server) — rien d'autre, IPv4 comme IPv6 ;
+#   - utilisateur `zer0-gw` (passerelle)        : seul autorisé à sortir,
+#     TCP 443 uniquement ;
+#   - les autres utilisateurs ne sont pas touchés (policy accept).
+#
+# Test :  sudo nft -f deploy/20-zer0-egress.nft
+#         sudo -u zer0 curl -m 3 https://example.com   # → refusé
+#         sudo -u zer0 curl -m 3 http://127.0.0.1:8787 # → OK
+#
+# Persistance : incluez ce fichier dans votre ruleset
+# (Debian/Ubuntu : /etc/nftables.conf ; Arch : /etc/nftables.d/).
+# ─────────────────────────────────────────────────────────────────────────────
+
+destroy table inet zer0_egress
+
+table inet zer0_egress {
+    chain output {
+        type filter hook output priority filter; policy accept;
+
+        # Loopback toujours autorisé (passerelle + llama-server)
+        oifname "lo" accept
+
+        # Connexions déjà établies
+        ct state established,related accept
+
+        # DNS : uniquement hors utilisateur zer0 (zer0-gw doit résoudre les
+        # providers ; l'agent n'a rien à résoudre)
+        meta skuid != "zer0" udp dport 53 accept
+        meta skuid != "zer0" tcp dport 53 accept
+
+        # L'agent (et tout code_exec qu'il lance) ne parle qu'au loopback.
+        meta skuid "zer0" drop
+
+        # La passerelle sort uniquement en HTTPS.
+        meta skuid "zer0-gw" tcp dport 443 accept
+        meta skuid "zer0-gw" drop
+    }
+}

@@ -88,7 +88,7 @@ impl ApiClient {
             if !matches!(m.role.as_str(), "user" | "assistant" | "tool" | "system") {
                 continue;
             }
-            msgs.push(serde_json::to_value(m).map_err(|e| ChatError::Setup { err: e.into(), status: None })?);
+            msgs.push(m.to_wire_json());
         }
 
         let mut body = json!({

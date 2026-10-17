@@ -1,0 +1,54 @@
+# ─────────────────────────────────────────────────────────────
+#  zer0-gw — configuration de la passerelle de clés
+#
+#  Installée dans /etc/zer0-gw/gw.toml  (chmod 640, root:zer0-gw)
+#  Les clés vivent ICI (ou dans /etc/zer0-gw/keys.env) —
+#  JAMAIS dans ~/.config/zer0/config.toml de l'agent.
+#
+#  Côté agent : pas besoin d'écrire ceci à la main — dans le TUI,
+#    /provider add openrouter sk-or-…
+#  dépose la clé ici et crée/active gw-openrouter automatiquement.
+#  (Équivalent manuel :)
+#    [custom.gw-openrouter]
+#    base_url = "http://127.0.0.1:8787/openrouter/v1"
+# ─────────────────────────────────────────────────────────────
+
+listen = "127.0.0.1:8787"
+# Fichier des clés déposées via `/provider add` — écrit par la passerelle
+# (chmod 600, propriété zer0-gw). Défaut : keys.managed à côté de ce gw.toml.
+# `keys.env` reste réservé aux clés « style variable d'env » injectées par systemd.
+# keys_file = "/etc/zer0-gw/keys.managed"
+
+[limits]
+requests_per_minute = 120        # par provider (partagé par tous les agents locaux)
+max_body_bytes = 4194304         # 4 MiO
+connect_timeout_secs = 10
+upstream_timeout_secs = 300      # SSE long inclus (zer0 a son propre timeout 120 s)
+
+# ── Providers ───────────────────────────────────────────────
+# base_url SANS le suffixe /v1/... (la passerelle ajoute le chemin demandé).
+#
+# Chemins autorisés par défaut : /v1/chat/completions, /v1/models,
+# /v1/embeddings (mémoire sémantique). Pour en autoriser d'autres :
+#   allowed_paths = ["/v1/chat/completions", "/v1/models", "/v1/embeddings"]
+
+[providers.openrouter]
+base_url = "https://openrouter.ai/api"
+api_key_env = "OPENROUTER_API_KEY"   # ou api_key = "sk-or-…" (déconseillé)
+
+[providers.nvidia]
+base_url = "https://integrate.api.nvidia.com"
+api_key_env = "NVIDIA_API_KEY"
+
+[providers.google]
+base_url = "https://generativelanguage.googleapis.com"
+api_key_env = "GEMINI_API_KEY"
+
+# Z.ai (Zhipu, GLM) — OpenAI-compatible
+[providers.zai]
+base_url = "https://api.z.ai/api/paas/v4"
+api_key_env = "ZAI_API_KEY"
+
+# Inférence locale : aucun secret, la passerelle ne fait que relayer.
+[providers.local]
+base_url = "http://127.0.0.1:8080"

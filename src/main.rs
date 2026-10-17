@@ -5,6 +5,7 @@ mod config;
 mod convo;
 mod event;
 mod fun;
+mod gwclient;
 mod jimmy;
 mod knowledge;
 mod llm;
@@ -20,6 +21,7 @@ mod search;
 mod select;
 mod tasks;
 mod telegram;
+mod update;
 mod vault;
 mod zerochan;
 mod tools;
@@ -77,6 +79,10 @@ struct Cli {
     /// Run a single prompt headlessly, print the answer, then exit.
     #[arg(long)]
     once: Option<String>,
+
+    /// Headless: attach an image (PNG/JPEG/WebP/GIF) to the prompt (vision).
+    #[arg(long)]
+    img: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -85,6 +91,15 @@ enum Command {
     Provider {
         #[command(subcommand)]
         action: ProviderAction,
+    },
+    /// Update the binary from the GitHub Releases.
+    Update {
+        /// Only check whether a newer version exists.
+        #[arg(long)]
+        check: bool,
+        /// Reinstall even when the version is already current.
+        #[arg(long)]
+        force: bool,
     },
     /// List the models of a provider.
     Models {
@@ -195,6 +210,8 @@ enum Command {
 enum ProviderAction {
     /// List all known providers and whether a key is configured.
     List,
+    /// Show where the keys live: zer0-gw gateway status (never the values).
+    Keys,
     /// Store an API key for a known provider (reads $ENV if omitted).
     Add { id: String, key: Option<String> },
     /// Define a custom OpenAI-compatible provider.
@@ -242,6 +259,10 @@ enum RouteAction {
 enum RoleAction {
     /// Show roles and their models.
     List,
+    /// Disable role routing: one model (the active provider) for everything.
+    Off,
+    /// Re-enable automatic role routing.
+    On,
     /// Associate a role with a model: `zer0 role set code openrouter/qwen/qwen3.8-27b:free`
     Set { role: String, route: String },
     /// Remove a role preset.
@@ -384,6 +405,8 @@ enum KbAction {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Ancien schéma `gw-<id>` → identifiant simple (migration silencieuse, une fois).
+    let _ = config::migrate_gateway_prefix();
     let cli = Cli::parse();
 
     if let Some(cmd) = cli.command {
@@ -411,8 +434,8 @@ async fn main() -> Result<()> {
         settings.model = model;
     }
 
-    if let Some(prompt) = cli.once {
-        return run_once(settings, system, prompt, all_tools, options).await;
+    if let Some(prompt) = cli.once.clone() {
+        return run_once(settings, system, prompt, all_tools, options, cli.img.clone()).await;
     }
 
     tui::run(
@@ -450,6 +473,10 @@ async fn run_command(cmd: Command) -> Result<()> {
         Command::Task { action } => task_cmd(action),
         Command::Search { query, max } => search_cmd(query, max).await,
         Command::Whoami { action } => whoami_cmd(action),
+        Command::Update { check, force } => {
+            println!("{}", update::run(check, force).await?);
+            Ok(())
+        }
         Command::Vault { action } => vault_cmd(action),
         Command::Pdf { action } => pdf_cmd(action),
         Command::Jev { file } => jev_cmd(file).await,
@@ -757,6 +784,22 @@ fn provider_cmd(action: ProviderAction) -> Result<()> {
             }
             println!("\nAjouter une clé : zer0 provider add <id> [clé]   (ou exporter $VAR)");
             println!("Provider maison : zer0 provider add-custom <id> <base_url>");
+            println!("Passerelle (clés hors de l'agent) : zer0 provider keys");
+        }
+        ProviderAction::Keys => {
+            if !gwclient::probe() {
+                println!("zer0-gw injoignable — lance-le : sudo systemctl start zer0-gw");
+            } else {
+                match gwclient::list_keys() {
+                    Ok(keys) => {
+                        println!("Clés détenues par zer0-gw (l'agent n'en a aucune) :");
+                        for (id, has) in keys {
+                            println!(" {:<14} {}", id, if has { "clé ✓" } else { "—" });
+                        }
+                    }
+                    Err(e) => println!("zer0-gw : {e}"),
+                }
+            }
         }
         ProviderAction::Add { id, key } => {
             let p = providers::find(&id).ok_or_else(|| anyhow!("provider inconnu: {id}"))?;
@@ -782,10 +825,22 @@ fn provider_cmd(action: ProviderAction) -> Result<()> {
                     }
                 }
             };
-            let mut g = config::load_global();
-            g.keys.insert(p.id.clone(), resolved);
-            config::save_global(&g)?;
-            println!("Clé enregistrée pour {} → {}", p.name, config::global_path().display());
+            match gwclient::add_key_flow(&p.id, &resolved) {
+                Ok(gwclient::AddRoute::ViaGateway { provider_id }) => {
+                    let mut g = config::load_global();
+                    let (name, _) = gwclient::activate_provider(&mut g, &provider_id);
+                    println!("🔑 Clé déposée sur zer0-gw (écriture seule) — aucune clé stockée ici.");
+                    println!("   Provider actif : {name}  →  {}", config::global_path().display());
+                }
+                Ok(gwclient::AddRoute::Local) => {
+                    let mut g = config::load_global();
+                    g.keys.insert(p.id.clone(), resolved);
+                    config::save_global(&g)?;
+                    println!("⚠ zer0-gw injoignable — clé enregistrée localement pour {} → {}", p.name, config::global_path().display());
+                    println!("   Pour le durcissement : lance zer0-gw puis relance cette commande.");
+                }
+                Err(e) => return Err(anyhow!("zer0-gw : {e}")),
+            }
         }
         ProviderAction::AddCustom { id, base_url, name, env } => {
             let id = id.to_ascii_lowercase();
@@ -818,6 +873,7 @@ fn provider_cmd(action: ProviderAction) -> Result<()> {
         }
         ProviderAction::Remove { id } => {
             let p = providers::find(&id).ok_or_else(|| anyhow!("provider inconnu: {id}"))?;
+            let _ = gwclient::delete_key(&p.id); // oublie aussi côté passerelle (si présente)
             let mut g = config::load_global();
             g.keys.remove(&p.id);
             let removed_custom = g.custom.remove(&p.id).is_some();
@@ -860,6 +916,11 @@ async fn list_models_cmd(free: bool, provider_id: Option<String>) -> Result<()> 
 fn model_cmd(action: ModelAction) -> Result<()> {
     match action {
         ModelAction::Use { id } => {
+            if crate::select::is_embedding_or_rerank(&id) {
+                return Err(anyhow!(
+                    "'{id}' est un modèle d'embedding/rerank — inutilisable en chat (endpoint /embeddings)."
+                ));
+            }
             let mut g = config::load_global();
             g.model = Some(id.clone());
             config::save_global(&g)?;
@@ -996,11 +1057,23 @@ async fn role_cmd(action: RoleAction) -> Result<()> {
     match action {
         RoleAction::List => {
             let roles = config::effective_roles();
-            println!("Rôles:");
+            if config::roles_enabled() {
+                println!("Rôles (actifs):");
+            } else {
+                println!("Rôles (désactivés — `zer0 role on` pour réactiver) :");
+            }
             for r in route::KNOWN_ROLES {
                 let v = roles.get(*r).cloned().unwrap_or_else(|| "—".to_string());
                 println!("  {:<10} {}", r, v);
             }
+        }
+        RoleAction::Off => {
+            config::set_roles_enabled(false)?;
+            println!("Rôles désactivés : un seul modèle (celui du provider actif) pour tout.");
+        }
+        RoleAction::On => {
+            config::set_roles_enabled(true)?;
+            println!("Rôles réactivés.");
         }
         RoleAction::Set { role, route: r } => {
             route::parse_route(&r).ok_or_else(|| anyhow!("route invalide: {r}"))?;
@@ -1148,6 +1221,7 @@ async fn run_once(
     prompt: String,
     all_tools: Vec<tools::ToolSpec>,
     options: ChatOptions,
+    img: Option<String>,
 ) -> Result<()> {
     use std::io::Write;
 
@@ -1190,7 +1264,13 @@ async fn run_once(
     let role = route::auto_role(&prompt);
     let endpoints = route::chain_for_role(&settings, role);
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<UiEvent>();
-    let messages = vec![ChatMessage::user(prompt)];
+    let mut user = ChatMessage::user(prompt);
+    if let Some(path) = img {
+        let (data_url, size) = crate::platform::image_data_url(&path).map_err(|e| anyhow!(e))?;
+        eprintln!("🖼 image jointe : {path} ({:.0} Kio)", size as f64 / 1024.0);
+        user.image = Some(data_url);
+    }
+    let messages = vec![user];
     tokio::spawn(async move {
         agent::turn::run_turn(endpoints, system, messages, all_tools, options, tx).await;
     });

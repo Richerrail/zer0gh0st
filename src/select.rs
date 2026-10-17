@@ -89,6 +89,14 @@ fn has_image_input(m: &ModelEntry) -> bool {
         .unwrap_or(false)
 }
 
+/// Heuristique de secours (nom du modèle) quand le catalogue n'est pas disponible.
+pub fn supports_images_by_name(model_id: &str) -> bool {
+    let id = model_id.to_ascii_lowercase();
+    ["vl", "vision", "omni", "multimodal", "llava", "pixtral", "image"]
+        .iter()
+        .any(|k| id.contains(k))
+}
+
 /// Preference keywords per category (tie-break only; benchmarks dominate).
 fn keyword_bonus(id: &str, cat: Category) -> i64 {
     let prefs: &[&str] = match cat {
@@ -113,6 +121,14 @@ fn keyword_bonus(id: &str, cat: Category) -> i64 {
 ///
 /// When OpenRouter publishes Artificial Analysis indices, they dominate the
 /// score; keyword preferences are only a fallback / tie-break.
+/// `true` si le modèle n'est pas utilisable en chat (embedding ou reranker).
+/// Ces modèles ne répondent que sur `/embeddings` ; les envoyer à
+/// `/chat/completions` produit un **400** (constaté avec
+/// `liquid/lfm-2.5-embedding-350m:free`).
+pub fn is_embedding_or_rerank(id: &str) -> bool {
+    id.contains("embedding") || id.contains("rerank")
+}
+
 pub fn score(m: &ModelEntry, cat: Category) -> i64 {
     let id = m.id.to_ascii_lowercase();
     let (intel, code, agentic) = bench(m);
@@ -131,7 +147,7 @@ pub fn score(m: &ModelEntry, cat: Category) -> i64 {
     }
 
     // never useful as a chat/agent model
-    if id.contains("embedding") || id.contains("rerank") {
+    if is_embedding_or_rerank(&id) {
         s -= 1000;
     }
     if id.contains("content-safety") {
