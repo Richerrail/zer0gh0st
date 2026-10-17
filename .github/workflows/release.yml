@@ -66,9 +66,12 @@ jobs:
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
+          # `zer0-<cible>*` (sans point obligatoire) : couvre AUSSI le binaire brut
+          # sans extension (Linux/macOS), dont `zer0 update` a besoin.
           files: |
-            zer0-${{ matrix.target }}.*
+            zer0-${{ matrix.target }}*
             SHA256SUMS.${{ matrix.target }}
+          overwrite_files: true
 
       - uses: actions/upload-artifact@v4
         with:
@@ -94,3 +97,4 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: SHA256SUMS
+          overwrite_files: true
