@@ -36,3 +36,24 @@ jobs:
       - name: Format (informatif)
         continue-on-error: true
         run: cargo fmt --all -- --check
+
+  gateway:
+    name: gateway (zer0-gw)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build zer0-gw
+        run: cargo build --release --features gateway
+
+      - name: Clippy (gateway)
+        run: cargo clippy --all-targets --features gateway -- -D warnings
+
+      - name: Tests (gateway)
+        run: cargo test --all-targets --features gateway

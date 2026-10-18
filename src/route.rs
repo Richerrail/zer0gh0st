@@ -90,6 +90,19 @@ pub fn auto_role(text: &str) -> &'static str {
 /// Endpoint chain for a role: the role's model first, then the normal chain.
 /// Falls back to the `main` role, then to the active endpoint.
 pub fn chain_for_role(settings: &Settings, role: &str) -> Vec<Endpoint> {
+    chain_for_role_with(settings, role, config::roles_enabled())
+}
+
+/// Comme `chain_for_role`, mais avec l'état « rôles » explicite (testable).
+///
+/// Rôles désactivés (`/role off`) ⇒ **un seul modèle** : le provider actif,
+/// **sans bascule** (les `routes` de la config sont ignorées). Sinon un échec
+/// changerait silencieusement de modèle — précisément ce qu'on veut éviter en
+/// mode « test d'un seul modèle ».
+fn chain_for_role_with(settings: &Settings, role: &str, roles_on: bool) -> Vec<Endpoint> {
+    if !roles_on {
+        return vec![from_settings(settings)];
+    }
     let roles = config::effective_roles();
     let route = roles
         .get(role)
@@ -278,5 +291,20 @@ mod tests {
         assert!(parse_route("no-slash").is_none());
         assert!(parse_route("unknownprovider/foo").is_none());
         assert!(parse_route("openrouter/").is_none());
+    }
+
+    #[test]
+    fn roles_off_gives_single_endpoint_without_failover() {
+        let s = Settings {
+            provider_id: "nvidia".to_string(),
+            provider_name: "NVIDIA".to_string(),
+            base_url: "https://integrate.api.nvidia.com/v1".to_string(),
+            model: "mistralai/mixtral-8x22b-v0.1".to_string(),
+            api_key: None,
+        };
+        let chain = chain_for_role_with(&s, "main", false);
+        assert_eq!(chain.len(), 1, "rôles off ⇒ un seul endpoint (pas de bascule)");
+        assert_eq!(chain[0].model, "mistralai/mixtral-8x22b-v0.1");
+        assert_eq!(chain[0].base_url, s.base_url);
     }
 }

@@ -1,3 +1,124 @@
+## v0.5.5 — Clés hors de l'agent, vision, menus (2026-10-17)
+
+Points saillants depuis v0.5.4 (détail daté plus bas) :
+
+- **Clés hors du processus agent** : `zer0-gw` (passerelle, utilisateur dédié) détient
+  les clés ; `/provider add` les y dépose en écriture seule ; `code_exec` n'hérite plus
+  d'aucun secret ; egress nftables (agent → loopback) ; unités systemd durcies.
+- **Un seul identifiant par provider** (fin du préfixe `gw-`) ; transport
+  passerelle/direct automatique ; migration des configurations existantes.
+- **Menus** : palette `/` filtrante, sélection navigable `/model` et `/provider`,
+  dépliage **par bloc** des sorties d'outils (clic droit / Ctrl+O), molette souris.
+- **Vision réelle** : `/img` (TUI) et `--img` (CLI) envoient l'image à un modèle multimodal.
+- **Nouveau provider** : Z.ai (Zhipu GLM).
+- **Mise à jour** : `zer0 update` — la CI publie désormais le binaire brut de chaque
+  plateforme et un `SHA256SUMS` (vérifié au téléchargement).
+- **Corrections** : URL upstream avec segment de version (z.ai), écriture des clés sous
+  systemd (`ReadWritePaths`), modèles d'embedding refusés en chat, `/role off` = un seul
+  modèle sans bascule, redémarrage du service à la mise à jour.
+
+## Mise à jour automatique : `zer0 update` (2026-10-17)
+
+- **`zer0 update`** (CLI) et **`/update`** (TUI) : interroge la dernière release GitHub,
+  télécharge le **binaire brut** de la plateforme, **vérifie le SHA256** (si
+  `SHA256SUMS` est publié — sinon le dit), puis remplace le binaire en place (rename
+  atomique). Options `--check` et `--force` ; les notes de version sont résumées.
+- **CI** : chaque release publie désormais le **binaire brut** (en plus des archives)
+  et des **checksums par cible**, agrégés en un `SHA256SUMS` unique.
+- **`scripts/update.sh`** : installe/rafraîchit un lanceur stable
+  (`~/.local/bin/zer0gh0st`) depuis les Releases — utile quand on construit depuis
+  les sources (cargo écrit dans `target/release`, pas dans le PATH).
+- Limites assumées : API GitHub non authentifiée (60 req/h), checksum issu du même
+  dépôt (pas de signature), Windows ne peut pas écraser un `.exe` en cours.
+- **Garde-fou dev** : si le binaire tourne depuis `target/` (build Cargo), `zer0 update`
+  **refuse** de le remplacer — pour un dev, c'est `cargo build --release` qui fait foi
+  (`--force` pour passer outre).
+
+## Fil compact : sorties repliées, dépliage par bloc (2026-10-17)
+
+- Les **sorties d'outils** (`role: tool`) sont repliées dans le fil : **3 lignes** +
+  « … N ligne(s) de plus — clic droit ou Ctrl+O ». Le dépliage est **par bloc** :
+  **clic droit** sur une sortie la déplie/replie (plafond 200 lignes), **Ctrl+O** agit
+  sur la dernière — comme `pi`, sans noyer le fil.
+- Les **appels d'outils** tiennent sur une ligne : `text_editor create /tmp/x.py
+  (42 lignes)`, `code_exec` → 1ʳᵉ ligne de la commande, `web_search` → la requête.
+  Fini le script Python entier déversé dans le fil.
+- Pied de page et aide : `Ctrl+O` / clic droit.
+
+## Vision : `/img` et `--img` (2026-10-17)
+
+- **`/img <chemin>`** (TUI) joint une image (PNG/JPEG/WebP/GIF) au **prochain** message ;
+  `/img clear` la retire, `/img` montre l'état. En CLI : `--img <chemin> --once "…"`.
+- Le message part en **content parts** OpenAI (`[{type:text}, {type:image_url}]`, data URL
+  base64) via `ChatMessage::to_wire_json()` ; sans image, `content` reste une chaîne.
+- **L'image n'est pas persistée** (`serde(skip)`) : jamais écrite dans le JSONL de
+  conversation (taille, données sensibles) — après `--resume`, refaire `/img`.
+- **Garde-fou honnête** : `/img` compare le modèle actif au catalogue `/models`
+  (`architecture.input_modalities`, marqué « 🖼 images » dans `/model`) et avertit si le
+  modèle n'accepte pas d'image, au lieu de laisser partir une requête vouée à l'échec.
+- Vérifié de bout en bout : agent → passerelle → `nvidia/nemotron-3.5-super-vl:free`
+  décrit réellement une capture d'écran (noms de stations lus dans l'image).
+
+## Défilement à la molette (2026-10-17)
+
+- **Molette souris** : défile la **conversation** (3 lignes/cran, retour en bas =
+  suivi auto réactivé). Au-dessus du panneau « Commandes », elle défile le panneau ;
+  sélecteur ouvert (`/model`, `/provider`, palette `/`), elle navigue dans la liste.
+  `PgUp`/`PgDn` restent disponibles.
+
+## Menus de sélection + un seul identifiant provider (2026-10-17)
+
+- **`/model`** (sans argument) et **`/provider`** (sans argument) ouvrent un **menu de
+  sélection** : ↑↓ / PageUp·PageDown, **filtre en tapant**, Entrée pour valider,
+  Échap pour annuler. Le panneau « Commandes » cliquable reste.
+- **Palette `/`** : taper `/` en début de saisie ouvre la **liste filtrante des
+  commandes** (↑↓, taper = filtrer, Entrée : exécute — ou insère si la commande attend
+  un argument, Échap : annuler). Le panneau « Commandes » cliquable reste.
+- **Fin du préfixe `gw-`** : un seul identifiant par provider (`openrouter`, `nvidia`,
+  `zai`…). Le transport (passerelle ou direct) est décidé automatiquement : si
+  `zer0-gw` répond, les providers intégrés passent par elle et **aucune clé n'est
+  résolue dans l'agent**. Les configs `gw-*` existantes sont migrées au démarrage.
+
+## Correctif zer0-gw : dépôt de clés (2026-10-16)
+
+- **`ProtectSystem=strict` rendait `/etc` en lecture seule** pour le service :
+  `/provider add` échouait en **500** avec `Read-only file system (os error 30)`.
+  Ajout de `ReadWritePaths=-/etc/zer0-gw` à l'unité, et droits de dossier
+  explicites dans `scripts/gw-setup.sh` (`chown root:zer0-gw`, `chmod 1770`).
+- La réponse HTTP 500 (et le journal) indique désormais la **cause système**
+  (`Permission denied`, `Read-only file system`…) au lieu d'un message générique.
+
+## `/role off|on` — tester un seul modèle (2026-10-15)
+
+- **`/role off`** (TUI) / **`zer0 role off`** (CLI) : désactive le routage par rôle —
+  tout (chat, sous-agents, `/work`, compaction) passe par le **modèle du provider
+  actif**. **`/role on`** réactive. Persisté dans `config.toml` (`roles_enabled`,
+  défaut `true` : les configs existantes restent actives). Barre de statut : `role:off`.
+- **Sans bascule** : en mode `off`, les `routes` de failover sont ignorées — un échec
+  donne une erreur au lieu de changer silencieusement de modèle (avant : la chaîne de
+  bascule continuait à s'appliquer, d'où des modèles différents d'un message à l'autre).
+  `/role on` rétablit **routage par rôle + bascule**.
+- `/role use <role>` réactive automatiquement les rôles ; `/role list` indique l'état.
+
+## Découpage de sécurité : zer0-gw + egress (2026-10-15)
+
+- **`zer0-gw`** (nouveau binaire, `cargo build --release --features gateway`) : passerelle
+  de clés. Les clés vivent dans `/etc/zer0-gw/` ; l'agent n'appelle que le loopback
+  **sans aucune clé** — l'exfiltration de clé devient impossible. Liste blanche de
+  chemins, rate-limit par provider, refus des redirections, journal JSON **sans clés**.
+- **`platform::scrub_secrets`** : `code_exec` (et tout shell enfant) n'hérite plus des
+  variables « secrets » (`*API_KEY*`, `*TOKEN*`, `*PASSPHRASE*`, `ZER0_VAULT*`, …).
+- **`/provider add <id> <clé>`** (TUI + `zer0 provider add`) : quand `zer0-gw` tourne,
+  la clé est **déposée sur la passerelle** (endpoint admin loopback, écriture seule) et
+  l'agent bascule sur `gw-<id>` **sans clé locale** ; sinon repli local averti. Nouvelle
+  commande **`/provider keys`** (état des clés détenues par `zer0-gw`) ; `provider remove`
+  oublie aussi la clé côté passerelle.
+- **`deploy/`** : unités systemd durcies (`IPAddressAllow=localhost` pour l'agent
+  headless), règles nftables d'egress par utilisateur (`zer0` → loopback uniquement ;
+  `zer0-gw` → 443 sortant), `scripts/gw-setup.sh`.
+- **Limites déclarées** (SAFETY.md §7) : l'agent peut toujours utiliser le relais
+  (quota) — plafonds de dépense côté provider recommandés.
+
 ## Projet test 0box (2026-10-13)
 
 - **`0BOX-TEST.md`** : projet test « compteur » (8 tâches, 1 par rôle) pour valider le

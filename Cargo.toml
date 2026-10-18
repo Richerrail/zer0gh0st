@@ -1,6 +1,6 @@
 [package]
 name = "zer0"
-version = "0.5.4"
+version = "0.5.5"
 edition = "2021"
 description = "ZER0|GH0ST - a terminal-native AI agent (CLI-only, Rust)"
 authors = ["richerrail"]
@@ -10,6 +10,16 @@ readme = "README.md"
 [[bin]]
 name = "zer0"
 path = "src/main.rs"
+
+# Passerelle de clés (optionnelle) : détient les clés API, l'agent n'en voit jamais.
+# Build : cargo build --release --features gateway  →  target/release/zer0-gw
+[[bin]]
+name = "zer0-gw"
+path = "src/bin/zer0-gw.rs"
+required-features = ["gateway"]
+
+[features]
+gateway = ["dep:axum", "tokio/net"]
 
 [dependencies]
 ratatui = "0.29"
@@ -31,8 +41,11 @@ argon2 = "0.5"
 rand = "0.8"
 base64 = "0.22"
 rpassword = "7"
+sha2 = "0.10"
 lopdf = "0.34"
 pdf-extract = "0.8"
+# Optionnel — uniquement pour la passerelle zer0-gw (feature "gateway") :
+axum = { version = "0.7", default-features = false, features = ["http1", "tokio", "json"], optional = true }
 
 [profile.release]
 opt-level = 3

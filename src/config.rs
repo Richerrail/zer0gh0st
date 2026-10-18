@@ -9,7 +9,7 @@ use crate::providers::{self, Provider};
 
 /// Global user config: API keys + last-used provider/model.
 /// Stored at `~/.config/zer0/config.toml`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlobalConfig {
     #[serde(default)]
     pub keys: BTreeMap<String, String>,
@@ -23,6 +23,14 @@ pub struct GlobalConfig {
     /// Named model presets: role -> `provider/model`.
     #[serde(default)]
     pub roles: BTreeMap<String, String>,
+    /// Routage par rôle actif ? `/role off` garde le modèle du provider actif
+    /// pour tout (utile pour tester un seul modèle). Défaut : `true`.
+    #[serde(default = "default_true")]
+    pub roles_enabled: bool,
+    /// Passer par zer0-gw pour les providers intégrés.
+    /// `None` = auto (on utilise la passerelle si elle répond).
+    #[serde(default)]
+    pub gateway: Option<bool>,
     /// User-defined providers (not in the built-in catalog).
     #[serde(default)]
     pub custom: BTreeMap<String, CustomProvider>,
@@ -38,6 +46,27 @@ pub struct GlobalConfig {
     /// Bot Telegram : identifiants (user id) autorisés à parler au bot.
     #[serde(default)]
     pub telegram_allow: Vec<i64>,
+}
+
+// `Default` manuel : `roles_enabled` doit valoir `true` sur une config neuve
+// (le `#[serde(default = …)]` ne couvre que la désérialisation, pas `default()`).
+impl Default for GlobalConfig {
+    fn default() -> Self {
+        Self {
+            keys: BTreeMap::new(),
+            provider: None,
+            model: None,
+            routes: Vec::new(),
+            roles: BTreeMap::new(),
+            roles_enabled: true,
+            gateway: None,
+            custom: BTreeMap::new(),
+            embeddings: None,
+            context_window: None,
+            telegram_token: None,
+            telegram_allow: Vec::new(),
+        }
+    }
 }
 
 /// Optional embedding backend, OpenAI-compatible (`/embeddings`).
@@ -226,12 +255,29 @@ pub fn resolve() -> Settings {
         .or_else(|| providers::default_model(&provider.id).map(String::from))
         .unwrap_or_default();
 
+    // Un seul identifiant par provider : si la passerelle tourne (ou si
+    // `gateway = true`), les providers intégrés passent par elle — la clé
+    // reste dans zer0-gw et n'est jamais résolue dans l'agent.
+    let via_gw = gateway_enabled() && !provider.custom;
+    let (base_url, api_key) = if via_gw {
+        (
+            format!(
+                "{}/{}/v1",
+                crate::gwclient::gw_base().trim_end_matches('/'),
+                provider.id
+            ),
+            None,
+        )
+    } else {
+        (provider.base_url.to_string(), key_for(&provider))
+    };
+
     Settings {
         provider_id: provider.id.to_string(),
         provider_name: provider.name.to_string(),
-        base_url: provider.base_url.to_string(),
+        base_url,
         model,
-        api_key: key_for(&provider),
+        api_key,
     }
 }
 
@@ -287,6 +333,71 @@ pub fn unset_role(role: &str, project: bool) -> Result<()> {
     }
 }
 
+/// Valeur par défaut des booléens « opt-out » (configs anciennes = comportement
+/// historique activé).
+fn default_true() -> bool {
+    true
+}
+
+/// `true` si le routage par rôle est actif. Les configs sans le champ
+/// `roles_enabled` restent actives (compatibilité).
+pub fn roles_enabled() -> bool {
+    load_global().roles_enabled
+}
+
+/// Active/désactive le routage par rôle (persisté dans la config globale).
+pub fn set_roles_enabled(on: bool) -> Result<()> {
+    let mut g = load_global();
+    g.roles_enabled = on;
+    save_global(&g)
+}
+
+/// La passerelle doit-elle servir les providers intégrés ?
+/// `gateway = true/false` force ; absent = auto (la passerelle répond).
+pub fn gateway_enabled() -> bool {
+    load_global().gateway.unwrap_or_else(crate::gwclient::available)
+}
+
+/// Migration de l'ancien schéma `gw-<id>` : un seul identifiant par provider.
+/// Retire le préfixe dans `provider`/`routes`/`roles` et supprime les entrées
+/// `[custom.gw-*]` devenues inutiles. Retourne `true` si quelque chose a changé.
+pub fn migrate_gateway_prefix() -> bool {
+    let mut g = load_global();
+    let mut changed = false;
+
+    if let Some(p) = g.provider.as_ref().and_then(|p| p.strip_prefix("gw-")) {
+        g.provider = Some(p.to_string());
+        changed = true;
+    }
+    for r in g.routes.iter_mut() {
+        if let Some(rest) = r.strip_prefix("gw-") {
+            *r = rest.to_string();
+            changed = true;
+        }
+    }
+    for v in g.roles.values_mut() {
+        if let Some(rest) = v.strip_prefix("gw-") {
+            *v = rest.to_string();
+            changed = true;
+        }
+    }
+    let legacy: Vec<String> = g
+        .custom
+        .keys()
+        .filter(|k| k.starts_with("gw-"))
+        .cloned()
+        .collect();
+    for k in legacy {
+        g.custom.remove(&k);
+        changed = true;
+    }
+
+    if changed {
+        let _ = save_global(&g);
+    }
+    changed
+}
+
 /// System-prompt override from the project, if any.
 pub fn system_prompt_override() -> Option<String> {
     let p = load_project();
@@ -320,4 +431,24 @@ fn write_toml<T: Serialize>(p: &Path, v: &T) -> Result<()> {
         let _ = fs::set_permissions(p, fs::Permissions::from_mode(0o600));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn roles_enabled_defaults_true_and_parses_false() {
+        // Config neuve (aucun fichier) → rôles actifs.
+        assert!(GlobalConfig::default().roles_enabled);
+        // Config ancienne (aucun champ) → rôles actifs, comportement historique.
+        let g: GlobalConfig = toml::from_str("").unwrap();
+        assert!(g.roles_enabled);
+        // Désactivation explicite.
+        let g: GlobalConfig = toml::from_str("roles_enabled = false").unwrap();
+        assert!(!g.roles_enabled);
+        // Réactivation explicite.
+        let g: GlobalConfig = toml::from_str("roles_enabled = true").unwrap();
+        assert!(g.roles_enabled);
+    }
 }

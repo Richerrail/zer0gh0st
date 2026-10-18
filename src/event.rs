@@ -26,6 +26,8 @@ pub enum UiEvent {
     Voice(String),
     /// Fenêtre de contexte rapportée par le provider (tokens).
     ContextWindow(u64),
+    /// Liste de modèles reçue : ouvre le sélecteur de modèle.
+    ModelList(Vec<crate::models::ModelEntry>),
     /// Le bot Telegram a demandé à s'éteindre (/shutdown).
     TelegramShutdown,
 }

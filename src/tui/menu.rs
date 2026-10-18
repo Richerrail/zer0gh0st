@@ -23,6 +23,27 @@ pub enum Hit {
     Cmd(&'static str),
 }
 
+/// Liste plate des commandes (commande, « groupe · libellé ») pour la palette `/`.
+pub fn flat_commands() -> Vec<(String, String)> {
+    fn walk(nodes: &'static [Node], group: Option<&str>, out: &mut Vec<(String, String)>) {
+        for node in nodes {
+            match node.run {
+                Some(run) => {
+                    let label = match group {
+                        Some(g) => format!("{g} · {}", node.label),
+                        None => node.label.to_string(),
+                    };
+                    out.push((run.to_string(), label));
+                }
+                None => walk(node.children, Some(node.label), out),
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(TREE, None, &mut out);
+    out
+}
+
 const fn n(label: &'static str, run: &'static str) -> Node {
     Node { label, run: Some(run), children: &[] }
 }
@@ -43,17 +64,21 @@ pub const TREE: &[Node] = &[
     n("work", "/work"),
     n("stop", "/stop"),
     n("quit", "/quit"),
+    // Visibles directement (sans déplier le groupe « model »).
+    n("model use", "/model use "),
+    n("free", "/free"),
+    n("update", "/update"),
     g("provider", &[
+        n("sélection", "/provider"),
         n("list", "/provider list"),
         n("add", "/provider add "),
         n("use", "/provider use "),
         n("remove", "/provider remove "),
     ]),
     g("model", &[
-        n("status", "/model"),
-        n("use", "/model use "),
+        n("sélection", "/model"),
         n("list", "/models"),
-        n("free", "/free"),
+        n("image", "/img "),
     ]),
     g("route", &[
         n("list", "/route list"),
@@ -63,6 +88,8 @@ pub const TREE: &[Node] = &[
     ]),
     g("role", &[
         n("list", "/role list"),
+        n("off", "/role off"),
+        n("on", "/role on"),
         n("set", "/role set "),
         n("use", "/role use "),
         n("auto", "/role auto"),
@@ -78,6 +105,8 @@ pub const TREE: &[Node] = &[
         n("remember", "/remember "),
         n("recall", "/recall "),
         n("forget", "/forget "),
+        n("embedder", "/embeddings"),
+        n("set embedder", "/embeddings set "),
     ]),
     g("task", &[
         n("list", "/task list"),
@@ -232,4 +261,28 @@ pub fn draw(
         lines.push(line);
     }
     f.render_widget(Paragraph::new(lines), inner);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn flat_commands_is_non_empty_and_covers_model_provider_role() {
+        let cmds = flat_commands();
+        assert!(cmds.len() > 10, "palette trop pauvre : {}", cmds.len());
+        assert!(cmds.iter().any(|(c, _)| c == "/model"));
+        assert!(cmds.iter().any(|(c, _)| c == "/provider"));
+        // présentes en direct dans le menu défilable
+        assert!(cmds.iter().any(|(c, _)| c == "/model use "));
+        assert!(cmds.iter().any(|(c, _)| c == "/free"));
+        // les sous-commandes portent le groupe dans le libellé
+        assert!(cmds.iter().any(|(c, l)| c == "/role off" && l.contains('·')));
+        // pas de doublon de commande
+        let mut codes: Vec<&String> = cmds.iter().map(|(c, _)| c).collect();
+        codes.sort();
+        let before = codes.len();
+        codes.dedup();
+        assert_eq!(before, codes.len(), "commandes en double dans la palette");
+    }
 }

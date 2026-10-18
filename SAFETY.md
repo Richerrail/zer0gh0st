@@ -3,7 +3,7 @@
 > **Règle fondamentale** : une propriété de sûreté non documentée n'est pas une propriété sûre —
 > elle est invérifiable. Quelqu'un qui décide de lancer Zer0 ne dispose que de ces documents.
 
-**Version** : 1.0 (2026-10-06) · **Projet** : 0.5.4
+**Version** : 1.0 (2026-10-06) · **Projet** : 0.5.5
 
 ---
 
@@ -88,3 +88,45 @@ ce modèle de menace. Voir [`ECOSYSTEM.md`](./ECOSYSTEM.md).
 2. Ne **pas** y déverrouiller le coffre ni y ouvrir de session authentifiée si l'agent traite du web.
 3. Activer `F4` (code_exec) **seulement** quand nécessaire.
 4. Souscrire aux conditions de chaque provider ; ne pas router de données sensibles.
+
+---
+
+## 7. Réduire l'exfiltration : `zer0-gw` + egress (déploiement durci)
+
+Le coffre chiffre les clés **au repos** ; tant que la clé est résolue dans le processus
+agent (`config::key_for`), un agent compromis peut la lire et l'envoyer ailleurs.
+Le déploiement durci retire la clé du processus — quatre couches, indépendantes :
+
+1. **Passerelle `zer0-gw`** (optionnel : `cargo build --release --features gateway`) :
+   le seul processus qui détient les clés (`/etc/zer0-gw/`, lisible par l'utilisateur
+   `zer0-gw` uniquement). L'agent n'appelle que `http://127.0.0.1:8787` **sans aucune
+   clé** ; la passerelle injecte l'en-tête `Authorization` vers le provider. Exfiltrer
+   une clé depuis l'agent devient impossible — elle n'y a jamais été.
+2. **Egress nftables** (`deploy/20-zer0-egress.nft`) : l'utilisateur `zer0` ne peut
+   joindre que le loopback ; seul `zer0-gw` sort, en TCP 443. Une exfiltration devient
+   un refus réseau, pas une affaire de confiance.
+3. **Unités systemd durcies** (`deploy/*.service`) : utilisateurs dédiés,
+   `ProtectSystem`, `SystemCallFilter`, et surtout `IPAddressAllow=localhost` pour
+   l'agent headless — le blocage le plus fort, sans même nftables.
+4. **Hygiène d'environnement** (`platform::scrub_secrets`) : les variables ressemblant
+   à des secrets (`*API_KEY*`, `*TOKEN*`, `*PASSPHRASE*`, `ZER0_VAULT*`, …) sont
+   retirées de l'environnement de tout processus enfant — `code_exec` ne peut plus
+   faire `env` pour récupérer une clé héritée.
+
+Installation : `sudo scripts/gw-setup.sh`. Côté agent, plus aucune clé à saisir :
+`/provider add openrouter sk-…` (TUI) ou `zer0 provider add …` (CLI) **déposent la clé
+sur la passerelle** via un endpoint admin loopback **en écriture seule** (on peut
+déposer, jamais relire), puis basculent l'agent sur `gw-<id>`. `/provider keys` affiche
+l'état des clés détenues par `zer0-gw`. Si la passerelle est absente, repli local avec
+avertissement — le coffre/`chmod 600` du §4 s'applique alors, et non le durcissement.
+
+**Ce que ça ne protège pas** : l'agent compromis peut toujours **utiliser le relais**
+(demander à `zer0-gw` d'appeler un provider, au détriment de votre quota — d'où le
+rate-limit côté passerelle et les plafonds de dépense côté provider) ; il voit toujours
+tout ce qui passe dans son contexte. Un processus qui exécute du code arbitraire n'est
+pas devenu digne de confiance : **sa clé est devenue inatteignable, c'est différent**.
+Les recommandations du §6 (VM/conteneur, pas de session authentifiée) restent valables.
+
+Honnêteté : la passerelle est un binaire de ~450 lignes avec liste blanche de chemins,
+rate-limit, refus des redirections et journal sans clés — mais elle n'a pas été auditée
+indépendamment. Elle réduit la surface d'attaque, elle ne prétend pas la fermer.
