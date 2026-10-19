@@ -1762,13 +1762,13 @@ pub fn cmd_0box(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) 
     }
     
     // Parse optional --perspectives flag
-    let mut perspectives = vec!["main", "code", "reasoning"];
+    let mut perspectives: Vec<String> = vec!["main".to_string(), "code".to_string(), "reasoning".to_string()];
     let topic_parts: Vec<&str> = topic.split_whitespace().collect();
     let mut topic_words = Vec::new();
     let mut i = 0;
     while i < topic_parts.len() {
         if topic_parts[i] == "--perspectives" && i + 1 < topic_parts.len() {
-            perspectives = topic_parts[i + 1].split(',').map(|s| s.trim()).collect();
+            perspectives = topic_parts[i + 1].split(',').map(|s| s.trim().to_string()).collect();
             i += 2;
         } else {
             topic_words.push(topic_parts[i]);
@@ -1777,81 +1777,202 @@ pub fn cmd_0box(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) 
     }
     let topic = topic_words.join(" ");
     
+    // Launch sequential debate as a background task
+    let app_settings = app.settings();
     let system = app.system.clone();
     let options = ChatOptions {
         max_tokens: app.max_tokens,
         thinking: app.thinking,
         temperature: app.temperature,
     };
+    let read_write = app.read_write;
+    let code_exec = app.code_exec;
+    let all_tools = app.all_tools.clone();
+    let ui = ui_tx.clone();
+    let topic_owned = topic.clone();
+    let perspectives_owned = perspectives.clone();
     
     app.messages.push(ChatMessage::notice(format!(
-        "[0box] Brainstorm sur '{}' — perspectives: {} — en cours…",
+        "[0box] 🎭 DÉBAT SÉQUENTIEL sur '{}' — perspectives: {} — en cours…",
         topic,
         perspectives.join(", ")
     )));
     
-    for (idx, role) in perspectives.iter().enumerate() {
-        let role_str = role.to_string();
-        let role_label = format!("[0box:{}]", role_str);
-        let system2 = system.clone();
-        let ui = ui_tx.clone();
-        let endpoints = route::chain_for_0box_role(&app.settings(), role);
-        let options_clone = options.clone();
-        let tc = topic.clone();
+    tokio::spawn(async move {
+        run_0box_debate(
+            topic_owned,
+            perspectives_owned,
+            app_settings,
+            system,
+            options,
+            read_write,
+            code_exec,
+            all_tools,
+            ui
+        ).await;
+    });
+}
+
+/// Lance un vrai débat séquentiel : chaque modèle reçoit la conversation complète
+/// et répond à son tour. Le dernier (MAIN) synthétise et peut exécuter.
+async fn run_0box_debate(
+    topic: String,
+    perspectives: Vec<String>,
+    app_settings: crate::config::Settings,
+    system: String,
+    options: ChatOptions,
+    read_write: bool,
+    code_exec: bool,
+    all_tools: Vec<crate::tools::ToolSpec>,
+    ui: UnboundedSender<UiEvent>,
+) {
+    // Build tools available (respect F3/F4)
+    let tools: Vec<crate::tools::ToolSpec> = all_tools
+        .iter()
+        .filter(|t| (t.name != "text_editor" || read_write) && (t.name != "code_exec" || code_exec))
+        .cloned()
+        .collect();
+    
+    // Conversation partagée entre tous les participants
+    let mut conversation: Vec<ChatMessage> = Vec::new();
+    
+    // Prompt initial système pour le débat
+    let debate_system = format!(
+        "{}\n\n## RÈGLES DU DÉBAT 0BOX\n\nTu participes à un débat structuré entre plusieurs perspectives IA.\nChaque participant parle À SON TOUR, reçoit l'historique complet, et doit :\n1. RÉPONDRE aux arguments précédents (accord/désaccord/nuance)\n2. APPORTER sa perspective unique\n3. UTILISER les outils si nécessaire (web_search, knowledge_search, etc.)\n4. RESTER CONSTRUCTIF — l'objectif est une solution concrète finale.\n\nLe DERNIER participant (MAIN) doit SYNTHÉTISER et PROPOSER UN PLAN D'ACTION EXÉCUTABLE.\nSi des outils sont nécessaires pour valider (code, fichiers, recherche), UTILISE-LES.",
+        system
+    );
+    
+    // Tour 1 : Premier participant (pas d'historique de débat)
+    for (turn_idx, role) in perspectives.iter().enumerate() {
+        let is_last = turn_idx == perspectives.len() - 1;
+        let role_label = if is_last { "MAIN (synthèse + action)" } else { role };
         
-        // Create a channel for sub-agent events (fallback, tool calls, etc.)
+        // Build prompt for this turn
+        let prompt = if turn_idx == 0 {
+            format!(
+                "=== DÉBAT 0BOX — TOUR 1/{} ===\nSUJET : {}\nTA PERSPECTIVE : {}\n\nTu OUVRES le débat. Donne ton analyse initiale, tes arguments clés, et tes questions aux autres perspectives.\nSois concret, structuré, et utilise les outils si tu as besoin de données.",
+                perspectives.len(),
+                topic,
+                role
+            )
+        } else if is_last {
+            // MAIN : synthèse finale + plan d'action
+            let history = format_conversation(&conversation);
+            format!(
+                "=== DÉBAT 0BOX — TOUR {}/{} (MAIN - SYNTHÈSE FINALE) ===\nSUJET : {}\nHISTORIQUE DU DÉBAT :\n{}\n\nTA MISSION (MAIN) :\n1. SYNTHÉTISE les points d'accord et de désaccord\n2. IDENTIFIE la meilleure approche consensuelle\n3. PROPOSE un PLAN D'ACTION CONCRET, ÉTAPE PAR ÉTAPE\n4. SI le plan nécessite du code/fichiers/recherche → UTILISE LES OUTILS pour l'EXÉCUTER MAINTENANT\n\nRéponds avec : SYNTHÈSE + PLAN D'ACTION + EXÉCUTION (outils si besoin).",
+                turn_idx + 1,
+                perspectives.len(),
+                topic,
+                history
+            )
+        } else {
+            // Participants intermédiaires : réagissent au débat
+            let history = format_conversation(&conversation);
+            format!(
+                "=== DÉBAT 0BOX — TOUR {}/{} ===\nSUJET : {}\nTA PERSPECTIVE : {}\nHISTORIQUE DU DÉBAT :\n{}\n\nRÉPONDS MAINTENANT :\n- Quels arguments précèdents VALIDES/INVALIDES ?\n- Quelle perspective UNIQUE apportes-tu ?\n- Quelles QUESTIONS aux autres ?\n- Utilise les outils si tu as besoin de preuves/données.",
+                turn_idx + 1,
+                perspectives.len(),
+                topic,
+                role,
+                history
+            )
+        };
+        
+        // Endpoint pour ce rôle
+        let endpoints = crate::route::chain_for_0box_role(&app_settings, role);
+        
+        // Channel pour événements du sous-agent
         let (evt_tx, mut evt_rx) = tokio::sync::mpsc::unbounded_channel::<crate::agent::subagent::SubAgentEvent>();
         
-        // Tools available to 0box agents (respect F3/F4 toggles)
-        let tools_0box: Vec<crate::tools::ToolSpec> = app
-            .all_tools
-            .iter()
-            .filter(|t| (t.name != "text_editor" || app.read_write) && (t.name != "code_exec" || app.code_exec))
-            .cloned()
-            .collect();
+        // Annonce du tour
+        let _ = ui.send(UiEvent::Info(format!("🎭 [0box:{}] Tour {}/{} — parole à {}", role, turn_idx + 1, perspectives.len(), role_label)));
         
-        tokio::spawn(async move {
-            let prompt = format!(
-                "Brainstorm sur '{}'. Perspective {} ({}): développe ton point de vue de manière concise, structure : 3 idées + conclusion.",
-                tc, idx + 1, role_str
-            );
+        // Lance le sous-agent avec l'historique de conversation complet
+        let system_clone = debate_system.clone();
+        let tools_clone = tools.clone();
+        let options_clone = options.clone();
+        let endpoints_clone = endpoints.clone();
+        let ui_clone = ui.clone();
+        let role_owned = role.to_string();
+        
+        let subagent_handle = tokio::spawn(async move {
+            let mut messages = vec![ChatMessage::user(prompt)];
+            
+            // Le sous-agent tourne avec ses propres messages MAIS on lui donne
+            // le système de débat + la conversation accumulée via le prompt
             let res = crate::agent::subagent::run_subagent(
-                endpoints, system2, prompt, tools_0box, options_clone, Some(evt_tx)
+                endpoints_clone,
+                system_clone,
+                messages[0].content.as_ref().unwrap().clone(),
+                tools_clone,
+                options_clone,
+                Some(evt_tx)
             ).await;
-            let label = format!("[{}]", role_str);
-            let _ = ui.send(UiEvent::Info(format!("📝 [{}]\n{}", label, res)));
+            (role_owned, res)
         });
         
-        // Forward sub-agent events to main UI
-        let ui2 = ui_tx.clone();
+        // Forward événements en temps réel
+        let ui_evt = ui.clone();
+        let role_label_owned = role_label.to_string();
         tokio::spawn(async move {
             while let Some(evt) = evt_rx.recv().await {
                 match evt {
                     crate::agent::subagent::SubAgentEvent::Fallback { from, to, reason } => {
-                        let _ = ui2.send(UiEvent::Info(format!(
-                            "{} ⚡ Bascule: {} → {} ({})\n",
-                            role_label, from, to, reason
+                        let _ = ui_evt.send(UiEvent::Info(format!(
+                            "{} ⚡ Bascule: {} → {} ({})", role_label_owned, from, to, reason
                         )));
                     }
                     crate::agent::subagent::SubAgentEvent::ToolCall { name, args } => {
-                        let short: String = args.chars().take(80).collect();
-                        let _ = ui2.send(UiEvent::Info(format!(
-                            "{} ⚙ {} {}", role_label, name, short
-                        )));
+                        let short: String = args.chars().take(100).collect();
+                        let _ = ui_evt.send(UiEvent::Info(format!("{} ⚙ {} {}", role_label_owned, name, short)));
                     }
                     crate::agent::subagent::SubAgentEvent::Error(e) => {
-                        let _ = ui2.send(UiEvent::Info(format!("{} ⚠ {}", role_label, e)));
+                        let _ = ui_evt.send(UiEvent::Info(format!("{} ⚠ {}", role_label_owned, e)));
                     }
                     crate::agent::subagent::SubAgentEvent::Info(info) => {
-                        let _ = ui2.send(UiEvent::Info(format!("{} ℹ {}", role_label, info)));
+                        let _ = ui_evt.send(UiEvent::Info(format!("{} ℹ {}", role_label_owned, info)));
                     }
                 }
             }
         });
         
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        // Attend la fin du tour
+        let (speaker, response) = subagent_handle.await.unwrap_or_else(|_| (role.to_string(), "Erreur".to_string()));
+        
+        // Ajoute à la conversation partagée
+        conversation.push(ChatMessage::assistant(format!("[{}]: {}", speaker, response), vec![]));
+        
+        // Affiche dans l'UI
+        let _ = ui.send(UiEvent::Info(format!("📝 [{}]:\n{}", speaker, response)));
+        
+        // Petite pause entre les tours
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
-    app.messages.push(ChatMessage::notice(format!("[0box] {} agents lancés sur '{}'.", perspectives.len(), topic)));
+    
+    // Fin du débat
+    let _ = ui.send(UiEvent::Info("✅ [0box] Débat terminé — synthèse et plan d'action ci-dessus.".to_string()));
+}
+
+/// Formate la conversation pour l'injection dans le prompt
+fn format_conversation(conversation: &[ChatMessage]) -> String {
+    if conversation.is_empty() {
+        return "(début du débat)".to_string();
+    }
+    conversation.iter().map(|m| {
+        if let Some(content) = &m.content {
+            // Extrait le speaker si format [speaker]: content
+            if let Some(rest) = content.strip_prefix('[') {
+                if let Some(end) = rest.find(']') {
+                    let speaker = &rest[..end];
+                    let text = &rest[end+2..];
+                    return format!("  🎭 {}: {}", speaker, text.chars().take(800).collect::<String>());
+                }
+            }
+            format!("  💬 {}", content.chars().take(800).collect::<String>())
+        } else {
+            String::new()
+        }
+    }).collect::<Vec<_>>().join("\n")
 }
 
 fn handle_0box_fallback(app: &mut App, args: &[&str], _ui_tx: &UnboundedSender<UiEvent>) {
