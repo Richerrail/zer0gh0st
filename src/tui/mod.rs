@@ -895,17 +895,35 @@ fn handle_provider(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent
             app.messages.push(ChatMessage::notice(s));
         }
         Some("add") => {
-            // Helper: /provider add cline <url> — pré-configure Cline
+            // Helper: /provider add cline [url] [clé]
+            // Un argument qui n'est PAS une URL (ex. une clé « sk_… ») est refusé :
+            // sinon il finit en base_url et /models crashe en « builder error ».
             let first = args.get(1).copied().unwrap_or("");
             if first == "cline" {
-                let url = args.get(2).copied().unwrap_or("http://localhost:11434/v1");
-                let id = "cline".to_string();
+                let arg2 = args.get(2).copied().unwrap_or("");
+                let arg3 = args.get(3).copied().unwrap_or("");
+                let (url, key) = if arg2.is_empty() {
+                    ("http://localhost:11434/v1".to_string(), None)
+                } else if arg2.starts_with("http://") || arg2.starts_with("https://") {
+                    (arg2.to_string(), if arg3.is_empty() { None } else { Some(arg3.to_string()) })
+                } else {
+                    app.messages.push(ChatMessage::notice(
+                        "⚠ Cet argument n'est pas une URL (une clé API ne peut PAS servir de base_url).\n\
+                         usage: /provider add cline [http://hôte:port/v1] [clé]\n\
+                         Sans argument → Ollama local (http://localhost:11434/v1).\n\
+                         Pour utiliser ta clé cline, donne l'URL du service en 1er, la clé en 2e.",
+                    ));
+                    return;
+                };
                 let mut g = config::load_global();
-                g.custom.insert(id.clone(), config::CustomProvider {
-                    name: "Cline (Ollama)".to_string(),
-                    base_url: url.to_string(),
+                g.custom.insert("cline".to_string(), config::CustomProvider {
+                    name: "cline".to_string(),
+                    base_url: url.clone(),
                     env_key: None,
                 });
+                if let Some(k) = key {
+                    g.keys.insert("cline".to_string(), k);
+                }
                 let _ = config::save_global(&g);
                 app.messages.push(ChatMessage::notice(format!(
                     "Provider 'cline' ajouté → {url}.\nUtilise: /provider use cline\nPuis: /models" )));
@@ -967,6 +985,11 @@ fn handle_provider(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent
             let url = args.get(2).copied().unwrap_or("");
             if id.is_empty() || url.is_empty() {
                 app.messages.push(ChatMessage::notice("usage: /provider add-custom <id> <base_url>"));
+            } else if !(url.starts_with("http://") || url.starts_with("https://")) {
+                app.messages.push(ChatMessage::notice(format!(
+                    "⚠ base_url invalide : « {url} » — elle doit commencer par http:// ou https://.\n\
+                     (une clé API ne peut PAS servir de base_url)"
+                )));
             } else if providers::builtins().iter().any(|p| p.id == id) {
                 app.messages.push(ChatMessage::notice(format!("'{id}' est déjà un provider intégré.")));
             } else {

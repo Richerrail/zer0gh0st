@@ -803,12 +803,19 @@ fn provider_cmd(action: ProviderAction) -> Result<()> {
             }
         }
         ProviderAction::Add { id, key } => {
-            // Helper: zer0 provider add cline [url]
+            // Helper: zer0 provider add cline [url] — l'URL doit être http(s)://, jamais une clé.
             if id.eq_ignore_ascii_case("cline") {
                 let url = key.unwrap_or_else(|| "http://localhost:11434/v1".to_string());
+                if !(url.starts_with("http://") || url.starts_with("https://")) {
+                    return Err(anyhow!(
+                        "« zer0 provider add cline » attend une URL (http://…), pas une clé.\n\
+                         usage: zer0 provider add cline [http://hôte:port/v1]\n\
+                         Sans argument → Ollama local (http://localhost:11434/v1)."
+                    ));
+                }
                 let mut g = config::load_global();
                 g.custom.insert("cline".to_string(), config::CustomProvider {
-                    name: "Cline (Ollama)".to_string(),
+                    name: "cline".to_string(),
                     base_url: url.clone(),
                     env_key: None,
                 });
@@ -860,6 +867,12 @@ Puis: zer0 models");
         }
         ProviderAction::AddCustom { id, base_url, name, env } => {
             let id = id.to_ascii_lowercase();
+            if !(base_url.starts_with("http://") || base_url.starts_with("https://")) {
+                return Err(anyhow!(
+                    "base_url invalide : « {base_url} » — elle doit commencer par http:// ou https:// \
+                     (une clé API ne peut PAS servir de base_url)"
+                ));
+            }
             if providers::builtins().iter().any(|p| p.id == id) {
                 return Err(anyhow!(
                     "'{id}' est déjà un provider intégré — pas besoin de add-custom."
