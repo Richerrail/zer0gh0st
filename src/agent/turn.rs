@@ -22,10 +22,39 @@ const MAX_CONTINUATIONS: u32 = 4;
 pub async fn run_turn(
     endpoints: Vec<Endpoint>,
     system: String,
+    messages: Vec<ChatMessage>,
+    tools: Vec<ToolSpec>,
+    options: ChatOptions,
+    ui: UnboundedSender<UiEvent>,
+) {
+    run_turn_budgeted(
+        endpoints,
+        system,
+        messages,
+        tools,
+        options,
+        ui,
+        MAX_ITERATIONS,
+        MAX_TOOL_CALLS,
+    )
+    .await
+}
+
+/// Comme `run_turn`, mais avec un budget d'endiguement explicite. Le débat 0box
+/// (MAIN exécute un plan multi-étapes : vérifier + créer + marquer) a montré que
+/// le budget par défaut (8 itérations) ne laisse même pas place aux `task_update`
+/// après vérification des livrables — les tours 0box passent donc un budget élargi,
+/// toujours borné (principe d'endiguement respecté : jamais illimité).
+#[allow(clippy::too_many_arguments)]
+pub async fn run_turn_budgeted(
+    endpoints: Vec<Endpoint>,
+    system: String,
     mut messages: Vec<ChatMessage>,
     tools: Vec<ToolSpec>,
     options: ChatOptions,
     ui: UnboundedSender<UiEvent>,
+    max_iterations: usize,
+    max_tool_calls: usize,
 ) {
     if endpoints.is_empty() {
         let _ = ui.send(UiEvent::Error("aucun endpoint configuré".into()));
@@ -118,7 +147,7 @@ pub async fn run_turn(
     let mut total_calls: usize = 0;
     let mut continuations: u32 = 0;
 
-    for _ in 0..MAX_ITERATIONS {
+    for _ in 0..max_iterations {
         let assistant = ChatMessage::assistant(content.clone(), calls.clone());
         messages.push(assistant.clone());
 
@@ -166,9 +195,9 @@ pub async fn run_turn(
                 )));
                 return;
             }
-            if total_calls > MAX_TOOL_CALLS {
+            if total_calls > max_tool_calls {
                 let _ = ui.send(UiEvent::Error(format!(
-                    "budget d'appels d'outils dépassé ({MAX_TOOL_CALLS}) → arrêt"
+                    "budget d'appels d'outils dépassé ({max_tool_calls}) → arrêt"
                 )));
                 return;
             }

@@ -1886,7 +1886,8 @@ pub fn cmd_0box(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) 
 
 /// Lance un vrai débat séquentiel : chaque modèle reçoit la conversation complète
 /// et répond à son tour. Le dernier (MAIN) synthétise et peut exécuter.
-async fn run_0box_debate(
+/// Publique : également appelée par le CLI headless (`zer0 0box <sujet>`).
+pub async fn run_0box_debate(
     topic: String,
     perspectives: Vec<String>,
     app_settings: crate::config::Settings,
@@ -1959,7 +1960,7 @@ async fn run_0box_debate(
             // MAIN : synthèse + attribution des tâches + EXÉCUTION IMMÉDIATE
             let history = format_conversation(&conversation);
             format!(
-                "=== DÉBAT 0BOX — TOUR {}/{} (MAIN - SYNTHÈSE + TÂCHES + EXÉCUTION) ===\nSUJET : {}\nHISTORIQUE DU DÉBAT :\n{}\n\n⚠️⚠️⚠️ INSTRUCTION CRITIQUE POUR MAIN ⚠️⚠️⚠️\n\nTu es MAIN. Ton rôle : SYNTHÉTISER, ATTRIBUER LES TÂCHES, puis EXÉCUTER.\n\nRÈGLE ABSOLUE : Tu DOIS appeler des outils DANS CETTE RÉPONSE.\nNE RÉPONDS PAS AVEC DU TEXTE SEULEMENT.\n\nPROCÉDURE OBLIGATOIRE (dans cet ordre) :\n1. CRÉE LES TÂCHES : appelle task_add UNE FOIS PAR étape du plan d'action.\n   Exemple : task_add text=\"Créer TodoList.java\" role=\"code\"\n   → chaque tâche reçoit un id (t1, t2, …) que les outils te renvoient.\n2. EXÉCUTE : appelle text_editor (create) pour CHAQUE fichier à créer,\n   code_exec pour CHAQUE commande à lancer.\n3. Marque l'avancement : task_update id=t1 status=claim au démarrage,\n   task_update id=t1 status=done quand c'est fini.\n4. Enchaîne les appels SANS t'arrêter jusqu'à ce que le plan soit réalisé.\n\nLes tâches restent visibles avec /task : l'utilisateur pourra les reprendre\navec /work si le budget d'appels d'outils est épuisé avant la fin.\n\nSi tu ne fais qu'écrire du texte sans appeler task_add, TU ÉCHOUES.\n\nCommence MAINTENANT : appelle task_add pour la première étape du plan.",
+                "=== DÉBAT 0BOX — TOUR {}/{} (MAIN - SYNTHÈSE + TÂCHES + EXÉCUTION) ===\nSUJET : {}\nHISTORIQUE DU DÉBAT :\n{}\n\n⚠️⚠️⚠️ INSTRUCTION CRITIQUE POUR MAIN ⚠️⚠️⚠️\n\nTu es MAIN. Ton rôle : SYNTHÉTISER, ATTRIBUER LES TÂCHES, puis EXÉCUTER.\n\nRÈGLE ABSOLUE : Tu DOIS appeler des outils DANS CETTE RÉPONSE.\nNE RÉPONDS PAS AVEC DU TEXTE SEULEMENT.\n\nPROCÉDURE OBLIGATOIRE (dans cet ordre) :\n0. VÉRIFIE D'ABORD avec task_list ce qui existe déjà : ne recrée JAMAIS une tâche existante — reprends le travail là où il en est (task_update claim → travail → done).\n1. CRÉE LES TÂCHES manquantes : appelle task_add UNE FOIS PAR étape du plan d'action.\n   Exemple : task_add text=\"Créer TodoList.java\" role=\"code\"\n   → chaque tâche reçoit un id (t1, t2, …) que les outils te renvoient.\n2. EXÉCUTE : appelle text_editor (create) pour CHAQUE fichier à créer,\n   code_exec pour CHAQUE commande à lancer.\n3. Marque l'avancement : task_update id=t1 status=claim au démarrage,\n   task_update id=t1 status=done quand c'est fini.\n4. Enchaîne les appels SANS t'arrêter jusqu'à ce que le plan soit réalisé.\n\nLes tâches restent visibles avec /task : l'utilisateur pourra les reprendre\navec /work si le budget d'appels d'outils est épuisé avant la fin.\n\nSi tu ne fais qu'écrire du texte sans appeler task_add, TU ÉCHOUES.\n\nCommence MAINTENANT : task_list d'abord, puis task_add pour les étapes manquantes.",
                 turn_idx + 1,
                 debate_perspectives.len(),
                 topic,
@@ -1986,7 +1987,6 @@ async fn run_0box_debate(
         
         // Exécute le tour avec validation et retry si échec
         let (speaker, response) = run_0box_turn_with_retry(
-            turn_idx,
             role,
             role_label,
             &prompt,
@@ -2016,7 +2016,6 @@ async fn run_0box_debate(
 /// Exécute un tour du débat 0box avec retry automatique et validation de la réponse.
 /// Retourne (speaker, response) garanti valide (non vide, non erreur).
 async fn run_0box_turn_with_retry(
-    turn_idx: usize,
     role: &str,
     role_label: &str,
     prompt: &str,
@@ -2040,14 +2039,6 @@ async fn run_0box_turn_with_retry(
         // Channel pour événements du sous-agent
         let (evt_tx, mut evt_rx) = tokio::sync::mpsc::unbounded_channel::<crate::agent::subagent::SubAgentEvent>();
         
-        // Annonce du tour (seulement au premier essai)
-        if attempt == 0 {
-            let _ = ui.send(UiEvent::Info(format!(
-                "🎭 [0box:{}] Tour {}/{} — parole à {}",
-                role, turn_idx + 1, 0, role_label
-            )));
-        }
-        
         // Lance le sous-agent
         let system_clone = debate_system.to_string();
         let tools_clone = tools.to_vec();
@@ -2056,14 +2047,26 @@ async fn run_0box_turn_with_retry(
         let prompt_clone = prompt.to_string();
         let role_owned = role.to_string();
         
+        // Actions du tour (accumulées pour l'historique du débat : sans ça, les
+        // perspectives suivantes ne voient NI les tâches créées NI les fichiers
+        // écrits — MAIN recréait en double des tâches déjà posées par « code »).
+        let actions: std::sync::Arc<std::sync::Mutex<Vec<String>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        
         let subagent_handle = tokio::spawn(async move {
-            let res = crate::agent::subagent::run_subagent(
+            // Budget élargi pour les tours de débat : MAIN doit vérifier + créer +
+            // marquer un plan multi-étapes — le budget par défaut (8/24) ne laisse
+            // même pas place aux `task_update` après vérification (constat run 3).
+            // Toujours borné : jamais illimité (principe d'endiguement).
+            let res = crate::agent::subagent::run_subagent_budgeted(
                 endpoints_clone,
                 system_clone,
                 prompt_clone,
                 tools_clone,
                 options_clone,
-                Some(evt_tx)
+                Some(evt_tx),
+                20,
+                64,
             ).await;
             (role_owned, res)
         });
@@ -2071,7 +2074,8 @@ async fn run_0box_turn_with_retry(
         // Forward événements en temps réel
         let ui_evt = ui.clone();
         let role_label_owned = role_label.to_string();
-        tokio::spawn(async move {
+        let acts_fwd = actions.clone();
+        let forwarder = tokio::spawn(async move {
             while let Some(evt) = evt_rx.recv().await {
                 match evt {
                     crate::agent::subagent::SubAgentEvent::Fallback { from, to, reason } => {
@@ -2080,8 +2084,23 @@ async fn run_0box_turn_with_retry(
                         )));
                     }
                     crate::agent::subagent::SubAgentEvent::ToolCall { name, args } => {
-                        let short: String = args.chars().take(100).collect();
+                        // Résumé compact (jamais le contenu brut tronqué à 100 chars,
+                        // qui donnait l'impression d'un flux coupé en plein file_text).
+                        let short = summarize_tool_call(&name, &args);
+                        if let Ok(mut a) = acts_fwd.lock() {
+                            a.push(format!("{} {}", name, short));
+                        }
                         let _ = ui_evt.send(UiEvent::Info(format!("{} ⚙ {} {}", role_label_owned, name, short)));
+                    }
+                    crate::agent::subagent::SubAgentEvent::ToolResult { name, result } => {
+                        let first: String = result
+                            .lines()
+                            .find(|l| !l.trim().is_empty())
+                            .unwrap_or("")
+                            .chars()
+                            .take(120)
+                            .collect();
+                        let _ = ui_evt.send(UiEvent::Info(format!("{} ✓ {} → {}", role_label_owned, name, first)));
                     }
                     crate::agent::subagent::SubAgentEvent::Error(e) => {
                         let _ = ui_evt.send(UiEvent::Info(format!("{} ⚠ {}", role_label_owned, e)));
@@ -2093,7 +2112,7 @@ async fn run_0box_turn_with_retry(
             }
         });
         
-        // Attend la fin du tour
+        // Attend la fin du tour ET le drainage des événements
         let (speaker, response) = match subagent_handle.await {
             Ok((s, r)) => (s, r),
             Err(e) => {
@@ -2101,27 +2120,61 @@ async fn run_0box_turn_with_retry(
                 continue; // retry
             }
         };
-        
-        // VALIDATION de la réponse
+        let _ = forwarder.await;
+
+        // Réponse enrichie des actions du tour — les perspectives suivantes (et MAIN
+        // en particulier) doivent voir les tâches créées et fichiers écrits, sinon
+        // elles recréent en double ce qui existe déjà (constat runs 1–2).
+        let mut full = response.clone();
+        let n_actions = actions.lock().map(|a| a.len()).unwrap_or(0);
+        if n_actions > 0 {
+            if let Ok(acts) = actions.lock() {
+                let shown: Vec<String> = acts.iter().take(20).cloned().collect();
+                let more = acts.len().saturating_sub(20);
+                let suffix = if more > 0 {
+                    format!(" (+{more} autres)")
+                } else {
+                    String::new()
+                };
+                full = format!(
+                    "{full}\n\n[Actions de ce tour : {}{suffix}]",
+                    shown.join(" ; ")
+                );
+            }
+        }
+
+        // VALIDATION — sur la réponse ORIGINALE (les actions comptent comme travail).
         let response_trimmed = response.trim();
-        if response_trimmed.is_empty() {
+        if response_trimmed.is_empty() && n_actions == 0 {
             last_error = "Réponse vide".to_string();
             let _ = ui.send(UiEvent::Info(format!("⚠ [0box:{}] Réponse vide, retry…", role)));
             continue;
         }
         if response_trimmed.starts_with("⚠") || response_trimmed.starts_with("Erreur") {
+            // Arrêt d'endiguement (boucle détectée, budget dépassé) : ce n'est PAS un
+            // échec modèle — le travail accompli est réel. Le retry redémarrerait le
+            // tour ENTIER pour rien (15 min perdues, run 4). On garde le tour tel quel.
+            if response_trimmed.contains("boucle détectée")
+                || response_trimmed.contains("budget d'appels d'outils dépassé")
+            {
+                let _ = ui.send(UiEvent::Info(format!(
+                    "🛑 [0box:{}] Tour arrêté par l'endiguement — travail conservé (pas de retry)",
+                    role
+                )));
+                return (speaker, full);
+            }
             last_error = format!("Réponse d'erreur: {response_trimmed}");
             let _ = ui.send(UiEvent::Info(format!("⚠ [0box:{}] Erreur détectée, retry…", role)));
             continue;
         }
-        if response_trimmed.chars().count() < 10 {
+        if response_trimmed.chars().count() < 10 && n_actions == 0 {
             last_error = "Réponse trop courte".to_string();
             let _ = ui.send(UiEvent::Info(format!("⚠ [0box:{}] Réponse trop courte (<10 chars), retry…", role)));
             continue;
         }
-        
+
         // Succès : réponse valide
-        return (speaker, response);
+        return (speaker, full);
     }
     
     // Tous les retries échoués

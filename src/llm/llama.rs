@@ -100,7 +100,12 @@ impl ApiClient {
             "temperature": options.temperature,
             "max_tokens": options.max_tokens,
         });
-        body["chat_template_kwargs"] = json!({ "enable_thinking": options.thinking });
+        // `chat_template_kwargs` est un paramètre llama.cpp/vLLM : l'endpoint OpenAI-compat
+        // de Google le REJETTE (400 « Unknown name "chat_template_kwargs" ») — bug constaté
+        // en débat 0box (rôle reasoning via gemma). On ne l'envoie pas à Google.
+        if !self.base_url.contains("generativelanguage.googleapis.com") {
+            body["chat_template_kwargs"] = json!({ "enable_thinking": options.thinking });
+        }
         // OpenRouter's unified reasoning control (Qwen uses chat_template_kwargs).
         if self.base_url.contains("openrouter.ai") {
             body["reasoning"] = json!({ "enabled": options.thinking });

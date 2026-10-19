@@ -1,5 +1,6 @@
 # Build output
 /target
+/target0box
 
 # Windows debug/test artifacts (binaires de test clipboard, scripts temporaires)
 *.exe

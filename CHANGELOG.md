@@ -1,5 +1,33 @@
 ## Non versionné
 
+- **0box testable de bout en bout + corrections issues du run réel** (0BOX-TEST
+  complet via le module 0box uniquement) :
+  - **CLI `zer0 0box <sujet> [--perspectives a,b,c]`** : le débat séquentiel
+    exécutable headless — jusqu'ici réservé à la TUI, donc invérifiable en
+    automatisation.
+  - **Résultats d'outils visibles** : `SubAgentEvent::ToolResult` créé et
+    relayé (`⚙ appel` suivi de `✓ résultat`) ; l'affichage tronquait avant à
+    100 chars le JSON brut, donnant l'impression d'un flux coupé.
+  - **Résumés compacts** : les appels du débat passent par `summarize_tool_call`
+    (plus jamais le `file_text` brut).
+  - **Historique du débat enrichi des actions** : chaque tour transmet ses
+    actions (task_add, fichiers…) aux suivants — sinon MAIN recréait en double
+    des tâches déjà posées, et ne voyait jamais le travail des autres.
+  - **MAIN vérifie `task_list` d'abord** (anti-duplication, étape 0 de sa procédure).
+  - **`chat_template_kwargs` non envoyé à Google** (400 « Unknown name ») —
+    paramètre llama.cpp/vLLM rejeté par l'endpoint OpenAI-compat de Gemini.
+  - **Sous-agent** : dernier message assistant AYANT du texte (un tour qui
+    finit sur des tool calls ne donnait plus « (aucune réponse) »).
+  - **Budget d'endiguement paramétrable** (`run_turn_budgeted` /
+    `run_subagent_budgeted`) : tours 0box = 20 itérations / 64 appels (le
+    8/24 par défaut ne laissait même pas place aux `task_update` après
+    vérification). Toujours borné — jamais illimité.
+  - **Arrêt d'endiguement ≠ échec** : une détection de boucle ou un budget
+    dépassé conserve le tour accompli au lieu de REJOUER tout le tour
+    (run 4 : 15 minutes perdues en retry intégral).
+  - **`enrich_system` adapté Windows** : `python` (pas `python3`), scripts
+    temporaires plutôt que one-liners multi-instructions cassés par le quoting
+    `cmd`.
 - **Porte d'honnêteté sur les tâches** : `task_update → done` (outil agent, CLI,
   TUI, boucle `/work`) **refuse** de marquer une tâche « fait » si un livrable
   mentionné dans son texte (chemin ancré `~/…`, `/…`, `X:\…`) est **absent ou vide** —

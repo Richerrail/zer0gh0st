@@ -206,6 +206,15 @@ enum Command {
         #[arg(long)]
         allow: Vec<i64>,
     },
+    /// Débat séquentiel multi-agents (0box) — headless, sans TUI.
+    #[command(name = "0box")]
+    ZeroBox {
+        /// Le sujet du débat (une phrase).
+        topic: Vec<String>,
+        /// Perspectives du débat, séparées par des virgules (défaut : code,reasoning,main).
+        #[arg(long, value_delimiter = ',')]
+        perspectives: Vec<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -490,6 +499,7 @@ async fn run_command(cmd: Command) -> Result<()> {
         Command::Provoke { role, task } => provoke_cmd(role, task).await,
         Command::Kb { action } => kb_cmd(action).await,
         Command::Telegram { token, allow } => telegram::run(token, allow).await,
+        Command::ZeroBox { topic, perspectives } => zerobox_cmd(topic, perspectives).await,
     }
 }
 
@@ -538,6 +548,69 @@ async fn provoke_cmd(role: String, task: Vec<String>) -> Result<()> {
     let res = 
         agent::subagent::run_subagent(endpoints, system, prompt, tools::all(), options, None).await;
     println!("{res}");
+    Ok(())
+}
+
+/// Débat 0box en mode headless : les mêmes règles que la TUI (`/0box`), sans interface.
+/// Permet de tester/scripter le module de débat (0BOX-TEST l'exigeait — jusqu'ici
+/// le débat n'était exécutable qu'interactivement, donc invérifiable en CI).
+async fn zerobox_cmd(topic: Vec<String>, perspectives: Vec<String>) -> Result<()> {
+    use std::io::Write;
+
+    let topic = topic.join(" ");
+    if topic.trim().is_empty() {
+        anyhow::bail!("usage: zer0 0box <sujet> [--perspectives code,reasoning,main]");
+    }
+    let perspectives = if perspectives.is_empty() {
+        vec!["code".to_string(), "reasoning".to_string(), "main".to_string()]
+    } else {
+        perspectives
+    };
+
+    let settings = config::resolve();
+    let system = config::system_prompt_override().unwrap_or_else(|| DEFAULT_SYSTEM.to_string());
+    // Même enrichissement que la TUI (tui:172) et --once : sans le bloc Environnement
+    // (OS, dossiers), les modèles croyaient être sous Linux et perdaient leurs
+    // itérations sur `cat`/`ls -la`/`mkdir -p` sous cmd.exe.
+    let system = enrich_system(system);
+    let options = ChatOptions { max_tokens: 8192, thinking: false, temperature: 0.3 };
+
+    // En headless, tous les outils sont armés (même politique que --once).
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<UiEvent>();
+    tokio::spawn(async move {
+        tui::run_0box_debate(
+            topic,
+            perspectives,
+            settings,
+            system,
+            options,
+            true, // text_editor
+            true, // code_exec
+            tools::all(),
+            tx,
+        )
+        .await;
+    });
+
+    while let Some(ev) = rx.recv().await {
+        match ev {
+            UiEvent::Info(t) => {
+                println!("{t}");
+                let _ = std::io::stdout().flush();
+            }
+            UiEvent::Token(t) => {
+                print!("{t}");
+                let _ = std::io::stdout().flush();
+            }
+            UiEvent::Active(label) => eprintln!("→ endpoint: {label}"),
+            UiEvent::Error(e) => {
+                eprintln!("⚠ {e}");
+                break;
+            }
+            _ => {}
+        }
+    }
+    println!();
     Ok(())
 }
 
@@ -1216,8 +1289,10 @@ pub(crate) fn enrich_system(system: String) -> String {
          - N'affiche PAS tout le fichier dans le chat : donne le chemin, la taille et un résumé.\n\
          - Si le contenu est très long, écris-le en entier d'un coup ; sinon écris puis complète \
            avec `insert`/`str_replace`.\n\
-         - Pour vérifier/tester, **préfère `python3 -c \"...\"`** (ou un pipe) plutôt que de créer un \
-           fichier de test (`check.py`) ; supprime-le ensuite (`text_editor` `delete`).\n\
+         - Pour vérifier/tester, **préfère un one-liner `python -c \"…\"` simple** plutôt que de créer un \
+           fichier de test (`check.py`). Sous Windows : `python` (pas `python3`) et le quoting \n\
+           `cmd` casse les one-liners multi-instructions — dans ce cas, écris un petit script avec \n\
+           `text_editor`, exécute-le (`python script.py`), puis supprime-le (`text_editor` `delete`).\n\
          - Crée les fichiers sous `{home}` avec un chemin absolu.\n\
          {env}"
     )
