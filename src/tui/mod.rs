@@ -1833,6 +1833,16 @@ async fn run_0box_debate(
         .cloned()
         .collect();
     
+    // Ensure MAIN is always last for synthesis + execution
+    let mut debate_perspectives = perspectives.clone();
+    if let Some(pos) = debate_perspectives.iter().position(|r| r == "main") {
+        let main_role = debate_perspectives.remove(pos);
+        debate_perspectives.push(main_role);
+    } else {
+        // If no main role specified, add it at the end
+        debate_perspectives.push("main".to_string());
+    }
+    
     // Conversation partagée entre tous les participants
     let mut conversation: Vec<ChatMessage> = Vec::new();
     
@@ -1843,15 +1853,15 @@ async fn run_0box_debate(
     );
     
     // Tour 1 : Premier participant (pas d'historique de débat)
-    for (turn_idx, role) in perspectives.iter().enumerate() {
-        let is_last = turn_idx == perspectives.len() - 1;
+    for (turn_idx, role) in debate_perspectives.iter().enumerate() {
+        let is_last = turn_idx == debate_perspectives.len() - 1;
         let role_label = if is_last { "MAIN (synthèse + action)" } else { role };
         
         // Build prompt for this turn
         let prompt = if turn_idx == 0 {
             format!(
                 "=== DÉBAT 0BOX — TOUR 1/{} ===\nSUJET : {}\nTA PERSPECTIVE : {}\n\nTu OUVRES le débat. Donne ton analyse initiale, tes arguments clés, et tes questions aux autres perspectives.\nSois concret, structuré, et utilise les outils si tu as besoin de données.",
-                perspectives.len(),
+                debate_perspectives.len(),
                 topic,
                 role
             )
@@ -1861,7 +1871,7 @@ async fn run_0box_debate(
             format!(
                 "=== DÉBAT 0BOX — TOUR {}/{} (MAIN - SYNTHÈSE FINALE) ===\nSUJET : {}\nHISTORIQUE DU DÉBAT :\n{}\n\nTA MISSION (MAIN) :\n1. SYNTHÉTISE les points d'accord et de désaccord\n2. IDENTIFIE la meilleure approche consensuelle\n3. PROPOSE un PLAN D'ACTION CONCRET, ÉTAPE PAR ÉTAPE\n4. SI le plan nécessite du code/fichiers/recherche → UTILISE LES OUTILS pour l'EXÉCUTER MAINTENANT\n\nRéponds avec : SYNTHÈSE + PLAN D'ACTION + EXÉCUTION (outils si besoin).",
                 turn_idx + 1,
-                perspectives.len(),
+                debate_perspectives.len(),
                 topic,
                 history
             )
@@ -1871,7 +1881,7 @@ async fn run_0box_debate(
             format!(
                 "=== DÉBAT 0BOX — TOUR {}/{} ===\nSUJET : {}\nTA PERSPECTIVE : {}\nHISTORIQUE DU DÉBAT :\n{}\n\nRÉPONDS MAINTENANT :\n- Quels arguments précèdents VALIDES/INVALIDES ?\n- Quelle perspective UNIQUE apportes-tu ?\n- Quelles QUESTIONS aux autres ?\n- Utilise les outils si tu as besoin de preuves/données.",
                 turn_idx + 1,
-                perspectives.len(),
+                debate_perspectives.len(),
                 topic,
                 role,
                 history
@@ -1885,7 +1895,7 @@ async fn run_0box_debate(
         let (evt_tx, mut evt_rx) = tokio::sync::mpsc::unbounded_channel::<crate::agent::subagent::SubAgentEvent>();
         
         // Annonce du tour
-        let _ = ui.send(UiEvent::Info(format!("🎭 [0box:{}] Tour {}/{} — parole à {}", role, turn_idx + 1, perspectives.len(), role_label)));
+        let _ = ui.send(UiEvent::Info(format!("🎭 [0box:{}] Tour {}/{} — parole à {}", role, turn_idx + 1, debate_perspectives.len(), role_label)));
         
         // Exécute le tour avec validation et retry si échec
         let (speaker, response) = run_0box_turn_with_retry(
