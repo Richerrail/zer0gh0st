@@ -182,8 +182,33 @@ pub fn chain_for_0box_role(settings: &Settings, role: &str) -> Vec<Endpoint> {
         }
     }
 
-    // Then add the role chain with roles disabled (pas de bascule en 0box)
-    let role_chain = chain_for_role_with(settings, role, false);
+    // Then add the full failover chain (role endpoint + global routes)
+    // This ensures proper fallback when models return empty responses
+    let mut role_chain = Vec::new();
+    
+    // First: the role-specific endpoint (if configured)
+    let roles = config::effective_roles();
+    let route = roles
+        .get(role)
+        .or_else(|| roles.get("main"))
+        .cloned();
+    if let Some(r) = route {
+        if let Some(ep) = parse_route(&r) {
+            role_chain.push(ep);
+        }
+    }
+    
+    // Then: the global failover chain (build_chain includes active + routes)
+    for ep in build_chain(settings) {
+        let dup = role_chain
+            .iter()
+            .any(|e| e.base_url == ep.base_url && e.model == ep.model);
+        if !dup {
+            role_chain.push(ep);
+        }
+    }
+    
+    // Add to main chain
     for ep in role_chain {
         let dup = chain
             .iter()
@@ -193,7 +218,17 @@ pub fn chain_for_0box_role(settings: &Settings, role: &str) -> Vec<Endpoint> {
         }
     }
 
-    chain
+    // Filter out recently failed endpoints
+    let alive: Vec<Endpoint> = chain
+        .iter()
+        .filter(|e| !is_failed(&e.label))
+        .cloned()
+        .collect();
+    if alive.is_empty() {
+        chain
+    } else {
+        alive
+    }
 }
 
 // --------------------------------------------------- model failure memory
