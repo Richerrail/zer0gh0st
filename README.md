@@ -425,6 +425,7 @@ Idées ouvertes : voir `ROADMAP*.md`.
   — **fork maintenu par nous :** [github.com/Richerrail/synnoesis](https://github.com/Richerrail/synnoesis)
 
 **Divers**
+- site : https://zer0gh0st.pages.dev
 - Nom : référence à ***Ghost in the Shell***.
 - Inférence : [llama.cpp](https://github.com/ggerganov/llama.cpp) · TUI : [ratatui](https://github.com/ratatui/ratatui).
 
