@@ -895,9 +895,25 @@ fn handle_provider(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent
             app.messages.push(ChatMessage::notice(s));
         }
         Some("add") => {
-            let id = args.get(1).copied().unwrap_or("");
+            // Helper: /provider add cline <url> — pré-configure Cline
+            let first = args.get(1).copied().unwrap_or("");
+            if first == "cline" {
+                let url = args.get(2).copied().unwrap_or("http://localhost:11434/v1");
+                let id = "cline".to_string();
+                let mut g = config::load_global();
+                g.custom.insert(id.clone(), config::CustomProvider {
+                    name: "Cline (Ollama)".to_string(),
+                    base_url: url.to_string(),
+                    env_key: None,
+                });
+                let _ = config::save_global(&g);
+                app.messages.push(ChatMessage::notice(format!(
+                    "Provider 'cline' ajouté → {url}.\nUtilise: /provider use cline\nPuis: /models" )));
+                return;
+            }
+            let id = first.to_ascii_lowercase();
             let key = args.get(2).copied().unwrap_or("");
-            match providers::find(id) {
+            match providers::find(&id) {
                 Some(p) if !key.is_empty() => match crate::gwclient::add_key_flow(&p.id, key) {
                     Ok(crate::gwclient::AddRoute::ViaGateway { provider_id }) => {
                         let mut g = config::load_global();

@@ -803,6 +803,21 @@ fn provider_cmd(action: ProviderAction) -> Result<()> {
             }
         }
         ProviderAction::Add { id, key } => {
+            // Helper: zer0 provider add cline [url]
+            if id.eq_ignore_ascii_case("cline") {
+                let url = key.unwrap_or_else(|| "http://localhost:11434/v1".to_string());
+                let mut g = config::load_global();
+                g.custom.insert("cline".to_string(), config::CustomProvider {
+                    name: "Cline (Ollama)".to_string(),
+                    base_url: url.clone(),
+                    env_key: None,
+                });
+                config::save_global(&g)?;
+                println!("Provider 'cline' ajouté → {url}.
+Utilise: zer0 provider use cline
+Puis: zer0 models");
+                return Ok(());
+            }
             let p = providers::find(&id).ok_or_else(|| anyhow!("provider inconnu: {id}"))?;
             let resolved = match key {
                 Some(k) => k,
