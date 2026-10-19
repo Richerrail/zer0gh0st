@@ -13,6 +13,8 @@ pub static HTTP_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
 });
 
 /// Retry a request on 429 (rate limit) with exponential backoff + Retry-After header.
+/// Helper disponible pour les appelants externes (pas encore utilisé en interne).
+#[allow(dead_code)]
 pub async fn send_with_retry(
     mut req_builder: impl FnMut() -> reqwest::RequestBuilder,
     max_retries: u32,

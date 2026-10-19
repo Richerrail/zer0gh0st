@@ -51,6 +51,7 @@ pub fn all() -> Vec<ToolSpec> {
 /// Execute a tool by name. Errors are returned as text so the model can react.
 pub async fn execute(name: &str, args: &str) -> String {
     match name {
+        "0box" => box0::run(args),
         "code_exec" => code_exec::run(args),
         "text_editor" => text_editor::run(args),
         "memory_save" => memory_save::run(args).await,

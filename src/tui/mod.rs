@@ -1917,9 +1917,6 @@ async fn run_0box_debate(
         // Endpoint pour ce rôle
         let endpoints = crate::route::chain_for_0box_role(&app_settings, role);
         
-        // Channel pour événements du sous-agent
-        let (evt_tx, mut evt_rx) = tokio::sync::mpsc::unbounded_channel::<crate::agent::subagent::SubAgentEvent>();
-        
         // Annonce du tour
         let _ = ui.send(UiEvent::Info(format!("🎭 [0box:{}] Tour {}/{} — parole à {}", role, turn_idx + 1, debate_perspectives.len(), role_label)));
         
@@ -1941,12 +1938,9 @@ async fn run_0box_debate(
         conversation.push(ChatMessage::assistant(format!("[{}]: {}", speaker, response), vec![]));
         
         // Affiche dans l'UI
-        let _ = ui.send(UiEvent::Info(format!("📝 [{}]:
-{}", speaker, response)));
+        let _ = ui.send(UiEvent::Info(format!("📝 [{}]:\n{}", speaker, response)));
         
         // Petite pause entre les tours
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
     
@@ -1997,8 +1991,6 @@ async fn run_0box_turn_with_retry(
         let endpoints_clone = endpoints.to_vec();
         let prompt_clone = prompt.to_string();
         let role_owned = role.to_string();
-        let ui_evt = ui.clone();
-        let role_label_owned = role_label.to_string();
         
         let subagent_handle = tokio::spawn(async move {
             let res = crate::agent::subagent::run_subagent(
@@ -2013,25 +2005,25 @@ async fn run_0box_turn_with_retry(
         });
         
         // Forward événements en temps réel
-        let ui_evt2 = ui.clone();
-        let role_label_owned2 = role_label.to_string();
+        let ui_evt = ui.clone();
+        let role_label_owned = role_label.to_string();
         tokio::spawn(async move {
             while let Some(evt) = evt_rx.recv().await {
                 match evt {
                     crate::agent::subagent::SubAgentEvent::Fallback { from, to, reason } => {
-                        let _ = ui_evt2.send(UiEvent::Info(format!(
-                            "{} ⚡ Bascule: {} → {} ({})", role_label_owned2, from, to, reason
+                        let _ = ui_evt.send(UiEvent::Info(format!(
+                            "{} ⚡ Bascule: {} → {} ({})", role_label_owned, from, to, reason
                         )));
                     }
                     crate::agent::subagent::SubAgentEvent::ToolCall { name, args } => {
                         let short: String = args.chars().take(100).collect();
-                        let _ = ui_evt2.send(UiEvent::Info(format!("{} ⚙ {} {}", role_label_owned2, name, short)));
+                        let _ = ui_evt.send(UiEvent::Info(format!("{} ⚙ {} {}", role_label_owned, name, short)));
                     }
                     crate::agent::subagent::SubAgentEvent::Error(e) => {
-                        let _ = ui_evt2.send(UiEvent::Info(format!("{} ⚠ {}", role_label_owned2, e)));
+                        let _ = ui_evt.send(UiEvent::Info(format!("{} ⚠ {}", role_label_owned, e)));
                     }
                     crate::agent::subagent::SubAgentEvent::Info(info) => {
-                        let _ = ui_evt2.send(UiEvent::Info(format!("{} ℹ {}", role_label_owned2, info)));
+                        let _ = ui_evt.send(UiEvent::Info(format!("{} ℹ {}", role_label_owned, info)));
                     }
                 }
             }
