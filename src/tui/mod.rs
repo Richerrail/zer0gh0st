@@ -1802,13 +1802,21 @@ pub fn cmd_0box(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) 
         // Create a channel for sub-agent events (fallback, tool calls, etc.)
         let (evt_tx, mut evt_rx) = tokio::sync::mpsc::unbounded_channel::<crate::agent::subagent::SubAgentEvent>();
         
+        // Tools available to 0box agents (respect F3/F4 toggles)
+        let tools_0box: Vec<crate::tools::ToolSpec> = app
+            .all_tools
+            .iter()
+            .filter(|t| (t.name != "text_editor" || app.read_write) && (t.name != "code_exec" || app.code_exec))
+            .cloned()
+            .collect();
+        
         tokio::spawn(async move {
             let prompt = format!(
                 "Brainstorm sur '{}'. Perspective {} ({}): développe ton point de vue de manière concise, structure : 3 idées + conclusion.",
                 tc, idx + 1, role_str
             );
             let res = crate::agent::subagent::run_subagent(
-                endpoints, system2, prompt, Vec::new(), options_clone, Some(evt_tx)
+                endpoints, system2, prompt, tools_0box, options_clone, Some(evt_tx)
             ).await;
             let label = format!("[{}]", role_str);
             let _ = ui.send(UiEvent::Info(format!("📝 [{}]\n{}", label, res)));
