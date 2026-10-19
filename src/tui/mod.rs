@@ -1873,10 +1873,20 @@ async fn run_0box_debate(
     let mut conversation: Vec<ChatMessage> = Vec::new();
     
     // Prompt initial système pour le débat
-    let debate_system = format!(
+    let mut debate_system = format!(
         "{}\n\n## RÈGLES DU DÉBAT 0BOX\n\nTu participes à un débat structuré entre plusieurs perspectives IA.\nChaque participant parle À SON TOUR, reçoit l'historique complet, et doit :\n1. RÉPONDRE aux arguments précédents (accord/désaccord/nuance)\n2. APPORTER sa perspective unique\n3. UTILISER les outils si nécessaire (web_search, knowledge_search, etc.)\n4. RESTER CONSTRUCTIF — l'objectif est une solution concrète finale.\n\nLe DERNIER participant (MAIN) doit SYNTHÉTISER et PROPOSER UN PLAN D'ACTION EXÉCUTABLE.\nSi des outils sont nécessaires pour valider (code, fichiers, recherche), UTILISE-LES.",
         system
     );
+    // Liste explicite des outils : ce modèle ignore souvent le paramètre `tools` de l'API,
+    // il faut les lui nommer dans le prompt (même pattern que start_turn).
+    if !tools.is_empty() {
+        debate_system.push_str(
+            "\n\n## Outils disponibles (utilise-les pour AGIR — ne dis jamais « je ne peux pas exécuter » quand un outil le permet)\n",
+        );
+        for t in &tools {
+            debate_system.push_str(&format!("- {} : {}\n", t.name, t.description));
+        }
+    }
     
     // Tour 1 : Premier participant (pas d'historique de débat)
     for (turn_idx, role) in debate_perspectives.iter().enumerate() {
@@ -1892,10 +1902,10 @@ async fn run_0box_debate(
                 role
             )
         } else if is_last {
-            // MAIN : synthèse finale + EXÉCUTION IMMÉDIATE
+            // MAIN : synthèse + attribution des tâches + EXÉCUTION IMMÉDIATE
             let history = format_conversation(&conversation);
             format!(
-                "=== DÉBAT 0BOX — TOUR {}/{} (MAIN - SYNTHÈSE + EXÉCUTION) ===\nSUJET : {}\nHISTORIQUE DU DÉBAT :\n{}\n\n⚠️⚠️⚠️ INSTRUCTION CRITIQUE POUR MAIN ⚠️⚠️⚠️\n\nTu es MAIN. Ton rôle : SYNTHÉTISER + EXÉCUTER IMMÉDIATEMENT.\n\nRÈGLE ABSOLUE : Tu DOIS utiliser les outils DANS CETTE RÉPONSE.\nNE RÉPONDS PAS AVEC DU TEXTE SEULEMENT.\n\nPROCÉDURE OBLIGATOIRE :\n1. Appelle text_editor (create) pour CHAQUE fichier à créer\n2. Appelle code_exec pour CHAQUE commande à lancer\n3. Enchaîne les appels d'outils SANS attendre\n4. Continue jusqu'à ce que TOUT soit créé et testé\n\nEXEMPLE DE CE QU'IL FAUT FAIRE :\n- text_editor create path=... file_text=...\n- code_exec command=...\n- text_editor create path=... file_text=...\n- code_exec command=...\n\nSi tu ne fais qu'écrire du texte sans appeler d'outils, TU ÉCHOUES.\n\nCommence MAINTENANT par le premier appel d'outil.",
+                "=== DÉBAT 0BOX — TOUR {}/{} (MAIN - SYNTHÈSE + TÂCHES + EXÉCUTION) ===\nSUJET : {}\nHISTORIQUE DU DÉBAT :\n{}\n\n⚠️⚠️⚠️ INSTRUCTION CRITIQUE POUR MAIN ⚠️⚠️⚠️\n\nTu es MAIN. Ton rôle : SYNTHÉTISER, ATTRIBUER LES TÂCHES, puis EXÉCUTER.\n\nRÈGLE ABSOLUE : Tu DOIS appeler des outils DANS CETTE RÉPONSE.\nNE RÉPONDS PAS AVEC DU TEXTE SEULEMENT.\n\nPROCÉDURE OBLIGATOIRE (dans cet ordre) :\n1. CRÉE LES TÂCHES : appelle task_add UNE FOIS PAR étape du plan d'action.\n   Exemple : task_add text=\"Créer TodoList.java\" role=\"code\"\n   → chaque tâche reçoit un id (t1, t2, …) que les outils te renvoient.\n2. EXÉCUTE : appelle text_editor (create) pour CHAQUE fichier à créer,\n   code_exec pour CHAQUE commande à lancer.\n3. Marque l'avancement : task_update id=t1 status=claim au démarrage,\n   task_update id=t1 status=done quand c'est fini.\n4. Enchaîne les appels SANS t'arrêter jusqu'à ce que le plan soit réalisé.\n\nLes tâches restent visibles avec /task : l'utilisateur pourra les reprendre\navec /work si le budget d'appels d'outils est épuisé avant la fin.\n\nSi tu ne fais qu'écrire du texte sans appeler task_add, TU ÉCHOUES.\n\nCommence MAINTENANT : appelle task_add pour la première étape du plan.",
                 turn_idx + 1,
                 debate_perspectives.len(),
                 topic,
