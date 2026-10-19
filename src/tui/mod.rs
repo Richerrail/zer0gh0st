@@ -1762,7 +1762,8 @@ pub fn cmd_0box(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) 
     }
     
     // Parse optional --perspectives flag
-    let mut perspectives: Vec<String> = vec!["main".to_string(), "code".to_string(), "reasoning".to_string()];
+    // Default order: code → reasoning → main (main always last for synthesis+execution)
+    let mut perspectives: Vec<String> = vec!["code".to_string(), "reasoning".to_string(), "main".to_string()];
     let topic_parts: Vec<&str> = topic.split_whitespace().collect();
     let mut topic_words = Vec::new();
     let mut i = 0;
