@@ -84,7 +84,15 @@ pub async fn list(
     if let Some(k) = key {
         req = req.bearer_auth(k);
     }
-    let resp = req.send().await?;
+    // Erreurs de construction (base_url invalide — ex. une clé en base_url)
+    // explicites : on affiche l'URL au lieu d'un nu « builder error ».
+    let resp = req.send().await.map_err(|e| {
+        if e.is_builder() || e.is_request() {
+            anyhow!("URL invalide : {url} — vérifie la base_url du provider « {} » (/provider list)", provider.id)
+        } else {
+            anyhow!("{url} : {e}")
+        }
+    })?;
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();

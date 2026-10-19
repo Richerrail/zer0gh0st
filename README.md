@@ -131,7 +131,7 @@ Détail complet du modèle de menace : [`SAFETY.md`](./SAFETY.md).
 | **Historique** | **conversation persistée** (JSONL) ; au démarrage = **nouvelle conversation** (l'ancienne est archivée, `--resume` pour reprendre) ; `/history`, `/new` ; **F6** liste/recharge les sessions |
 | **Sélection** | clic + glisser dans le chat/saisie → surbrillance + **copie presse-papier** auto |
 | **Contexte** | compaction automatique (~4000 tokens) via le rôle `utility` |
-| **Tâches** | liste Markdown `.zer0/tasks.md`, `claim/done`, boucle `/work` par sous-agent |
+| **Tâches** | liste Markdown `.zer0/tasks.md`, `claim/done`, boucle `/work` par sous-agent ; **porte d'honnêteté** : `done` refusé si un livrable mentionné est absent ou vide |
 | **Sous-agents** | `/ask`, `/review`, `/jev` en contexte isolé |
 | **Outils** | `code_exec`, `text_editor`, `web_search`, `memory_*`, `task_*` |
 | **Divers** | `/vault`, `/pdf`, personas `/whoami`, recherche `/search` |
@@ -303,7 +303,7 @@ Zer0 agit : tu décris un but, il appelle les outils nécessaires.
 
 ## 7. Commandes
 
-**TUI** (extrait) : `/help` `/think` `/provider` `/model` `/models` `/ctx` `/free` `/select` `/route` `/telegram` `/tg`
+**TUI** (extrait) : `/help` `/think` `/provider` `/model` `/models` `/quota` `/ctx` `/free` `/select` `/route` `/telegram` `/tg`
 `/role` `/project` `/memory` `/recall` `/compact` `/task` `/work` `/ask` `/review` `/search`
 `/stop` `/context` `/whoami` `/vault` `/pdf` `/jev` `/kb` `/new` `/history` `/radio` `/bintime`
 `/pong` `/kristal` `/streaming` `/retro` `/panel` `/clear` `/quit`.

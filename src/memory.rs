@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::config;
+use crate::http_client;
 use crate::providers;
 
 /// One persistent memory entry. Always stored as `untrusted`.
@@ -126,7 +127,7 @@ pub async fn embed(text: &str) -> Result<Vec<f32>> {
 
     let url = format!("{}/embeddings", provider.base_url.trim_end_matches('/'));
     let body = serde_json::json!({ "model": model, "input": text });
-    let mut req = reqwest::Client::new().post(&url).json(&body);
+    let mut req = http_client::HTTP_CLIENT.post(&url).json(&body);
     if let Some(k) = key {
         req = req.bearer_auth(k);
     }

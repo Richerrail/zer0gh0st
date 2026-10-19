@@ -1,4 +1,5 @@
 use crate::config::{self, Settings};
+use crate::http_client;
 use crate::llm::llama::ApiClient;
 use crate::models;
 use crate::providers;
@@ -162,6 +163,74 @@ pub fn build_chain(settings: &Settings) -> Vec<Endpoint> {
     }
 }
 
+/// Build a chain for 0box agents: 0box fallbacks first, then role chain.
+/// This allows configuring model fallbacks specifically for /0box brainstorming.
+pub fn chain_for_0box_role(settings: &Settings, role: &str) -> Vec<Endpoint> {
+    let mut chain = Vec::new();
+
+    // Add 0box-specific fallbacks first (if configured)
+    if let Some(fallbacks) = config::load_global().zero_box_fallbacks {
+        for fb in fallbacks {
+            if let Some(ep) = parse_route(&fb) {
+                let dup = chain
+                    .iter()
+                    .any(|e: &Endpoint| e.base_url == ep.base_url && e.model == ep.model);
+                if !dup {
+                    chain.push(ep);
+                }
+            }
+        }
+    }
+
+    // Then add the full failover chain (role endpoint + global routes)
+    // This ensures proper fallback when models return empty responses
+    let mut role_chain = Vec::new();
+    
+    // First: the role-specific endpoint (if configured)
+    let roles = config::effective_roles();
+    let route = roles
+        .get(role)
+        .or_else(|| roles.get("main"))
+        .cloned();
+    if let Some(r) = route {
+        if let Some(ep) = parse_route(&r) {
+            role_chain.push(ep);
+        }
+    }
+    
+    // Then: the global failover chain (build_chain includes active + routes)
+    for ep in build_chain(settings) {
+        let dup = role_chain
+            .iter()
+            .any(|e| e.base_url == ep.base_url && e.model == ep.model);
+        if !dup {
+            role_chain.push(ep);
+        }
+    }
+    
+    // Add to main chain
+    for ep in role_chain {
+        let dup = chain
+            .iter()
+            .any(|e: &Endpoint| e.base_url == ep.base_url && e.model == ep.model);
+        if !dup {
+            chain.push(ep);
+        }
+    }
+
+    // Filter out recently failed endpoints
+    let alive: Vec<Endpoint> = chain
+        .iter()
+        .filter(|e| !is_failed(&e.label))
+        .cloned()
+        .collect();
+    if alive.is_empty() {
+        chain
+    } else {
+        alive
+    }
+}
+
 // --------------------------------------------------- model failure memory
 
 /// How long an endpoint stays blacklisted after a failure.
@@ -231,8 +300,7 @@ pub async fn auto_role_assignments(provider_id: &str) -> anyhow::Result<Vec<(Str
     let provider = providers::find(provider_id)
         .ok_or_else(|| anyhow::anyhow!("provider inconnu: {provider_id}"))?;
     let key = config::key_for(&provider);
-    let http = reqwest::Client::new();
-    let list = models::list(&http, &provider, key.as_deref()).await?;
+    let list = models::list(&http_client::HTTP_CLIENT, &provider, key.as_deref()).await?;
     let free: Vec<_> = list.into_iter().filter(models::is_free).collect();
 
     let plan: &[(&str, &str)] = &[
@@ -265,8 +333,7 @@ pub async fn auto_free_routes(
     let provider = providers::find(provider_id)
         .ok_or_else(|| anyhow::anyhow!("provider inconnu: {provider_id}"))?;
     let key = config::key_for(&provider);
-    let http = reqwest::Client::new();
-    let list = models::list(&http, &provider, key.as_deref()).await?;
+    let list = models::list(&http_client::HTTP_CLIENT, &provider, key.as_deref()).await?;
     let free: Vec<_> = list.into_iter().filter(models::is_free).collect();
     let (_, ranked) = select::rank(problem, &free, top);
     let key = config::key_for(&provider);

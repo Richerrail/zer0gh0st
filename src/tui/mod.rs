@@ -1,4 +1,4 @@
-mod banner;
+﻿mod banner;
 mod menu;
 mod picker;
 
@@ -16,6 +16,7 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use crate::agent::history::ChatMessage;
 use crate::config::{self, Settings};
 use crate::event::UiEvent;
+use crate::http_client;
 use crate::llm::llama::ChatOptions;
 use crate::memory;
 use crate::models;
@@ -133,6 +134,8 @@ pub struct App {
     /// Navigation clavier du menu (F2) : focus + index sélectionné.
     pub menu_focus: bool,
     pub menu_sel: usize,
+    /// Dernier événement clavier traité (pour déduplication sur Windows).
+    pub last_key_event: Option<(KeyCode, KeyModifiers, std::time::Instant)>,
 }
 
 impl App {
@@ -252,6 +255,7 @@ pub async fn run(
         menu_rect: Rect::default(),
         menu_focus: false,
         menu_sel: 0,
+        last_key_event: None,
         thinking: options.thinking,
         max_tokens: options.max_tokens,
         temperature: options.temperature,
@@ -605,6 +609,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
         "/vault" => handle_vault(app, &args),
         "/pdf" => handle_pdf(app, &args),
         "/jev" => cmd_jev(app, &args, ui_tx),
+        "/0box" => cmd_0box(app, &args, ui_tx),
         "/kb" => handle_kb(app, &args, ui_tx),
         "/radio" => {
             let arg = args.join(" ");
@@ -752,12 +757,14 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
                 tokio::spawn(async move {
                     let res = crate::agent::subagent::run_subagent(
                         endpoints, system, prompt, tools, options,
+                        None,
                     )
                     .await;
                     let _ = ui.send(UiEvent::Info(format!("⚡ Zer0 (piqué au vif) :\n{res}")));
                 });
             }
         }
+        "/quota" => app.messages.push(ChatMessage::notice(crate::quota::report())),
         "/free" => cmd_list_models(app, ui_tx, true),
         "/select" => {
             let problem = args.join(" ");
@@ -789,6 +796,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
              /ctx [N|1M|auto]           contexte du modèle (auto/override)\n\
              /telegram [on|off]         bot Telegram à distance (long polling)\n\
              /free                      liste les modèles gratuits\n\
+             /quota                     usage observé des modèles (appels, 429)\n\
              /route [list|add|clear]    chaîne de bascule (failover)\n\
              /route auto [n]            remplit la chaîne avec les modèles :free\n\
              /route add <provider>/<model>\n\
@@ -889,9 +897,43 @@ fn handle_provider(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent
             app.messages.push(ChatMessage::notice(s));
         }
         Some("add") => {
-            let id = args.get(1).copied().unwrap_or("");
+            // Helper: /provider add cline [url] [clé]
+            // Un argument qui n'est PAS une URL (ex. une clé « sk_… ») est refusé :
+            // sinon il finit en base_url et /models crashe en « builder error ».
+            let first = args.get(1).copied().unwrap_or("");
+            if first == "cline" {
+                let arg2 = args.get(2).copied().unwrap_or("");
+                let arg3 = args.get(3).copied().unwrap_or("");
+                let (url, key) = if arg2.is_empty() {
+                    ("http://localhost:11434/v1".to_string(), None)
+                } else if arg2.starts_with("http://") || arg2.starts_with("https://") {
+                    (arg2.to_string(), if arg3.is_empty() { None } else { Some(arg3.to_string()) })
+                } else {
+                    app.messages.push(ChatMessage::notice(
+                        "⚠ Cet argument n'est pas une URL (une clé API ne peut PAS servir de base_url).\n\
+                         usage: /provider add cline [http://hôte:port/v1] [clé]\n\
+                         Sans argument → Ollama local (http://localhost:11434/v1).\n\
+                         Pour utiliser ta clé cline, donne l'URL du service en 1er, la clé en 2e.",
+                    ));
+                    return;
+                };
+                let mut g = config::load_global();
+                g.custom.insert("cline".to_string(), config::CustomProvider {
+                    name: "cline".to_string(),
+                    base_url: url.clone(),
+                    env_key: None,
+                });
+                if let Some(k) = key {
+                    g.keys.insert("cline".to_string(), k);
+                }
+                let _ = config::save_global(&g);
+                app.messages.push(ChatMessage::notice(format!(
+                    "Provider 'cline' ajouté → {url}.\nUtilise: /provider use cline\nPuis: /models" )));
+                return;
+            }
+            let id = first.to_ascii_lowercase();
             let key = args.get(2).copied().unwrap_or("");
-            match providers::find(id) {
+            match providers::find(&id) {
                 Some(p) if !key.is_empty() => match crate::gwclient::add_key_flow(&p.id, key) {
                     Ok(crate::gwclient::AddRoute::ViaGateway { provider_id }) => {
                         let mut g = config::load_global();
@@ -945,6 +987,11 @@ fn handle_provider(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent
             let url = args.get(2).copied().unwrap_or("");
             if id.is_empty() || url.is_empty() {
                 app.messages.push(ChatMessage::notice("usage: /provider add-custom <id> <base_url>"));
+            } else if !(url.starts_with("http://") || url.starts_with("https://")) {
+                app.messages.push(ChatMessage::notice(format!(
+                    "⚠ base_url invalide : « {url} » — elle doit commencer par http:// ou https://.\n\
+                     (une clé API ne peut PAS servir de base_url)"
+                )));
             } else if providers::builtins().iter().any(|p| p.id == id) {
                 app.messages.push(ChatMessage::notice(format!("'{id}' est déjà un provider intégré.")));
             } else {
@@ -1213,8 +1260,7 @@ fn cmd_pick_model(ui_tx: &UnboundedSender<UiEvent>) {
     let key = settings.api_key.clone();
     let ui = ui_tx.clone();
     tokio::spawn(async move {
-        let http = reqwest::Client::new();
-        match models::list(&http, &provider, key.as_deref()).await {
+        match models::list(&http_client::HTTP_CLIENT, &provider, key.as_deref()).await {
             Ok(list) => {
                 let _ = ui.send(UiEvent::ModelList(list));
             }
@@ -1430,13 +1476,26 @@ fn handle_task(app: &mut App, args: &[&str]) {
                 crate::tasks::Status::Claimed
             };
             match crate::tasks::set_status(id, status) {
-                Ok(true) => app.messages.push(ChatMessage::notice(format!(
+                Ok(crate::tasks::Update::Ok(s)) => app.messages.push(ChatMessage::notice(format!(
                     "Tâche {id} → {}",
-                    status.label()
+                    s.label()
                 ))),
-                Ok(false) => app
+                Ok(crate::tasks::Update::NotFound) => app
                     .messages
                     .push(ChatMessage::notice(format!("Tâche {id} introuvable"))),
+                Ok(crate::tasks::Update::Refused(missing)) => {
+                    let mut m = format!(
+                        "⚠ Refusé : {id} ne peut pas être marquée « fait » — livrable(s) en défaut :\n"
+                    );
+                    for (p, why) in &missing {
+                        m.push_str(&format!("  ✗ {p} ({why})\n"));
+                    }
+                    m.push_str(
+                        "« fait » exige le livrable sur disque, non vide — crée-le, ou retire \
+                         le chemin du texte de la tâche (édition manuelle de .zer0/tasks.md).",
+                    );
+                    app.messages.push(ChatMessage::notice(m));
+                }
                 Err(e) => app
                     .messages
                     .push(ChatMessage::notice(format!("Erreur: {e}"))),
@@ -1472,6 +1531,7 @@ fn cmd_ask(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
             question,
             Vec::new(),
             options,
+            None,
         )
         .await;
         let _ = ui.send(UiEvent::Info(format!("🤖 [{role_s}] {res}")));
@@ -1519,6 +1579,7 @@ fn cmd_review(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
             task,
             Vec::new(),
             options,
+            None,
         )
         .await;
         let _ = ui.send(UiEvent::Info(format!("🔍 [review {path_s}]\n{res}")));
@@ -1560,9 +1621,25 @@ fn cmd_work(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
     )));
     tokio::spawn(async move {
         let res =
-            crate::agent::subagent::run_subagent(endpoints, system, text, tools, options).await;
-        let _ = crate::tasks::set_status(&id, crate::tasks::Status::Done);
-        let _ = ui.send(UiEvent::Info(format!("🛠 [{id}] fait\n{res}")));
+            crate::agent::subagent::run_subagent(endpoints, system, text, tools, options, None).await;
+        match crate::tasks::set_status(&id, crate::tasks::Status::Done) {
+            Ok(crate::tasks::Update::Ok(_)) => {
+                let _ = ui.send(UiEvent::Info(format!("🛠 [{id}] fait\n{res}")));
+            }
+            Ok(crate::tasks::Update::Refused(missing)) => {
+                let mut m = format!(
+                    "⚠ [{id}] NON marquée faite — livrable(s) en défaut (porte d'honnêteté) :\n"
+                );
+                for (p, why) in &missing {
+                    m.push_str(&format!("  ✗ {p} ({why})\n"));
+                }
+                m.push_str(&format!("\nrésultat du sous-agent :\n{res}"));
+                let _ = ui.send(UiEvent::Info(m));
+            }
+            _ => {
+                let _ = ui.send(UiEvent::Info(format!("🛠 [{id}] (statut inchangé)\n{res}")));
+            }
+        }
     });
 }
 
@@ -1724,10 +1801,488 @@ fn cmd_jev(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
         "📊 jev : {path_s} ({nchars} caractères) → analyse du code complet…"
     )));
     tokio::spawn(async move {
-        let res = crate::agent::subagent::run_jev(endpoints, system, &path_s, &content, options)
+        let res = crate::agent::subagent::run_jev(endpoints, system, &path_s, &content, options, None)
             .await;
         let _ = ui.send(UiEvent::Info(format!("📊 [jev {path_s}]\n{res}")));
     });
+}
+
+pub fn cmd_0box(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
+    let mut args_iter = args.iter().peekable();
+    
+    // Handle subcommands
+    if let Some(first) = args_iter.peek() {
+        match **first {
+            "fallback" => {
+                handle_0box_fallback(app, &args_iter.skip(1).cloned().collect::<Vec<_>>(), ui_tx);
+                return;
+            }
+            "help" => {
+                show_0box_help(app);
+                return;
+            }
+            _ => {}
+        }
+    }
+    
+    let topic = args.iter().cloned().collect::<Vec<_>>().join(" ");
+    if topic.trim().is_empty() {
+        app.messages.push(ChatMessage::notice("usage: /0box <sujet> [--perspectives main,code,reasoning]\n       /0box fallback <add|remove|list> <provider/model>\n       /0box help"));
+        return;
+    }
+    
+    // Parse optional --perspectives flag
+    // Default order: code → reasoning → main (main always last for synthesis+execution)
+    let mut perspectives: Vec<String> = vec!["code".to_string(), "reasoning".to_string(), "main".to_string()];
+    let topic_parts: Vec<&str> = topic.split_whitespace().collect();
+    let mut topic_words = Vec::new();
+    let mut i = 0;
+    while i < topic_parts.len() {
+        if topic_parts[i] == "--perspectives" && i + 1 < topic_parts.len() {
+            perspectives = topic_parts[i + 1].split(',').map(|s| s.trim().to_string()).collect();
+            i += 2;
+        } else {
+            topic_words.push(topic_parts[i]);
+            i += 1;
+        }
+    }
+    let topic = topic_words.join(" ");
+    
+    // Launch sequential debate as a background task
+    let app_settings = app.settings();
+    let system = app.system.clone();
+    let options = ChatOptions {
+        max_tokens: app.max_tokens,
+        thinking: app.thinking,
+        temperature: app.temperature,
+    };
+    let read_write = app.read_write;
+    let code_exec = app.code_exec;
+    let all_tools = app.all_tools.clone();
+    let ui = ui_tx.clone();
+    let topic_owned = topic.clone();
+    let perspectives_owned = perspectives.clone();
+    
+    app.messages.push(ChatMessage::notice(format!(
+        "[0box] 🎭 DÉBAT SÉQUENTIEL sur '{}' — perspectives: {} — en cours…",
+        topic,
+        perspectives.join(", ")
+    )));
+    
+    tokio::spawn(async move {
+        run_0box_debate(
+            topic_owned,
+            perspectives_owned,
+            app_settings,
+            system,
+            options,
+            read_write,
+            code_exec,
+            all_tools,
+            ui
+        ).await;
+    });
+}
+
+/// Lance un vrai débat séquentiel : chaque modèle reçoit la conversation complète
+/// et répond à son tour. Le dernier (MAIN) synthétise et peut exécuter.
+/// Publique : également appelée par le CLI headless (`zer0 0box <sujet>`).
+pub async fn run_0box_debate(
+    topic: String,
+    perspectives: Vec<String>,
+    app_settings: crate::config::Settings,
+    system: String,
+    options: ChatOptions,
+    read_write: bool,
+    code_exec: bool,
+    all_tools: Vec<crate::tools::ToolSpec>,
+    ui: UnboundedSender<UiEvent>,
+) {
+    // Build tools available (respect F3/F4)
+    let tools: Vec<crate::tools::ToolSpec> = all_tools
+        .iter()
+        .filter(|t| (t.name != "text_editor" || read_write) && (t.name != "code_exec" || code_exec))
+        .cloned()
+        .collect();
+    
+    // Ensure MAIN is always last for synthesis + execution
+    let mut debate_perspectives = perspectives.clone();
+    if let Some(pos) = debate_perspectives.iter().position(|r| r == "main") {
+        let main_role = debate_perspectives.remove(pos);
+        debate_perspectives.push(main_role);
+    } else {
+        // If no main role specified, add it at the end
+        debate_perspectives.push("main".to_string());
+    }
+    
+
+    // Debug: log the actual perspectives order being used
+    let _ = ui.send(UiEvent::Info(format!(
+        "[0box] Perspectives: {} (F3={} F4={})",
+        debate_perspectives.join(" -> "),
+        if read_write { "ON" } else { "OFF" },
+        if code_exec { "ON" } else { "OFF" }
+    )));
+
+    // Conversation partagée entre tous les participants
+    let mut conversation: Vec<ChatMessage> = Vec::new();
+    
+    // Prompt initial système pour le débat
+    let mut debate_system = format!(
+        "{}\n\n## RÈGLES DU DÉBAT 0BOX\n\nTu participes à un débat structuré entre plusieurs perspectives IA.\nChaque participant parle À SON TOUR, reçoit l'historique complet, et doit :\n1. RÉPONDRE aux arguments précédents (accord/désaccord/nuance)\n2. APPORTER sa perspective unique\n3. UTILISER les outils si nécessaire (web_search, knowledge_search, etc.)\n4. RESTER CONSTRUCTIF — l'objectif est une solution concrète finale.\n\nLe DERNIER participant (MAIN) doit SYNTHÉTISER et PROPOSER UN PLAN D'ACTION EXÉCUTABLE.\nSi des outils sont nécessaires pour valider (code, fichiers, recherche), UTILISE-LES.",
+        system
+    );
+    // Liste explicite des outils : ce modèle ignore souvent le paramètre `tools` de l'API,
+    // il faut les lui nommer dans le prompt (même pattern que start_turn).
+    if !tools.is_empty() {
+        debate_system.push_str(
+            "\n\n## Outils disponibles (utilise-les pour AGIR — ne dis jamais « je ne peux pas exécuter » quand un outil le permet)\n",
+        );
+        for t in &tools {
+            debate_system.push_str(&format!("- {} : {}\n", t.name, t.description));
+        }
+    }
+    
+    // Tour 1 : Premier participant (pas d'historique de débat)
+    for (turn_idx, role) in debate_perspectives.iter().enumerate() {
+        let is_last = turn_idx == debate_perspectives.len() - 1;
+        let role_label = if is_last { "MAIN (synthèse + action)" } else { role };
+        
+        // Build prompt for this turn
+        let prompt = if turn_idx == 0 {
+            format!(
+                "=== DÉBAT 0BOX — TOUR 1/{} ===\nSUJET : {}\nTA PERSPECTIVE : {}\n\nTu OUVRES le débat. Donne ton analyse initiale, tes arguments clés, et tes questions aux autres perspectives.\nSois concret, structuré, et utilise les outils si tu as besoin de données.",
+                debate_perspectives.len(),
+                topic,
+                role
+            )
+        } else if is_last {
+            // MAIN : synthèse + attribution des tâches + EXÉCUTION IMMÉDIATE
+            let history = format_conversation(&conversation);
+            format!(
+                "=== DÉBAT 0BOX — TOUR {}/{} (MAIN - SYNTHÈSE + TÂCHES + EXÉCUTION) ===\nSUJET : {}\nHISTORIQUE DU DÉBAT :\n{}\n\n⚠️⚠️⚠️ INSTRUCTION CRITIQUE POUR MAIN ⚠️⚠️⚠️\n\nTu es MAIN. Ton rôle : SYNTHÉTISER, ATTRIBUER LES TÂCHES, puis EXÉCUTER.\n\nRÈGLE ABSOLUE : Tu DOIS appeler des outils DANS CETTE RÉPONSE.\nNE RÉPONDS PAS AVEC DU TEXTE SEULEMENT.\n\nPROCÉDURE OBLIGATOIRE (dans cet ordre) :\n0. VÉRIFIE D'ABORD avec task_list ce qui existe déjà : ne recrée JAMAIS une tâche existante — reprends le travail là où il en est (task_update claim → travail → done).\n1. CRÉE LES TÂCHES manquantes : appelle task_add UNE FOIS PAR étape du plan d'action.\n   Exemple : task_add text=\"Créer TodoList.java\" role=\"code\"\n   → chaque tâche reçoit un id (t1, t2, …) que les outils te renvoient.\n2. EXÉCUTE : appelle text_editor (create) pour CHAQUE fichier à créer,\n   code_exec pour CHAQUE commande à lancer.\n3. Marque l'avancement : task_update id=t1 status=claim au démarrage,\n   task_update id=t1 status=done quand c'est fini.\n4. Enchaîne les appels SANS t'arrêter jusqu'à ce que le plan soit réalisé.\n\nLes tâches restent visibles avec /task : l'utilisateur pourra les reprendre\navec /work si le budget d'appels d'outils est épuisé avant la fin.\n\nSi tu ne fais qu'écrire du texte sans appeler task_add, TU ÉCHOUES.\n\nCommence MAINTENANT : task_list d'abord, puis task_add pour les étapes manquantes.",
+                turn_idx + 1,
+                debate_perspectives.len(),
+                topic,
+                history
+            )
+        } else {
+            // Participants intermédiaires : réagissent au débat
+            let history = format_conversation(&conversation);
+            format!(
+                "=== DÉBAT 0BOX — TOUR {}/{} ===\nSUJET : {}\nTA PERSPECTIVE : {}\nHISTORIQUE DU DÉBAT :\n{}\n\nRÉPONDS MAINTENANT :\n- Quels arguments précèdents VALIDES/INVALIDES ?\n- Quelle perspective UNIQUE apportes-tu ?\n- Quelles QUESTIONS aux autres ?\n- Utilise les outils si tu as besoin de preuves/données.",
+                turn_idx + 1,
+                debate_perspectives.len(),
+                topic,
+                role,
+                history
+            )
+        };
+        
+        // Endpoint pour ce rôle
+        let endpoints = crate::route::chain_for_0box_role(&app_settings, role);
+        
+        // Annonce du tour
+        let _ = ui.send(UiEvent::Info(format!("🎭 [0box:{}] Tour {}/{} — parole à {}", role, turn_idx + 1, debate_perspectives.len(), role_label)));
+        
+        // Exécute le tour avec validation et retry si échec
+        let (speaker, response) = run_0box_turn_with_retry(
+            role,
+            role_label,
+            &prompt,
+            &endpoints,
+            &debate_system,
+            &tools,
+            &options,
+            &ui,
+            3, // max retries per turn
+        ).await;
+        
+        // Ajoute à la conversation partagée
+        conversation.push(ChatMessage::assistant(format!("[{}]: {}", speaker, response), vec![]));
+        
+        // Affiche dans l'UI
+        let _ = ui.send(UiEvent::Info(format!("📝 [{}]:\n{}", speaker, response)));
+        
+        // Petite pause entre les tours
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    
+    // Fin du débat
+    let _ = ui.send(UiEvent::Info("✅ [0box] Débat terminé — synthèse et plan d'action ci-dessus.".to_string()));
+}
+
+/// Formate la conversation pour l'injection dans le prompt
+/// Exécute un tour du débat 0box avec retry automatique et validation de la réponse.
+/// Retourne (speaker, response) garanti valide (non vide, non erreur).
+async fn run_0box_turn_with_retry(
+    role: &str,
+    role_label: &str,
+    prompt: &str,
+    endpoints: &[crate::route::Endpoint],
+    debate_system: &str,
+    tools: &[crate::tools::ToolSpec],
+    options: &ChatOptions,
+    ui: &UnboundedSender<UiEvent>,
+    max_retries: u32,
+) -> (String, String) {
+    let mut last_error = String::new();
+    
+    for attempt in 0..=max_retries {
+        if attempt > 0 {
+            let _ = ui.send(UiEvent::Info(format!(
+                "🔄 [0box:{}] Retry {}/{} — nouvelle tentative…",
+                role, attempt, max_retries
+            )));
+        }
+        
+        // Channel pour événements du sous-agent
+        let (evt_tx, mut evt_rx) = tokio::sync::mpsc::unbounded_channel::<crate::agent::subagent::SubAgentEvent>();
+        
+        // Lance le sous-agent
+        let system_clone = debate_system.to_string();
+        let tools_clone = tools.to_vec();
+        let options_clone = options.clone();
+        let endpoints_clone = endpoints.to_vec();
+        let prompt_clone = prompt.to_string();
+        let role_owned = role.to_string();
+        
+        // Actions du tour (accumulées pour l'historique du débat : sans ça, les
+        // perspectives suivantes ne voient NI les tâches créées NI les fichiers
+        // écrits — MAIN recréait en double des tâches déjà posées par « code »).
+        let actions: std::sync::Arc<std::sync::Mutex<Vec<String>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        
+        let subagent_handle = tokio::spawn(async move {
+            // Budget élargi pour les tours de débat : MAIN doit vérifier + créer +
+            // marquer un plan multi-étapes — le budget par défaut (8/24) ne laisse
+            // même pas place aux `task_update` après vérification (constat run 3).
+            // Toujours borné : jamais illimité (principe d'endiguement).
+            let res = crate::agent::subagent::run_subagent_budgeted(
+                endpoints_clone,
+                system_clone,
+                prompt_clone,
+                tools_clone,
+                options_clone,
+                Some(evt_tx),
+                20,
+                64,
+            ).await;
+            (role_owned, res)
+        });
+        
+        // Forward événements en temps réel
+        let ui_evt = ui.clone();
+        let role_label_owned = role_label.to_string();
+        let acts_fwd = actions.clone();
+        let forwarder = tokio::spawn(async move {
+            while let Some(evt) = evt_rx.recv().await {
+                match evt {
+                    crate::agent::subagent::SubAgentEvent::Fallback { from, to, reason } => {
+                        let _ = ui_evt.send(UiEvent::Info(format!(
+                            "{} ⚡ Bascule: {} → {} ({})", role_label_owned, from, to, reason
+                        )));
+                    }
+                    crate::agent::subagent::SubAgentEvent::ToolCall { name, args } => {
+                        // Résumé compact (jamais le contenu brut tronqué à 100 chars,
+                        // qui donnait l'impression d'un flux coupé en plein file_text).
+                        let short = summarize_tool_call(&name, &args);
+                        if let Ok(mut a) = acts_fwd.lock() {
+                            a.push(format!("{} {}", name, short));
+                        }
+                        let _ = ui_evt.send(UiEvent::Info(format!("{} ⚙ {} {}", role_label_owned, name, short)));
+                    }
+                    crate::agent::subagent::SubAgentEvent::ToolResult { name, result } => {
+                        let first: String = result
+                            .lines()
+                            .find(|l| !l.trim().is_empty())
+                            .unwrap_or("")
+                            .chars()
+                            .take(120)
+                            .collect();
+                        let _ = ui_evt.send(UiEvent::Info(format!("{} ✓ {} → {}", role_label_owned, name, first)));
+                    }
+                    crate::agent::subagent::SubAgentEvent::Error(e) => {
+                        let _ = ui_evt.send(UiEvent::Info(format!("{} ⚠ {}", role_label_owned, e)));
+                    }
+                    crate::agent::subagent::SubAgentEvent::Info(info) => {
+                        let _ = ui_evt.send(UiEvent::Info(format!("{} ℹ {}", role_label_owned, info)));
+                    }
+                }
+            }
+        });
+        
+        // Attend la fin du tour ET le drainage des événements
+        let (speaker, response) = match subagent_handle.await {
+            Ok((s, r)) => (s, r),
+            Err(e) => {
+                last_error = format!("Join error: {e}");
+                continue; // retry
+            }
+        };
+        let _ = forwarder.await;
+
+        // Réponse enrichie des actions du tour — les perspectives suivantes (et MAIN
+        // en particulier) doivent voir les tâches créées et fichiers écrits, sinon
+        // elles recréent en double ce qui existe déjà (constat runs 1–2).
+        let mut full = response.clone();
+        let n_actions = actions.lock().map(|a| a.len()).unwrap_or(0);
+        if n_actions > 0 {
+            if let Ok(acts) = actions.lock() {
+                let shown: Vec<String> = acts.iter().take(20).cloned().collect();
+                let more = acts.len().saturating_sub(20);
+                let suffix = if more > 0 {
+                    format!(" (+{more} autres)")
+                } else {
+                    String::new()
+                };
+                full = format!(
+                    "{full}\n\n[Actions de ce tour : {}{suffix}]",
+                    shown.join(" ; ")
+                );
+            }
+        }
+
+        // VALIDATION — sur la réponse ORIGINALE (les actions comptent comme travail).
+        let response_trimmed = response.trim();
+        if response_trimmed.is_empty() && n_actions == 0 {
+            last_error = "Réponse vide".to_string();
+            let _ = ui.send(UiEvent::Info(format!("⚠ [0box:{}] Réponse vide, retry…", role)));
+            continue;
+        }
+        if response_trimmed.starts_with("⚠") || response_trimmed.starts_with("Erreur") {
+            // Arrêt d'endiguement (boucle détectée, budget dépassé) : ce n'est PAS un
+            // échec modèle — le travail accompli est réel. Le retry redémarrerait le
+            // tour ENTIER pour rien (15 min perdues, run 4). On garde le tour tel quel.
+            if response_trimmed.contains("boucle détectée")
+                || response_trimmed.contains("budget d'appels d'outils dépassé")
+            {
+                let _ = ui.send(UiEvent::Info(format!(
+                    "🛑 [0box:{}] Tour arrêté par l'endiguement — travail conservé (pas de retry)",
+                    role
+                )));
+                return (speaker, full);
+            }
+            last_error = format!("Réponse d'erreur: {response_trimmed}");
+            let _ = ui.send(UiEvent::Info(format!("⚠ [0box:{}] Erreur détectée, retry…", role)));
+            continue;
+        }
+        if response_trimmed.chars().count() < 10 && n_actions == 0 {
+            last_error = "Réponse trop courte".to_string();
+            let _ = ui.send(UiEvent::Info(format!("⚠ [0box:{}] Réponse trop courte (<10 chars), retry…", role)));
+            continue;
+        }
+
+        // Succès : réponse valide
+        return (speaker, full);
+    }
+    
+    // Tous les retries échoués
+    let error_msg = format!("[{}]: ÉCHEC après {} tentatives — {}. Le débat continue avec ce constat.", role, max_retries + 1, last_error);
+    let _ = ui.send(UiEvent::Info(format!("❌ [0box:{}] {}", role, error_msg)));
+    (role.to_string(), error_msg)
+}
+
+
+fn format_conversation(conversation: &[ChatMessage]) -> String {
+    if conversation.is_empty() {
+        return "(début du débat)".to_string();
+    }
+    conversation.iter().map(|m| {
+        if let Some(content) = &m.content {
+            // Extrait le speaker si format [speaker]: content
+            if let Some(rest) = content.strip_prefix('[') {
+                if let Some(end) = rest.find(']') {
+                    let speaker = &rest[..end];
+                    let text = &rest[end+2..];
+                    return format!("  🎭 {}: {}", speaker, text.chars().take(800).collect::<String>());
+                }
+            }
+            format!("  💬 {}", content.chars().take(800).collect::<String>())
+        } else {
+            String::new()
+        }
+    }).collect::<Vec<_>>().join("\n")
+}
+
+fn handle_0box_fallback(app: &mut App, args: &[&str], _ui_tx: &UnboundedSender<UiEvent>) {
+    match args.first().copied() {
+        Some("list") => {
+            let g = crate::config::load_global();
+            let fallbacks = g.zero_box_fallbacks.unwrap_or_default();
+            if fallbacks.is_empty() {
+                app.messages.push(ChatMessage::notice("[0box] Aucun modèle de fallback configuré. Utilise la chaîne de bascule standard (rôles + routes)."));
+            } else {
+                let mut s = String::from("[0box] Modèles de fallback configurés:\n");
+                for fb in &fallbacks {
+                    s.push_str(&format!("  - {}\n", fb));
+                }
+                s.push_str("\nCes modèles sont ajoutés EN PREMIER dans la chaîne pour les agents 0box.");
+                app.messages.push(ChatMessage::notice(s));
+            }
+        }
+        Some("add") => {
+            if args.len() < 2 {
+                app.messages.push(ChatMessage::notice("usage: /0box fallback add <provider/model>"));
+                return;
+            }
+            let route = args[1];
+            if crate::route::parse_route(route).is_none() {
+                app.messages.push(ChatMessage::notice(format!("Route invalide: {}. Format: provider/model", route)));
+                return;
+            }
+            let mut g = crate::config::load_global();
+            let fallbacks = g.zero_box_fallbacks.get_or_insert_with(Vec::new);
+            if !fallbacks.contains(&route.to_string()) {
+                fallbacks.push(route.to_string());
+                if let Err(e) = crate::config::save_global(&g) {
+                    app.messages.push(ChatMessage::notice(format!("Erreur: {e}")));
+                } else {
+                    app.messages.push(ChatMessage::notice(format!("[0box] Fallback ajouté: {route}")));
+                }
+            } else {
+                app.messages.push(ChatMessage::notice(format!("[0box] Déjà présent: {route}")));
+            }
+        }
+        Some("remove") => {
+            if args.len() < 2 {
+                app.messages.push(ChatMessage::notice("usage: /0box fallback remove <provider/model>"));
+                return;
+            }
+            let route = args[1];
+            let mut g = crate::config::load_global();
+            if let Some(fallbacks) = &mut g.zero_box_fallbacks {
+                fallbacks.retain(|r| r != route);
+                if let Err(e) = crate::config::save_global(&g) {
+                    app.messages.push(ChatMessage::notice(format!("Erreur: {e}")));
+                } else {
+                    app.messages.push(ChatMessage::notice(format!("[0box] Fallback supprimé: {route}")));
+                }
+            }
+        }
+        _ => {
+            app.messages.push(ChatMessage::notice("usage: /0box fallback <add|remove|list> <provider/model>"));
+        }
+    }
+}
+
+fn show_0box_help(app: &mut App) {
+    app.messages.push(ChatMessage::notice(
+        String::from("[0box] Brainstorm multi-perspectives\n\n")
+        + "Usage:\n"
+        + "  /0box <sujet> [--perspectives main,code,reasoning]  Lance un brainstorm\n"
+        + "  /0box fallback list                                  Liste les fallbacks 0box\n"
+        + "  /0box fallback add <provider/model>                  Ajoute un fallback 0box\n"
+        + "  /0box fallback remove <provider/model>               Retire un fallback 0box\n"
+        + "  /0box help                                           Cette aide\n\n"
+        + "Exemples:\n"
+        + "  /0box comment optimiser mon build Rust --perspectives code,reasoning,fast\n"
+        + "  /0box fallback add openrouter/qwen/qwen-2.5-72b:free\n"
+        + "  /0box fallback add google/gemini-1.5-flash\n"
+        + "\n"
+        + "Le système utilise la chaîne de bascule standard (rôle → routes globales).\n"
+        + "Les fallbacks 0box s'ajoutent EN TÊTE de chaîne pour les agents 0box uniquement."
+    ));
 }
 
 fn handle_kb(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
@@ -2037,8 +2592,7 @@ fn cmd_list_models(app: &App, ui_tx: &UnboundedSender<UiEvent>, free_only: bool)
     let key = app.api_key.clone();
     let ui = ui_tx.clone();
     tokio::spawn(async move {
-        let http = reqwest::Client::new();
-        match models::list(&http, &provider, key.as_deref()).await {
+        match models::list(&http_client::HTTP_CLIENT, &provider, key.as_deref()).await {
             Ok(mut list) => {
                 if free_only {
                     list.retain(models::is_free);
@@ -2051,9 +2605,13 @@ fn cmd_list_models(app: &App, ui_tx: &UnboundedSender<UiEvent>, free_only: bool)
                     provider.name
                 ));
                 for m in list.iter().take(80) {
+                    // Usage observé cette session (429, appels ok) — rien d'observé ⇒ rien d'affiché.
+                    let badge = crate::quota::badge(&format!("{}/{}", provider.id, m.id))
+                        .unwrap_or_default();
                     s.push_str(&format!(
-                        "  {}{}\n",
+                        "  {}{}{}\n",
                         m.id,
+                        badge,
                         m.context_length.map(|c| format!("  (ctx {c})")).unwrap_or_default()
                     ));
                 }
@@ -2076,10 +2634,9 @@ fn cmd_select(problem: &str, ui_tx: &UnboundedSender<UiEvent>) {
     let problem = problem.to_string();
     let ui = ui_tx.clone();
     tokio::spawn(async move {
-        let http = reqwest::Client::new();
         // OpenRouter exposes its model list publicly (no key needed).
         let provider = providers::find("openrouter").unwrap();
-        match models::list(&http, &provider, None).await {
+        match models::list(&http_client::HTTP_CLIENT, &provider, None).await {
             Ok(list) => {
                 let free: Vec<_> = list.into_iter().filter(models::is_free).collect();
                 let (cat, ranked) = select::rank(&problem, &free, 5);
@@ -2201,6 +2758,35 @@ fn handle_input(
     app: &mut App,
     ui_tx: &UnboundedSender<UiEvent>,
 ) {
+    // ========== FILTRE RELEASE (Windows/ConPTY : chaque touche = Press + Release) ==========
+    // Sans ce filtre, le sélecteur/palette traite le Release comme une 2e frappe
+    // (le filtre Press du dispatch principal ne couvre pas ce chemin) → « 0 » devient « 00 ».
+    if let Event::Key(k) = &ev {
+        if k.kind == KeyEventKind::Release {
+            return;
+        }
+    }
+    // ========================================================================================
+
+    // ========== DÉDUPLICATION GLOBALE (doublons de Press, ex. ConPTY) ==========
+    if let Event::Key(k) = &ev {
+        // On ne déduplique que les Press (Repeat = auto-repeat légitime)
+        if k.kind == KeyEventKind::Press {
+            let now = std::time::Instant::now();
+            let code = k.code;
+            let mods = k.modifiers;
+            
+            // Vérifier si c'est un doublon (même touche + mêmes modifs < 50ms)
+            if let Some((last_code, last_mods, last_time)) = app.last_key_event {
+                if last_code == code && last_mods == mods && now.duration_since(last_time).as_millis() < 50 {
+                    return; // Ignorer le doublon
+                }
+            }
+            app.last_key_event = Some((code, mods, now));
+        }
+    }
+    // ================================================================================
+
     // Sélecteur ouvert : il capte tout le clavier.
     if let Event::Key(key) = ev {
         if app.picker.is_some() {
@@ -2465,6 +3051,43 @@ fn handle_input(
         app.sel_anchor = None;
         app.sel_head = None;
         match k.code {
+            // Copier le dernier message assistant (Ctrl+Shift+C)
+            KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT) => {
+                copy_last_assistant(app);
+            }
+            // Coller depuis le presse-papier (Ctrl+V)
+            KeyCode::Char('v') if k.modifiers.contains(KeyModifiers::CONTROL) && !k.modifiers.contains(KeyModifiers::SHIFT) => {
+                match crate::clipboard::paste() {
+                    Some(text) if !text.trim().is_empty() => {
+                        input_insert_str(app, &text);
+                    }
+                    Some(_) => {
+                        app.messages.push(ChatMessage::notice("⚠ presse-papier vide"));
+                    }
+                    None => {
+                        app.messages.push(ChatMessage::notice(
+                            "⚠ presse-papier inaccessible (PowerShell requis sur Windows)"
+                        ));
+                    }
+                }
+            }
+            // Coller depuis le presse-papier (Ctrl+Shift+V) - alias
+            KeyCode::Char('v') if k.modifiers.contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT) => {
+                match crate::clipboard::paste() {
+                    Some(text) if !text.trim().is_empty() => {
+                        input_insert_str(app, &text);
+                    }
+                    Some(_) => {
+                        app.messages.push(ChatMessage::notice("⚠ presse-papier vide"));
+                    }
+                    None => {
+                        app.messages.push(ChatMessage::notice(
+                            "⚠ presse-papier inaccessible (PowerShell requis sur Windows — essayez Ctrl+V du terminal)"
+                        ));
+                    }
+                }
+            }
+            // Ctrl+C simple = quitter (comportement actuel)
             KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => app.should_quit = true,
             KeyCode::Esc => app.should_quit = true,
             KeyCode::Enter => send_message(app, ui_tx),
@@ -3468,8 +4091,7 @@ fn probe_context(app: &App, ui_tx: &UnboundedSender<UiEvent>) {
     let key = app.api_key.clone();
     let ui = ui_tx.clone();
     tokio::spawn(async move {
-        let http = reqwest::Client::new();
-        if let Ok(list) = models::list(&http, &provider, key.as_deref()).await {
+        if let Ok(list) = models::list(&http_client::HTTP_CLIENT, &provider, key.as_deref()).await {
             if let Some(c) = list
                 .iter()
                 .find(|m| m.id == model)
@@ -3490,17 +4112,18 @@ fn input_height(app: &App, width: u16) -> u16 {
 
 fn copy_selection(app: &mut App) {
     if let (Some(a), Some(h)) = (app.sel_anchor, app.sel_head) {
-        let x0 = a.0.min(h.0) as usize;
-        let x1 = a.0.max(h.0) as usize;
-        let y0 = a.1.min(h.1) as usize;
-        let y1 = a.1.max(h.1) as usize;
+        let x0 = a.0.min(h.0);
+        let x1 = a.0.max(h.0);
+        let y0 = a.1.min(h.1);
+        let y1 = a.1.max(h.1);
+
         let mut text = String::new();
         for y in y0..=y1 {
-            if let Some(row) = app.screen.get(y) {
+            if let Some(row) = app.screen.get(y as usize) {
                 let chars: Vec<char> = row.chars().collect();
                 let mut line = String::new();
                 for x in x0..=x1 {
-                    if let Some(c) = chars.get(x) {
+                    if let Some(c) = chars.get(x as usize) {
                         line.push(*c);
                     }
                 }
@@ -3521,6 +4144,34 @@ fn copy_selection(app: &mut App) {
     }
     app.sel_anchor = None;
     app.sel_head = None;
+}
+
+/// Copie le contenu propre d'un message par index (sans UI chrome)
+fn copy_message_content(app: &mut App, msg_idx: usize) {
+    if let Some(msg) = app.messages.get(msg_idx) {
+        if let Some(content) = &msg.content {
+            if !content.trim().is_empty() {
+                crate::clipboard::copy(content);
+                let role_label = match msg.role.as_str() {
+                    "assistant" => "assistant",
+                    "user" => "utilisateur",
+                    "tool" => "outil",
+                    _ => &msg.role,
+                };
+                app.messages.push(ChatMessage::notice(format!(
+                    "📋 message {role_label} copié ({} caractères)",
+                    content.chars().count()
+                )));
+            }
+        }
+    }
+}
+
+/// Copie le dernier message assistant (raccourci Ctrl+Shift+C)
+fn copy_last_assistant(app: &mut App) {
+    if let Some(idx) = app.messages.iter().rposition(|m| m.role == "assistant") {
+        copy_message_content(app, idx);
+    }
 }
 
 fn toggle_mic(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
@@ -3755,3 +4406,10 @@ mod tests {
         assert_eq!(super::block_at(&[], 0), None);
     }
 }
+
+
+
+
+
+
+

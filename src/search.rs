@@ -1,4 +1,5 @@
 use anyhow::Result;
+use crate::http_client;
 use serde::Deserialize;
 
 /// A single web search result.
@@ -39,7 +40,7 @@ pub fn format_hits(hits: &[SearchHit]) -> String {
 async fn html_search(query: &str, max: usize) -> Result<Vec<SearchHit>> {
     let q = urlencoding::encode(query);
     let url = format!("https://html.duckduckgo.com/html/?q={q}");
-    let resp = reqwest::Client::new()
+    let resp = http_client::HTTP_CLIENT
         .get(&url)
         .header("User-Agent", UA)
         .send()
@@ -154,7 +155,7 @@ struct DdgResponse {
 async fn instant_answer(query: &str, max: usize) -> Result<Vec<SearchHit>> {
     let q = urlencoding::encode(query);
     let url = format!("https://api.duckduckgo.com/?q={q}&format=json&no_html=1&skip_disambig=1");
-    let resp = reqwest::Client::new()
+    let resp = http_client::HTTP_CLIENT
         .get(&url)
         .header("User-Agent", UA)
         .send()

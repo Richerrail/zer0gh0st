@@ -1,20 +1,53 @@
 use crate::agent::history::ChatMessage;
-use crate::agent::turn::run_turn;
+use crate::agent::turn::run_turn_budgeted;
 use crate::event::UiEvent;
 use crate::llm::llama::ChatOptions;
 use crate::route::Endpoint;
 use crate::tools::ToolSpec;
+use tokio::sync::mpsc::UnboundedSender;
+
+/// Events that a sub-agent can forward to the parent (for visibility).
+#[derive(Debug, Clone)]
+pub enum SubAgentEvent {
+    /// The sub-agent switched to a different endpoint (failover).
+    Fallback { from: String, to: String, reason: String },
+    /// A tool was called.
+    ToolCall { name: String, args: String },
+    /// A tool returned a result (name = last called tool).
+    ToolResult { name: String, result: String },
+    /// An error occurred (non-fatal).
+    Error(String),
+    /// Progress info.
+    Info(String),
+}
 
 /// Run an isolated one-shot sub-agent and return its final text.
 ///
 /// The sub-agent gets a fresh conversation (no shared history) and its own
-/// event channel, so it never pollutes the main chat.
+/// event channel. Optionally forwards fallback/progress events via `event_tx`.
 pub async fn run_subagent(
     endpoints: Vec<Endpoint>,
     system: String,
     task: String,
     tools: Vec<ToolSpec>,
     options: ChatOptions,
+    event_tx: Option<UnboundedSender<SubAgentEvent>>,
+) -> String {
+    run_subagent_budgeted(endpoints, system, task, tools, options, event_tx, 8, 24).await
+}
+
+/// Comme `run_subagent`, avec budget d'endiguement explicite (itérations / appels
+/// d'outils) — utilisé par le débat 0box dont MAIN exécute un plan multi-étapes.
+#[allow(clippy::too_many_arguments)]
+pub async fn run_subagent_budgeted(
+    endpoints: Vec<Endpoint>,
+    system: String,
+    task: String,
+    tools: Vec<ToolSpec>,
+    options: ChatOptions,
+    event_tx: Option<UnboundedSender<SubAgentEvent>>,
+    max_iterations: usize,
+    max_tool_calls: usize,
 ) -> String {
     if endpoints.is_empty() {
         return "Aucun endpoint disponible pour ce rôle.".to_string();
@@ -23,24 +56,73 @@ pub async fn run_subagent(
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<UiEvent>();
     let messages = vec![ChatMessage::user(task)];
     tokio::spawn(async move {
-        run_turn(endpoints, system, messages, tools, options, tx).await;
+        run_turn_budgeted(endpoints, system, messages, tools, options, tx, max_iterations, max_tool_calls)
+            .await;
     });
 
     let mut result = String::new();
+    let mut last_endpoint: Option<String> = None;
+    let mut last_tool = String::new();
     while let Some(ev) = rx.recv().await {
         match ev {
             UiEvent::TurnComplete(full) => {
+                // Dernier message assistant AYANT du texte : un tour peut se terminer sur
+                // des appels d'outils (budget d'itérations atteint) sans texte final —
+                // prendre un message plus ancien plutôt que "(aucune réponse)".
                 result = full
                     .iter()
                     .rev()
-                    .find(|m| m.role == "assistant")
+                    .find(|m| {
+                        m.role == "assistant"
+                            && m.content.as_deref().is_some_and(|c| !c.trim().is_empty())
+                    })
                     .and_then(|m| m.content.clone())
                     .unwrap_or_default();
                 break;
             }
             UiEvent::Error(e) => {
                 result = format!("⚠ {e}");
+                if let Some(tx) = &event_tx {
+                    let _ = tx.send(SubAgentEvent::Error(e));
+                }
                 break;
+            }
+            UiEvent::Active(label) => {
+                // Endpoint changed (failover) — forward to parent for visibility.
+                if let Some(prev) = last_endpoint.replace(label.clone()) {
+                    if prev != label {
+                        if let Some(tx) = &event_tx {
+                            let _ = tx.send(SubAgentEvent::Fallback {
+                                from: prev,
+                                to: label.clone(),
+                                reason: "failover (rate limit, error, or empty response)".into(),
+                            });
+                        }
+                    }
+                } else {
+                    last_endpoint = Some(label);
+                }
+            }
+            UiEvent::ToolCall { name, args } => {
+                last_tool = name.clone();
+                if let Some(tx) = &event_tx {
+                    let _ = tx.send(SubAgentEvent::ToolCall { name, args });
+                }
+            }
+            UiEvent::ToolResult(r) => {
+                // Sans ça, le débat 0box affichait l'appel mais jamais sa
+                // confirmation — d'où l'impression de « coupé » (0BOX-TEST).
+                if let Some(tx) = &event_tx {
+                    let _ = tx.send(SubAgentEvent::ToolResult {
+                        name: last_tool.clone(),
+                        result: r,
+                    });
+                }
+            }
+            UiEvent::Info(info) => {
+                if let Some(tx) = &event_tx {
+                    let _ = tx.send(SubAgentEvent::Info(info));
+                }
             }
             _ => {}
         }
@@ -62,6 +144,7 @@ pub async fn run_jev(
     path: &str,
     content: &str,
     options: ChatOptions,
+    event_tx: Option<UnboundedSender<SubAgentEvent>>,
 ) -> String {
     const MAX_WHOLE: usize = 100_000;
     const CHUNK: usize = 60_000;
@@ -71,7 +154,7 @@ pub async fn run_jev(
 
     if total <= MAX_WHOLE {
         let task = jev_task(path, content, None);
-        return run_subagent(endpoints, system, task, Vec::new(), options).await;
+        return run_subagent(endpoints, system, task, Vec::new(), options, event_tx).await;
     }
 
     let n = total.div_ceil(CHUNK);
@@ -86,6 +169,7 @@ pub async fn run_jev(
             task,
             Vec::new(),
             options.clone(),
+            event_tx.clone(),
         )
         .await;
         if let Some(s) = parse_score(&res) {

@@ -1,3 +1,4 @@
+pub mod box0;
 pub mod code_exec;
 pub mod knowledge_search;
 pub mod memory_save;
@@ -34,6 +35,7 @@ impl ToolSpec {
 /// All tools known to Zer0, regardless of runtime toggles.
 pub fn all() -> Vec<ToolSpec> {
     vec![
+        box0::spec(),
         code_exec::spec(),
         text_editor::spec(),
         memory_save::spec(),
@@ -49,6 +51,7 @@ pub fn all() -> Vec<ToolSpec> {
 /// Execute a tool by name. Errors are returned as text so the model can react.
 pub async fn execute(name: &str, args: &str) -> String {
     match name {
+        "0box" => box0::run(args),
         "code_exec" => code_exec::run(args),
         "text_editor" => text_editor::run(args),
         "memory_save" => memory_save::run(args).await,

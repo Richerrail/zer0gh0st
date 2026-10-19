@@ -2855,6 +2855,7 @@ dependencies = [
  "eventsource-stream",
  "futures-util",
  "lopdf",
+ "once_cell",
  "pdf-extract",
  "rand 0.8.8",
  "ratatui",

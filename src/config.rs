@@ -46,6 +46,9 @@ pub struct GlobalConfig {
     /// Bot Telegram : identifiants (user id) autorisés à parler au bot.
     #[serde(default)]
     pub telegram_allow: Vec<i64>,
+    /// Modèles de fallback spécifiques pour /0box (ajoutés en tête de chaîne).
+    #[serde(default)]
+    pub zero_box_fallbacks: Option<Vec<String>>,
 }
 
 // `Default` manuel : `roles_enabled` doit valoir `true` sur une config neuve
@@ -65,6 +68,7 @@ impl Default for GlobalConfig {
             context_window: None,
             telegram_token: None,
             telegram_allow: Vec::new(),
+            zero_box_fallbacks: None,
         }
     }
 }

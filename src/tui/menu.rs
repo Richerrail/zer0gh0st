@@ -67,6 +67,7 @@ pub const TREE: &[Node] = &[
     // Visibles directement (sans déplier le groupe « model »).
     n("model use", "/model use "),
     n("free", "/free"),
+    n("quota", "/quota"),
     n("update", "/update"),
     g("provider", &[
         n("sélection", "/provider"),
@@ -146,6 +147,7 @@ pub const TREE: &[Node] = &[
         n("ask", "/ask "),
         n("review", "/review "),
         n("jev", "/jev "),
+        n("0box", "/0box "),
         n("select", "/select "),
         n("search", "/search "),
         n("jimmy", "/jimmy"),

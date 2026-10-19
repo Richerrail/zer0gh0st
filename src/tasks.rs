@@ -114,9 +114,37 @@ pub fn add(text: &str, role: Option<String>) -> Result<Task> {
     Ok(task)
 }
 
-pub fn set_status(id: &str, status: Status) -> Result<bool> {
+/// Issue d'une mise à jour de statut.
+#[derive(Debug, PartialEq)]
+pub enum Update {
+    /// Appliqué (statut résultant).
+    Ok(Status),
+    /// Id inconnu.
+    NotFound,
+    /// `done` refusé : livrables absents/vides — (chemin, problème).
+    Refused(Vec<(String, String)>),
+}
+
+pub fn set_status(id: &str, status: Status) -> Result<Update> {
     let mut tasks = load();
     let mut found = false;
+    // Porte d'honnêteté : marquer `done` exige que les livrables mentionnés
+    // dans le texte existent réellement sur disque (le test 0BOX-TEST a révélé
+    // des tâches [x] sans livrable — « j'ai écrit le fichier » non vérifié).
+    // Contournement assumé : éditer `.zer0/tasks.md` à la main.
+    if status == Status::Done {
+        let mut missing = Vec::new();
+        for t in &tasks {
+            if t.id == id {
+                found = true;
+                let paths = extract_paths(&t.text);
+                missing.extend(verify_deliverables(&paths));
+            }
+        }
+        if found && !missing.is_empty() {
+            return Ok(Update::Refused(missing));
+        }
+    }
     for t in &mut tasks {
         if t.id == id {
             t.status = status;
@@ -125,8 +153,71 @@ pub fn set_status(id: &str, status: Status) -> Result<bool> {
     }
     if found {
         save(&tasks)?;
+        Ok(Update::Ok(status))
+    } else {
+        Ok(Update::NotFound)
     }
-    Ok(found)
+}
+
+/// Chemins candidats dans le texte d'une tâche. L'heuristique est volontairement
+/// **prudente** : seuls les chemins ancrés (`~/…`, `/…`, `X:\…`, `./…`, `../…`)
+/// sont retenus — jamais un relatif ambigu (cwd variable), ni une notation
+/// d'extension (`.txt/.jsonl`), ni une URL (« et/ou » est déjà écarté : pas de
+/// point dans le dernier segment). Objectif : ne JAMAIS bloquer une tâche sur un
+/// faux positif ; la vérification vise les livrables en chemin complet.
+pub fn extract_paths(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for tok in text.split_whitespace() {
+        let tok = tok.trim_matches(|c: char| {
+            matches!(c, '`' | '"' | '\'' | '(' | ')' | ',' | ';' | ']' | '[' | '{' | '}' | '«' | '»')
+        });
+        if tok.is_empty() {
+            continue;
+        }
+        let low = tok.to_ascii_lowercase();
+        if low.starts_with("http://") || low.starts_with("https://") || low.starts_with("ftp://") {
+            continue; // URL, pas un livrable local
+        }
+        if !tok.contains('/') && !tok.contains('\\') {
+            continue;
+        }
+        let rooted = tok.starts_with("~/")
+            || tok.starts_with("~\\")
+            || tok.starts_with('/')
+            || tok.starts_with("./")
+            || tok.starts_with(".\\")
+            || tok.starts_with("../")
+            || tok.starts_with("..\\")
+            || (tok.len() > 1 && tok.as_bytes()[1] == b':'); // C:\ …
+        if !rooted {
+            continue; // relatif ambigu ou notation d'extension (`.txt/.jsonl`)
+        }
+        out.push(expand_home(tok));
+    }
+    out
+}
+
+/// `~/x` → dossier personnel. Autres chemins inchangés.
+fn expand_home(p: &str) -> String {
+    if let Some(rest) = p.strip_prefix("~/").or_else(|| p.strip_prefix("~\\")) {
+        format!("{}{}", crate::platform::home().trim_end_matches(['/', '\\']), rest)
+    } else {
+        p.to_string()
+    }
+}
+
+/// Vérifie les livrables : chaque chemin doit exister ; un fichier doit être
+/// non vide. Retourne les défauts (chemin, problème) — vide = tout va bien.
+fn verify_deliverables(paths: &[String]) -> Vec<(String, String)> {
+    paths
+        .iter()
+        .filter_map(|p| match fs::metadata(p) {
+            Err(_) => Some((p.clone(), "introuvable".to_string())),
+            Ok(m) if m.is_dir() => None,
+            Ok(m) if m.len() == 0 => Some((p.clone(), "vide (0 octet)".to_string())),
+            Ok(_) => None,
+        })
+        .collect()
 }
 
 /// Supprime une tâche par id. `true` si trouvée.
@@ -175,4 +266,60 @@ pub fn format_list() -> String {
         ));
     }
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_paths_finds_real_ones() {
+        let ps = extract_paths(
+            "Coordination → D:\\x\\0box-test\\RAPPORT.md, intégrer dans D:\\x\\0box-test\\",
+        );
+        assert!(ps.contains(&"D:\\x\\0box-test\\RAPPORT.md".to_string()));
+        assert!(ps.contains(&"D:\\x\\0box-test\\".to_string()));
+
+        // ~ expandu vers le dossier personnel
+        let ps = extract_paths("Générer ~/0box-test/sample.jsonl (20 lignes)");
+        assert_eq!(ps.len(), 1);
+        assert!(ps[0].ends_with("0box-test/sample.jsonl"));
+        assert!(!ps[0].contains('~'));
+    }
+
+    #[test]
+    fn extract_paths_rejects_false_positives() {
+        assert!(extract_paths("choisir A et/ou B puis valider").is_empty());
+        assert!(extract_paths("voir https://exemple.com/page/1 pour plus").is_empty());
+        assert!(extract_paths("réponds directement dans le chat").is_empty());
+        // nom de fichier sans répertoire : non détecté (limite assumée)
+        assert!(extract_paths("écris RAPPORT.md puis arrête").is_empty());
+        // notation d'extensions : pas un chemin
+        assert!(extract_paths("entrées .txt/.jsonl, format txt|json").is_empty());
+        // chemin relatif ambigu : non vérifiable honnêtement (cwd variable)
+        assert!(extract_paths("crée 0box-test/RAPPORT.md ici").is_empty());
+    }
+
+    #[test]
+    fn verify_flags_missing_and_empty() {
+        let dir = std::env::temp_dir().join("zer0_tasks_test");
+        let _ = fs::create_dir_all(&dir);
+        let full = dir.join("plein.txt");
+        fs::write(&full, "contenu").unwrap();
+        let empty = dir.join("vide.txt");
+        fs::write(&empty, "").unwrap();
+        let missing = dir.join("absent.md");
+        let _ = fs::remove_file(&missing);
+
+        let fails = verify_deliverables(&[
+            full.to_str().unwrap().to_string(),
+            empty.to_str().unwrap().to_string(),
+            missing.to_str().unwrap().to_string(),
+            dir.to_str().unwrap().to_string(), // dossier existant = OK
+        ]);
+        assert_eq!(fails.len(), 2);
+        assert!(fails.iter().any(|(p, _)| p.ends_with("vide.txt")));
+        assert!(fails.iter().any(|(p, _)| p.ends_with("absent.md")));
+        let _ = fs::remove_dir_all(&dir);
+    }
 }

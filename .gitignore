@@ -1,5 +1,30 @@
 # Build output
 /target
+/target0box
+
+# Windows debug/test artifacts (binaires de test clipboard, scripts temporaires)
+*.exe
+*.pdb
+!zer0-*.exe
+src/tui/mod.rs.bak
+
+# Artifacts de debug clipboard Windows (temporaires)
+check_ps1.rs
+debug_snippet.txt
+old_fn.txt
+snippet_lf.txt
+test_clip.rs
+test_clip2.rs
+test_clipboard.rs
+test_clipboard.bat
+test_unicode*.ps1
+fix_*.ps1
+write_ps1*.rs
+
+# Config / lanceurs locaux
+/gw.toml
+run-zer0-gw.bat
+run-zer0-gw.ps1
 
 # Models (never commit — download/build your own)
 /models
@@ -8,6 +33,7 @@
 
 # Runtime / user data
 /data
+/0box-test
 /knowledge.db
 /knowledge.db-*
 /knowledge.log

@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 use eventsource_stream::Eventsource;
 use futures_util::StreamExt;
+use reqwest::header::RETRY_AFTER;
 use serde::Deserialize;
 use serde_json::json;
 use std::time::Duration;
@@ -8,6 +9,7 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::agent::history::{ChatMessage, FunctionCall, ToolCall};
 use crate::event::UiEvent;
+use crate::http_client::HTTP_CLIENT;
 use crate::tools::ToolSpec;
 
 /// Hard cap on a single streamed response (guards against runaway/looping models).
@@ -67,7 +69,7 @@ impl ApiClient {
             base_url: base_url.into().trim_end_matches('/').to_string(),
             model: model.into(),
             api_key,
-            http: reqwest::Client::new(),
+            http: HTTP_CLIENT.clone(),
         }
     }
 
@@ -98,7 +100,12 @@ impl ApiClient {
             "temperature": options.temperature,
             "max_tokens": options.max_tokens,
         });
-        body["chat_template_kwargs"] = json!({ "enable_thinking": options.thinking });
+        // `chat_template_kwargs` est un paramètre llama.cpp/vLLM : l'endpoint OpenAI-compat
+        // de Google le REJETTE (400 « Unknown name "chat_template_kwargs" ») — bug constaté
+        // en débat 0box (rôle reasoning via gemma). On ne l'envoie pas à Google.
+        if !self.base_url.contains("generativelanguage.googleapis.com") {
+            body["chat_template_kwargs"] = json!({ "enable_thinking": options.thinking });
+        }
         // OpenRouter's unified reasoning control (Qwen uses chat_template_kwargs).
         if self.base_url.contains("openrouter.ai") {
             body["reasoning"] = json!({ "enabled": options.thinking });
@@ -111,27 +118,66 @@ impl ApiClient {
         }
 
         let url = format!("{}/chat/completions", self.base_url);
-        let mut req = self.http.post(&url).json(&body);
-        if self.base_url.contains("openrouter.ai") {
-            req = req
-                .header("HTTP-Referer", "https://github.com/omar0/ZER0v1")
-                .header("X-Title", "Zer0");
-        }
-        if let Some(k) = &self.api_key {
-            req = req.bearer_auth(k);
-        }
-        let resp = req
-            .send()
-            .await
-            .map_err(|e| ChatError::Setup { err: e.into(), status: None })?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            return Err(ChatError::Setup {
-                err: anyhow!("{status}: {}", text.chars().take(200).collect::<String>()),
-                status: Some(status.as_u16()),
-            });
-        }
+        // Étiquette d'usage (suivi 200/429, voir `quota`) — identique aux labels de `route`.
+        let quota_label = crate::quota::label_for(&self.base_url, &self.model);
+        
+        // Build request with proper headers
+        let req_builder = || {
+            let mut req = self.http.post(&url).json(&body);
+            if self.base_url.contains("openrouter.ai") {
+                req = req
+                    .header("HTTP-Referer", "https://github.com/richerrail/zer0gh0st")
+                    .header("X-Title", "zer0gh0st/0.5.5");
+            }
+            if let Some(k) = &self.api_key {
+                req = req.bearer_auth(k);
+            }
+            req
+        };
+        
+        // Retry loop for 429 (rate limit) with exponential backoff + Retry-After header
+        let mut retries = 3;
+        let resp = loop {
+            let req = req_builder();
+            let resp = req
+                .send()
+                .await
+                .map_err(|e| ChatError::Setup { err: e.into(), status: None })?;
+            
+            if resp.status() == 429 {
+                // Retry-After doit être lu avant `text()` (qui consomme la réponse).
+                let wait = resp.headers()
+                    .get(RETRY_AFTER)
+                    .and_then(|h| h.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or(2u64.pow(3 - retries));
+                let text = resp.text().await.unwrap_or_default();
+                crate::quota::record_rate_limited(&quota_label, &text);
+                if retries == 0 {
+                    return Err(ChatError::Setup {
+                        err: anyhow!("429: {}", text.chars().take(200).collect::<String>()),
+                        status: Some(429),
+                    });
+                }
+                let _ = ui.send(UiEvent::Info(
+                    format!("⏳ Rate limited (429), retrying in {}s...", wait)
+                ));
+                tokio::time::sleep(Duration::from_secs(wait)).await;
+                retries -= 1;
+                continue;
+            }
+            
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                return Err(ChatError::Setup {
+                    err: anyhow!("{status}: {}", text.chars().take(200).collect::<String>()),
+                    status: Some(status.as_u16()),
+                });
+            }
+            crate::quota::record_success(&quota_label);
+            break resp;
+        };
 
         let mut stream = resp.bytes_stream().eventsource();
         let mut content = String::new();
@@ -206,38 +252,60 @@ impl ApiClient {
 
         // Some providers return empty content in streaming mode (e.g. vLLM
         // diffusion models) while the non-streaming call works. Retry once
-        // without streaming.
+        // without streaming (with retry on 429).
         if content.trim().is_empty() && partial.is_empty() {
             let mut body2 = body.clone();
             body2["stream"] = json!(false);
-            let mut req2 = self.http.post(&url).json(&body2);
-            if self.base_url.contains("openrouter.ai") {
-                req2 = req2
-                    .header("HTTP-Referer", "https://github.com/omar0/ZER0v1")
-                    .header("X-Title", "Zer0");
-            }
-            if let Some(k) = &self.api_key {
-                req2 = req2.bearer_auth(k);
-            }
-            if let Ok(resp2) = req2.send().await {
-                if resp2.status().is_success() {
-                    if let Ok(v) = resp2.json::<serde_json::Value>().await {
-                        if let Some(msg) = v["choices"].get(0).and_then(|ch| ch.get("message")) {
-                            let c = msg
-                                .get("content")
-                                .and_then(|x| x.as_str())
-                                .unwrap_or("");
-                            if !c.is_empty() {
-                                content = c.to_string();
-                                let _ = ui.send(UiEvent::Token(c.to_string()));
-                            } else if let Some(r) = msg.get("reasoning_content").and_then(|x| x.as_str())
-                            {
-                                if !r.is_empty() {
-                                    reasoning = r.to_string();
+            
+            let mut retries2 = 3;
+            loop {
+                let mut req2 = self.http.post(&url).json(&body2);
+                if self.base_url.contains("openrouter.ai") {
+                    req2 = req2
+                        .header("HTTP-Referer", "https://github.com/richerrail/zer0gh0st")
+                        .header("X-Title", "zer0gh0st/0.5.5");
+                }
+                if let Some(k) = &self.api_key {
+                    req2 = req2.bearer_auth(k);
+                }
+                match req2.send().await {
+                    Ok(resp2) if resp2.status() == 429 => {
+                        let wait = resp2.headers()
+                            .get(RETRY_AFTER)
+                            .and_then(|h| h.to_str().ok())
+                            .and_then(|s| s.parse::<u64>().ok())
+                            .unwrap_or(2u64.pow(3 - retries2));
+                        let text = resp2.text().await.unwrap_or_default();
+                        crate::quota::record_rate_limited(&quota_label, &text);
+                        if retries2 == 0 { break; }
+                        let _ = ui.send(UiEvent::Info(
+                            format!("⏳ Rate limited (429), retrying in {}s...", wait)
+                        ));
+                        tokio::time::sleep(Duration::from_secs(wait)).await;
+                        retries2 -= 1;
+                        continue;
+                    }
+                    Ok(resp2) if resp2.status().is_success() => {
+                        crate::quota::record_success(&quota_label);
+                        if let Ok(v) = resp2.json::<serde_json::Value>().await {
+                            if let Some(msg) = v["choices"].get(0).and_then(|ch| ch.get("message")) {
+                                let c = msg
+                                    .get("content")
+                                    .and_then(|x| x.as_str())
+                                    .unwrap_or("");
+                                if !c.is_empty() {
+                                    content = c.to_string();
+                                    let _ = ui.send(UiEvent::Token(c.to_string()));
+                                } else if let Some(r) = msg.get("reasoning_content").and_then(|x| x.as_str()) {
+                                    if !r.is_empty() {
+                                        reasoning = r.to_string();
+                                    }
                                 }
                             }
                         }
+                        break;
                     }
+                    _ => break,
                 }
             }
         }

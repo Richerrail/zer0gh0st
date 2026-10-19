@@ -6,6 +6,7 @@ mod convo;
 mod event;
 mod fun;
 mod gwclient;
+mod http_client;
 mod jimmy;
 mod knowledge;
 mod llm;
@@ -16,6 +17,7 @@ mod pdf;
 mod personas;
 mod platform;
 mod providers;
+mod quota;
 mod route;
 mod search;
 mod select;
@@ -203,6 +205,15 @@ enum Command {
         /// Identifiants Telegram autorisés (sinon auto-claim du premier chat).
         #[arg(long)]
         allow: Vec<i64>,
+    },
+    /// Débat séquentiel multi-agents (0box) — headless, sans TUI.
+    #[command(name = "0box")]
+    ZeroBox {
+        /// Le sujet du débat (une phrase).
+        topic: Vec<String>,
+        /// Perspectives du débat, séparées par des virgules (défaut : code,reasoning,main).
+        #[arg(long, value_delimiter = ',')]
+        perspectives: Vec<String>,
     },
 }
 
@@ -488,6 +499,7 @@ async fn run_command(cmd: Command) -> Result<()> {
         Command::Provoke { role, task } => provoke_cmd(role, task).await,
         Command::Kb { action } => kb_cmd(action).await,
         Command::Telegram { token, allow } => telegram::run(token, allow).await,
+        Command::ZeroBox { topic, perspectives } => zerobox_cmd(topic, perspectives).await,
     }
 }
 
@@ -533,9 +545,72 @@ async fn provoke_cmd(role: String, task: Vec<String>) -> Result<()> {
         "Le cancre Jimmy devait « {t} » et a seulement répondu : « {jab} ». \
          Une IA compétente ferait mieux. Fais le travail correctement : {t}"
     );
-    let res =
-        agent::subagent::run_subagent(endpoints, system, prompt, tools::all(), options).await;
+    let res = 
+        agent::subagent::run_subagent(endpoints, system, prompt, tools::all(), options, None).await;
     println!("{res}");
+    Ok(())
+}
+
+/// Débat 0box en mode headless : les mêmes règles que la TUI (`/0box`), sans interface.
+/// Permet de tester/scripter le module de débat (0BOX-TEST l'exigeait — jusqu'ici
+/// le débat n'était exécutable qu'interactivement, donc invérifiable en CI).
+async fn zerobox_cmd(topic: Vec<String>, perspectives: Vec<String>) -> Result<()> {
+    use std::io::Write;
+
+    let topic = topic.join(" ");
+    if topic.trim().is_empty() {
+        anyhow::bail!("usage: zer0 0box <sujet> [--perspectives code,reasoning,main]");
+    }
+    let perspectives = if perspectives.is_empty() {
+        vec!["code".to_string(), "reasoning".to_string(), "main".to_string()]
+    } else {
+        perspectives
+    };
+
+    let settings = config::resolve();
+    let system = config::system_prompt_override().unwrap_or_else(|| DEFAULT_SYSTEM.to_string());
+    // Même enrichissement que la TUI (tui:172) et --once : sans le bloc Environnement
+    // (OS, dossiers), les modèles croyaient être sous Linux et perdaient leurs
+    // itérations sur `cat`/`ls -la`/`mkdir -p` sous cmd.exe.
+    let system = enrich_system(system);
+    let options = ChatOptions { max_tokens: 8192, thinking: false, temperature: 0.3 };
+
+    // En headless, tous les outils sont armés (même politique que --once).
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<UiEvent>();
+    tokio::spawn(async move {
+        tui::run_0box_debate(
+            topic,
+            perspectives,
+            settings,
+            system,
+            options,
+            true, // text_editor
+            true, // code_exec
+            tools::all(),
+            tx,
+        )
+        .await;
+    });
+
+    while let Some(ev) = rx.recv().await {
+        match ev {
+            UiEvent::Info(t) => {
+                println!("{t}");
+                let _ = std::io::stdout().flush();
+            }
+            UiEvent::Token(t) => {
+                print!("{t}");
+                let _ = std::io::stdout().flush();
+            }
+            UiEvent::Active(label) => eprintln!("→ endpoint: {label}"),
+            UiEvent::Error(e) => {
+                eprintln!("⚠ {e}");
+                break;
+            }
+            _ => {}
+        }
+    }
+    println!();
     Ok(())
 }
 
@@ -603,7 +678,7 @@ async fn jev_cmd(file: String) -> Result<()> {
     };
     let nchars = content.chars().count();
     eprintln!("📊 jev : {file} ({nchars} caractères)…");
-    let res = agent::subagent::run_jev(endpoints, system, &file, &content, options).await;
+    let res = agent::subagent::run_jev(endpoints, system, &file, &content, options, None).await;
     println!("{res}");
     Ok(())
 }
@@ -723,17 +798,23 @@ fn task_cmd(action: TaskAction) -> Result<()> {
             println!("Tâche {} ajoutée: {}", t.id, t.text);
         }
         TaskAction::Done { id } => {
-            if tasks::set_status(&id, tasks::Status::Done)? {
-                println!("Tâche {id} → fait");
-            } else {
-                println!("Tâche {id} introuvable");
+            match tasks::set_status(&id, tasks::Status::Done)? {
+                tasks::Update::Ok(_) => println!("Tâche {id} → fait"),
+                tasks::Update::NotFound => println!("Tâche {id} introuvable"),
+                tasks::Update::Refused(missing) => {
+                    println!("Refusé : livrable(s) manquant(s) pour {id} :");
+                    for (p, why) in missing {
+                        println!("  ✗ {p} ({why})");
+                    }
+                    println!("« fait » exige le livrable sur disque (voir .zer0/tasks.md)");
+                }
             }
         }
         TaskAction::Claim { id } => {
-            if tasks::set_status(&id, tasks::Status::Claimed)? {
-                println!("Tâche {id} → en cours");
-            } else {
-                println!("Tâche {id} introuvable");
+            match tasks::set_status(&id, tasks::Status::Claimed)? {
+                tasks::Update::Ok(_) => println!("Tâche {id} → en cours"),
+                tasks::Update::NotFound => println!("Tâche {id} introuvable"),
+                _ => unreachable!("claim n'est jamais refusé"),
             }
         }
         TaskAction::Rm { id } => {
@@ -802,6 +883,28 @@ fn provider_cmd(action: ProviderAction) -> Result<()> {
             }
         }
         ProviderAction::Add { id, key } => {
+            // Helper: zer0 provider add cline [url] — l'URL doit être http(s)://, jamais une clé.
+            if id.eq_ignore_ascii_case("cline") {
+                let url = key.unwrap_or_else(|| "http://localhost:11434/v1".to_string());
+                if !(url.starts_with("http://") || url.starts_with("https://")) {
+                    return Err(anyhow!(
+                        "« zer0 provider add cline » attend une URL (http://…), pas une clé.\n\
+                         usage: zer0 provider add cline [http://hôte:port/v1]\n\
+                         Sans argument → Ollama local (http://localhost:11434/v1)."
+                    ));
+                }
+                let mut g = config::load_global();
+                g.custom.insert("cline".to_string(), config::CustomProvider {
+                    name: "cline".to_string(),
+                    base_url: url.clone(),
+                    env_key: None,
+                });
+                config::save_global(&g)?;
+                println!("Provider 'cline' ajouté → {url}.
+Utilise: zer0 provider use cline
+Puis: zer0 models");
+                return Ok(());
+            }
             let p = providers::find(&id).ok_or_else(|| anyhow!("provider inconnu: {id}"))?;
             let resolved = match key {
                 Some(k) => k,
@@ -844,6 +947,12 @@ fn provider_cmd(action: ProviderAction) -> Result<()> {
         }
         ProviderAction::AddCustom { id, base_url, name, env } => {
             let id = id.to_ascii_lowercase();
+            if !(base_url.starts_with("http://") || base_url.starts_with("https://")) {
+                return Err(anyhow!(
+                    "base_url invalide : « {base_url} » — elle doit commencer par http:// ou https:// \
+                     (une clé API ne peut PAS servir de base_url)"
+                ));
+            }
             if providers::builtins().iter().any(|p| p.id == id) {
                 return Err(anyhow!(
                     "'{id}' est déjà un provider intégré — pas besoin de add-custom."
@@ -892,8 +1001,7 @@ async fn list_models_cmd(free: bool, provider_id: Option<String>) -> Result<()> 
     let id = provider_id.unwrap_or_else(|| config::resolve().provider_id);
     let p = providers::find(&id).ok_or_else(|| anyhow!("provider inconnu: {id}"))?;
     let key = config::key_for(&p);
-    let http = reqwest::Client::new();
-    let mut list = models::list(&http, &p, key.as_deref()).await?;
+    let mut list = models::list(&http_client::HTTP_CLIENT, &p, key.as_deref()).await?;
     if free {
         list.retain(models::is_free);
     }
@@ -1151,8 +1259,7 @@ async fn select_cmd(problem: Vec<String>) -> Result<()> {
         return Err(anyhow!("usage: zer0 select <problème>"));
     }
     let p = providers::find("openrouter").unwrap();
-    let http = reqwest::Client::new();
-    let list = models::list(&http, &p, None).await?;
+    let list = models::list(&http_client::HTTP_CLIENT, &p, None).await?;
     let free: Vec<_> = list.into_iter().filter(models::is_free).collect();
     let (cat, ranked) = select::rank(&problem, &free, 8);
     println!("Problème → catégorie: {}", cat.label());
@@ -1182,8 +1289,10 @@ pub(crate) fn enrich_system(system: String) -> String {
          - N'affiche PAS tout le fichier dans le chat : donne le chemin, la taille et un résumé.\n\
          - Si le contenu est très long, écris-le en entier d'un coup ; sinon écris puis complète \
            avec `insert`/`str_replace`.\n\
-         - Pour vérifier/tester, **préfère `python3 -c \"...\"`** (ou un pipe) plutôt que de créer un \
-           fichier de test (`check.py`) ; supprime-le ensuite (`text_editor` `delete`).\n\
+         - Pour vérifier/tester, **préfère un one-liner `python -c \"…\"` simple** plutôt que de créer un \
+           fichier de test (`check.py`). Sous Windows : `python` (pas `python3`) et le quoting \n\
+           `cmd` casse les one-liners multi-instructions — dans ce cas, écris un petit script avec \n\
+           `text_editor`, exécute-le (`python script.py`), puis supprime-le (`text_editor` `delete`).\n\
          - Crée les fichiers sous `{home}` avec un chemin absolu.\n\
          {env}"
     )
