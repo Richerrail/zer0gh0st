@@ -1887,65 +1887,30 @@ async fn run_0box_debate(
         // Annonce du tour
         let _ = ui.send(UiEvent::Info(format!("🎭 [0box:{}] Tour {}/{} — parole à {}", role, turn_idx + 1, perspectives.len(), role_label)));
         
-        // Lance le sous-agent avec l'historique de conversation complet
-        let system_clone = debate_system.clone();
-        let tools_clone = tools.clone();
-        let options_clone = options.clone();
-        let endpoints_clone = endpoints.clone();
-        let ui_clone = ui.clone();
-        let role_owned = role.to_string();
-        
-        let subagent_handle = tokio::spawn(async move {
-            let mut messages = vec![ChatMessage::user(prompt)];
-            
-            // Le sous-agent tourne avec ses propres messages MAIS on lui donne
-            // le système de débat + la conversation accumulée via le prompt
-            let res = crate::agent::subagent::run_subagent(
-                endpoints_clone,
-                system_clone,
-                messages[0].content.as_ref().unwrap().clone(),
-                tools_clone,
-                options_clone,
-                Some(evt_tx)
-            ).await;
-            (role_owned, res)
-        });
-        
-        // Forward événements en temps réel
-        let ui_evt = ui.clone();
-        let role_label_owned = role_label.to_string();
-        tokio::spawn(async move {
-            while let Some(evt) = evt_rx.recv().await {
-                match evt {
-                    crate::agent::subagent::SubAgentEvent::Fallback { from, to, reason } => {
-                        let _ = ui_evt.send(UiEvent::Info(format!(
-                            "{} ⚡ Bascule: {} → {} ({})", role_label_owned, from, to, reason
-                        )));
-                    }
-                    crate::agent::subagent::SubAgentEvent::ToolCall { name, args } => {
-                        let short: String = args.chars().take(100).collect();
-                        let _ = ui_evt.send(UiEvent::Info(format!("{} ⚙ {} {}", role_label_owned, name, short)));
-                    }
-                    crate::agent::subagent::SubAgentEvent::Error(e) => {
-                        let _ = ui_evt.send(UiEvent::Info(format!("{} ⚠ {}", role_label_owned, e)));
-                    }
-                    crate::agent::subagent::SubAgentEvent::Info(info) => {
-                        let _ = ui_evt.send(UiEvent::Info(format!("{} ℹ {}", role_label_owned, info)));
-                    }
-                }
-            }
-        });
-        
-        // Attend la fin du tour
-        let (speaker, response) = subagent_handle.await.unwrap_or_else(|_| (role.to_string(), "Erreur".to_string()));
+        // Exécute le tour avec validation et retry si échec
+        let (speaker, response) = run_0box_turn_with_retry(
+            turn_idx,
+            role,
+            role_label,
+            &prompt,
+            &endpoints,
+            &debate_system,
+            &tools,
+            &options,
+            &ui,
+            3, // max retries per turn
+        ).await;
         
         // Ajoute à la conversation partagée
         conversation.push(ChatMessage::assistant(format!("[{}]: {}", speaker, response), vec![]));
         
         // Affiche dans l'UI
-        let _ = ui.send(UiEvent::Info(format!("📝 [{}]:\n{}", speaker, response)));
+        let _ = ui.send(UiEvent::Info(format!("📝 [{}]:
+{}", speaker, response)));
         
         // Petite pause entre les tours
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
     
@@ -1954,6 +1919,126 @@ async fn run_0box_debate(
 }
 
 /// Formate la conversation pour l'injection dans le prompt
+/// Exécute un tour du débat 0box avec retry automatique et validation de la réponse.
+/// Retourne (speaker, response) garanti valide (non vide, non erreur).
+async fn run_0box_turn_with_retry(
+    turn_idx: usize,
+    role: &str,
+    role_label: &str,
+    prompt: &str,
+    endpoints: &[crate::route::Endpoint],
+    debate_system: &str,
+    tools: &[crate::tools::ToolSpec],
+    options: &ChatOptions,
+    ui: &UnboundedSender<UiEvent>,
+    max_retries: u32,
+) -> (String, String) {
+    let mut last_error = String::new();
+    
+    for attempt in 0..=max_retries {
+        if attempt > 0 {
+            let _ = ui.send(UiEvent::Info(format!(
+                "🔄 [0box:{}] Retry {}/{} — nouvelle tentative…",
+                role, attempt, max_retries
+            )));
+        }
+        
+        // Channel pour événements du sous-agent
+        let (evt_tx, mut evt_rx) = tokio::sync::mpsc::unbounded_channel::<crate::agent::subagent::SubAgentEvent>();
+        
+        // Annonce du tour (seulement au premier essai)
+        if attempt == 0 {
+            let _ = ui.send(UiEvent::Info(format!(
+                "🎭 [0box:{}] Tour {}/{} — parole à {}",
+                role, turn_idx + 1, 0, role_label
+            )));
+        }
+        
+        // Lance le sous-agent
+        let system_clone = debate_system.to_string();
+        let tools_clone = tools.to_vec();
+        let options_clone = options.clone();
+        let endpoints_clone = endpoints.to_vec();
+        let prompt_clone = prompt.to_string();
+        let role_owned = role.to_string();
+        let ui_evt = ui.clone();
+        let role_label_owned = role_label.to_string();
+        
+        let subagent_handle = tokio::spawn(async move {
+            let res = crate::agent::subagent::run_subagent(
+                endpoints_clone,
+                system_clone,
+                prompt_clone,
+                tools_clone,
+                options_clone,
+                Some(evt_tx)
+            ).await;
+            (role_owned, res)
+        });
+        
+        // Forward événements en temps réel
+        let ui_evt2 = ui.clone();
+        let role_label_owned2 = role_label.to_string();
+        tokio::spawn(async move {
+            while let Some(evt) = evt_rx.recv().await {
+                match evt {
+                    crate::agent::subagent::SubAgentEvent::Fallback { from, to, reason } => {
+                        let _ = ui_evt2.send(UiEvent::Info(format!(
+                            "{} ⚡ Bascule: {} → {} ({})", role_label_owned2, from, to, reason
+                        )));
+                    }
+                    crate::agent::subagent::SubAgentEvent::ToolCall { name, args } => {
+                        let short: String = args.chars().take(100).collect();
+                        let _ = ui_evt2.send(UiEvent::Info(format!("{} ⚙ {} {}", role_label_owned2, name, short)));
+                    }
+                    crate::agent::subagent::SubAgentEvent::Error(e) => {
+                        let _ = ui_evt2.send(UiEvent::Info(format!("{} ⚠ {}", role_label_owned2, e)));
+                    }
+                    crate::agent::subagent::SubAgentEvent::Info(info) => {
+                        let _ = ui_evt2.send(UiEvent::Info(format!("{} ℹ {}", role_label_owned2, info)));
+                    }
+                }
+            }
+        });
+        
+        // Attend la fin du tour
+        let (speaker, response) = match subagent_handle.await {
+            Ok((s, r)) => (s, r),
+            Err(e) => {
+                last_error = format!("Join error: {e}");
+                continue; // retry
+            }
+        };
+        
+        // VALIDATION de la réponse
+        let response_trimmed = response.trim();
+        if response_trimmed.is_empty() {
+            last_error = "Réponse vide".to_string();
+            let _ = ui.send(UiEvent::Info(format!("⚠ [0box:{}] Réponse vide, retry…", role)));
+            continue;
+        }
+        if response_trimmed.starts_with("⚠") || response_trimmed.starts_with("Erreur") {
+            last_error = format!("Réponse d'erreur: {response_trimmed}");
+            let _ = ui.send(UiEvent::Info(format!("⚠ [0box:{}] Erreur détectée, retry…", role)));
+            continue;
+        }
+        if response_trimmed.chars().count() < 10 {
+            last_error = "Réponse trop courte".to_string();
+            let _ = ui.send(UiEvent::Info(format!("⚠ [0box:{}] Réponse trop courte (<10 chars), retry…", role)));
+            continue;
+        }
+        
+        // Succès : réponse valide
+        return (speaker, response);
+    }
+    
+    // Tous les retries échoués
+    let error_msg = format!("[{}]: ÉCHEC après {} tentatives — {}. Le débat continue avec ce constat.", role, max_retries + 1, last_error);
+    let _ = ui.send(UiEvent::Info(format!("❌ [0box:{}] {}", role, error_msg)));
+    (role.to_string(), error_msg)
+}
+
+
 fn format_conversation(conversation: &[ChatMessage]) -> String {
     if conversation.is_empty() {
         return "(début du débat)".to_string();
