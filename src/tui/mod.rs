@@ -2637,9 +2637,19 @@ fn handle_input(
     app: &mut App,
     ui_tx: &UnboundedSender<UiEvent>,
 ) {
-    // ========== DÉDUPLICATION GLOBALE (tout en haut, avant tout traitement) ==========
+    // ========== FILTRE RELEASE (Windows/ConPTY : chaque touche = Press + Release) ==========
+    // Sans ce filtre, le sélecteur/palette traite le Release comme une 2e frappe
+    // (le filtre Press du dispatch principal ne couvre pas ce chemin) → « 0 » devient « 00 ».
     if let Event::Key(k) = &ev {
-        // On ne déduplique que les Press (pas Release/Repeat)
+        if k.kind == KeyEventKind::Release {
+            return;
+        }
+    }
+    // ========================================================================================
+
+    // ========== DÉDUPLICATION GLOBALE (doublons de Press, ex. ConPTY) ==========
+    if let Event::Key(k) = &ev {
+        // On ne déduplique que les Press (Repeat = auto-repeat légitime)
         if k.kind == KeyEventKind::Press {
             let now = std::time::Instant::now();
             let code = k.code;
