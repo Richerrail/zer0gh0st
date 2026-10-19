@@ -113,6 +113,8 @@ impl ApiClient {
         }
 
         let url = format!("{}/chat/completions", self.base_url);
+        // Étiquette d'usage (suivi 200/429, voir `quota`) — identique aux labels de `route`.
+        let quota_label = crate::quota::label_for(&self.base_url, &self.model);
         
         // Build request with proper headers
         let req_builder = || {
@@ -138,19 +140,20 @@ impl ApiClient {
                 .map_err(|e| ChatError::Setup { err: e.into(), status: None })?;
             
             if resp.status() == 429 {
-                if retries == 0 {
-                    let text = resp.text().await.unwrap_or_default();
-                    return Err(ChatError::Setup {
-                        err: anyhow!("429: {}", text.chars().take(200).collect::<String>()),
-                        status: Some(429),
-                    });
-                }
-                // Honor Retry-After header if present, else exponential backoff
+                // Retry-After doit être lu avant `text()` (qui consomme la réponse).
                 let wait = resp.headers()
                     .get(RETRY_AFTER)
                     .and_then(|h| h.to_str().ok())
                     .and_then(|s| s.parse::<u64>().ok())
                     .unwrap_or(2u64.pow(3 - retries));
+                let text = resp.text().await.unwrap_or_default();
+                crate::quota::record_rate_limited(&quota_label, &text);
+                if retries == 0 {
+                    return Err(ChatError::Setup {
+                        err: anyhow!("429: {}", text.chars().take(200).collect::<String>()),
+                        status: Some(429),
+                    });
+                }
                 let _ = ui.send(UiEvent::Info(
                     format!("⏳ Rate limited (429), retrying in {}s...", wait)
                 ));
@@ -167,6 +170,7 @@ impl ApiClient {
                     status: Some(status.as_u16()),
                 });
             }
+            crate::quota::record_success(&quota_label);
             break resp;
         };
 
@@ -261,12 +265,14 @@ impl ApiClient {
                 }
                 match req2.send().await {
                     Ok(resp2) if resp2.status() == 429 => {
-                        if retries2 == 0 { break; }
                         let wait = resp2.headers()
                             .get(RETRY_AFTER)
                             .and_then(|h| h.to_str().ok())
                             .and_then(|s| s.parse::<u64>().ok())
                             .unwrap_or(2u64.pow(3 - retries2));
+                        let text = resp2.text().await.unwrap_or_default();
+                        crate::quota::record_rate_limited(&quota_label, &text);
+                        if retries2 == 0 { break; }
                         let _ = ui.send(UiEvent::Info(
                             format!("⏳ Rate limited (429), retrying in {}s...", wait)
                         ));
@@ -275,6 +281,7 @@ impl ApiClient {
                         continue;
                     }
                     Ok(resp2) if resp2.status().is_success() => {
+                        crate::quota::record_success(&quota_label);
                         if let Ok(v) = resp2.json::<serde_json::Value>().await {
                             if let Some(msg) = v["choices"].get(0).and_then(|ch| ch.get("message")) {
                                 let c = msg

@@ -14,6 +14,7 @@ src/
 ├── config.rs          config globale (~/.config/zer0) + projet (.zer0/) + Settings
 ├── providers.rs       catalogue des providers (intégrés + personnalisés)
 ├── models.rs          découverte /models, détection :free
+├── quota.rs           usage observé des modèles (200/429 réels, limites révélées par les 429)
 ├── select.rs          classement de modèles (benchmarks + mots-clés par mot entier)
 ├── route.rs           chaînes d'endpoints, bascule, mémoire d'échecs, rôle → endpoint
 ├── memory.rs          mémoire persistante JSONL + enveloppe d'honnêteté

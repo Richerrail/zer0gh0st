@@ -1,3 +1,11 @@
+## Non versionné
+
+- **Suivi d'usage des modèles** (`/quota`) : Zer0 affiche ce qu'il **observe** — appels
+  réussis, 429 réels, et les limites (`X-RateLimit-*`) quand un fournisseur les révèle
+  dans le corps d'un 429 (OpenRouter). Les listes `/models` et `/free` portent un badge
+  par modèle (⚠ 429, · appels ok). Honnêteté : les API ne publient pas leur quota
+  (Cline n'expose rien) — rien n'est inventé, les compteurs sont locaux à la session.
+
 ## v0.5.5 — Clés hors de l'agent, vision, menus (2026-10-17)
 
 Points saillants depuis v0.5.4 (détail daté plus bas) :

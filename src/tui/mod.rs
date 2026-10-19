@@ -764,6 +764,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
                 });
             }
         }
+        "/quota" => app.messages.push(ChatMessage::notice(crate::quota::report())),
         "/free" => cmd_list_models(app, ui_tx, true),
         "/select" => {
             let problem = args.join(" ");
@@ -795,6 +796,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
              /ctx [N|1M|auto]           contexte du modèle (auto/override)\n\
              /telegram [on|off]         bot Telegram à distance (long polling)\n\
              /free                      liste les modèles gratuits\n\
+             /quota                     usage observé des modèles (appels, 429)\n\
              /route [list|add|clear]    chaîne de bascule (failover)\n\
              /route auto [n]            remplit la chaîne avec les modèles :free\n\
              /route add <provider>/<model>\n\
@@ -2521,9 +2523,13 @@ fn cmd_list_models(app: &App, ui_tx: &UnboundedSender<UiEvent>, free_only: bool)
                     provider.name
                 ));
                 for m in list.iter().take(80) {
+                    // Usage observé cette session (429, appels ok) — rien d'observé ⇒ rien d'affiché.
+                    let badge = crate::quota::badge(&format!("{}/{}", provider.id, m.id))
+                        .unwrap_or_default();
                     s.push_str(&format!(
-                        "  {}{}\n",
+                        "  {}{}{}\n",
                         m.id,
+                        badge,
                         m.context_length.map(|c| format!("  (ctx {c})")).unwrap_or_default()
                     ));
                 }

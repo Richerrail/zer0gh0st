@@ -32,6 +32,7 @@ run-zer0-gw.ps1
 
 # Runtime / user data
 /data
+/0box-test
 /knowledge.db
 /knowledge.db-*
 /knowledge.log
