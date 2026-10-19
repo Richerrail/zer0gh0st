@@ -1844,6 +1844,15 @@ async fn run_0box_debate(
         debate_perspectives.push("main".to_string());
     }
     
+
+    // Debug: log the actual perspectives order being used
+    let _ = ui.send(UiEvent::Info(format!(
+        "[0box] Perspectives: {} (F3={} F4={})",
+        debate_perspectives.join(" -> "),
+        if read_write { "ON" } else { "OFF" },
+        if code_exec { "ON" } else { "OFF" }
+    )));
+
     // Conversation partagée entre tous les participants
     let mut conversation: Vec<ChatMessage> = Vec::new();
     
