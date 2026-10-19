@@ -1,4 +1,4 @@
-mod banner;
+﻿mod banner;
 mod menu;
 mod picker;
 
@@ -16,6 +16,7 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use crate::agent::history::ChatMessage;
 use crate::config::{self, Settings};
 use crate::event::UiEvent;
+use crate::http_client;
 use crate::llm::llama::ChatOptions;
 use crate::memory;
 use crate::models;
@@ -133,6 +134,8 @@ pub struct App {
     /// Navigation clavier du menu (F2) : focus + index sélectionné.
     pub menu_focus: bool,
     pub menu_sel: usize,
+    /// Dernier événement clavier traité (pour déduplication sur Windows).
+    pub last_key_event: Option<(KeyCode, KeyModifiers, std::time::Instant)>,
 }
 
 impl App {
@@ -252,6 +255,7 @@ pub async fn run(
         menu_rect: Rect::default(),
         menu_focus: false,
         menu_sel: 0,
+        last_key_event: None,
         thinking: options.thinking,
         max_tokens: options.max_tokens,
         temperature: options.temperature,
@@ -605,6 +609,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
         "/vault" => handle_vault(app, &args),
         "/pdf" => handle_pdf(app, &args),
         "/jev" => cmd_jev(app, &args, ui_tx),
+        "/0box" => cmd_0box(app, &args, ui_tx),
         "/kb" => handle_kb(app, &args, ui_tx),
         "/radio" => {
             let arg = args.join(" ");
@@ -752,6 +757,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
                 tokio::spawn(async move {
                     let res = crate::agent::subagent::run_subagent(
                         endpoints, system, prompt, tools, options,
+                        None,
                     )
                     .await;
                     let _ = ui.send(UiEvent::Info(format!("⚡ Zer0 (piqué au vif) :\n{res}")));
@@ -1213,8 +1219,7 @@ fn cmd_pick_model(ui_tx: &UnboundedSender<UiEvent>) {
     let key = settings.api_key.clone();
     let ui = ui_tx.clone();
     tokio::spawn(async move {
-        let http = reqwest::Client::new();
-        match models::list(&http, &provider, key.as_deref()).await {
+        match models::list(&http_client::HTTP_CLIENT, &provider, key.as_deref()).await {
             Ok(list) => {
                 let _ = ui.send(UiEvent::ModelList(list));
             }
@@ -1472,6 +1477,7 @@ fn cmd_ask(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
             question,
             Vec::new(),
             options,
+            None,
         )
         .await;
         let _ = ui.send(UiEvent::Info(format!("🤖 [{role_s}] {res}")));
@@ -1519,6 +1525,7 @@ fn cmd_review(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
             task,
             Vec::new(),
             options,
+            None,
         )
         .await;
         let _ = ui.send(UiEvent::Info(format!("🔍 [review {path_s}]\n{res}")));
@@ -1560,7 +1567,7 @@ fn cmd_work(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
     )));
     tokio::spawn(async move {
         let res =
-            crate::agent::subagent::run_subagent(endpoints, system, text, tools, options).await;
+            crate::agent::subagent::run_subagent(endpoints, system, text, tools, options, None).await;
         let _ = crate::tasks::set_status(&id, crate::tasks::Status::Done);
         let _ = ui.send(UiEvent::Info(format!("🛠 [{id}] fait\n{res}")));
     });
@@ -1724,10 +1731,199 @@ fn cmd_jev(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
         "📊 jev : {path_s} ({nchars} caractères) → analyse du code complet…"
     )));
     tokio::spawn(async move {
-        let res = crate::agent::subagent::run_jev(endpoints, system, &path_s, &content, options)
+        let res = crate::agent::subagent::run_jev(endpoints, system, &path_s, &content, options, None)
             .await;
         let _ = ui.send(UiEvent::Info(format!("📊 [jev {path_s}]\n{res}")));
     });
+}
+
+pub fn cmd_0box(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
+    let mut args_iter = args.iter().peekable();
+    
+    // Handle subcommands
+    if let Some(first) = args_iter.peek() {
+        match **first {
+            "fallback" => {
+                handle_0box_fallback(app, &args_iter.skip(1).cloned().collect::<Vec<_>>(), ui_tx);
+                return;
+            }
+            "help" => {
+                show_0box_help(app);
+                return;
+            }
+            _ => {}
+        }
+    }
+    
+    let topic = args.iter().cloned().collect::<Vec<_>>().join(" ");
+    if topic.trim().is_empty() {
+        app.messages.push(ChatMessage::notice("usage: /0box <sujet> [--perspectives main,code,reasoning]\n       /0box fallback <add|remove|list> <provider/model>\n       /0box help"));
+        return;
+    }
+    
+    // Parse optional --perspectives flag
+    let mut perspectives = vec!["main", "code", "reasoning"];
+    let topic_parts: Vec<&str> = topic.split_whitespace().collect();
+    let mut topic_words = Vec::new();
+    let mut i = 0;
+    while i < topic_parts.len() {
+        if topic_parts[i] == "--perspectives" && i + 1 < topic_parts.len() {
+            perspectives = topic_parts[i + 1].split(',').map(|s| s.trim()).collect();
+            i += 2;
+        } else {
+            topic_words.push(topic_parts[i]);
+            i += 1;
+        }
+    }
+    let topic = topic_words.join(" ");
+    
+    let system = app.system.clone();
+    let options = ChatOptions {
+        max_tokens: app.max_tokens,
+        thinking: app.thinking,
+        temperature: app.temperature,
+    };
+    
+    app.messages.push(ChatMessage::notice(format!(
+        "[0box] Brainstorm sur '{}' — perspectives: {} — en cours…",
+        topic,
+        perspectives.join(", ")
+    )));
+    
+    for (idx, role) in perspectives.iter().enumerate() {
+        let role_str = role.to_string();
+        let role_label = format!("[0box:{}]", role_str);
+        let system2 = system.clone();
+        let ui = ui_tx.clone();
+        let endpoints = route::chain_for_0box_role(&app.settings(), role);
+        let options_clone = options.clone();
+        let tc = topic.clone();
+        
+        // Create a channel for sub-agent events (fallback, tool calls, etc.)
+        let (evt_tx, mut evt_rx) = tokio::sync::mpsc::unbounded_channel::<crate::agent::subagent::SubAgentEvent>();
+        
+        tokio::spawn(async move {
+            let prompt = format!(
+                "Brainstorm sur '{}'. Perspective {} ({}): développe ton point de vue de manière concise, structure : 3 idées + conclusion.",
+                tc, idx + 1, role_str
+            );
+            let res = crate::agent::subagent::run_subagent(
+                endpoints, system2, prompt, Vec::new(), options_clone, Some(evt_tx)
+            ).await;
+            let label = format!("[{}]", role_str);
+            let _ = ui.send(UiEvent::Info(format!("📝 [{}]\n{}", label, res)));
+        });
+        
+        // Forward sub-agent events to main UI
+        let ui2 = ui_tx.clone();
+        tokio::spawn(async move {
+            while let Some(evt) = evt_rx.recv().await {
+                match evt {
+                    crate::agent::subagent::SubAgentEvent::Fallback { from, to, reason } => {
+                        let _ = ui2.send(UiEvent::Info(format!(
+                            "{} ⚡ Bascule: {} → {} ({})\n",
+                            role_label, from, to, reason
+                        )));
+                    }
+                    crate::agent::subagent::SubAgentEvent::ToolCall { name, args } => {
+                        let short: String = args.chars().take(80).collect();
+                        let _ = ui2.send(UiEvent::Info(format!(
+                            "{} ⚙ {} {}", role_label, name, short
+                        )));
+                    }
+                    crate::agent::subagent::SubAgentEvent::Error(e) => {
+                        let _ = ui2.send(UiEvent::Info(format!("{} ⚠ {}", role_label, e)));
+                    }
+                    crate::agent::subagent::SubAgentEvent::Info(info) => {
+                        let _ = ui2.send(UiEvent::Info(format!("{} ℹ {}", role_label, info)));
+                    }
+                }
+            }
+        });
+        
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    app.messages.push(ChatMessage::notice(format!("[0box] {} agents lancés sur '{}'.", perspectives.len(), topic)));
+}
+
+fn handle_0box_fallback(app: &mut App, args: &[&str], _ui_tx: &UnboundedSender<UiEvent>) {
+    match args.first().copied() {
+        Some("list") => {
+            let g = crate::config::load_global();
+            let fallbacks = g.zero_box_fallbacks.unwrap_or_default();
+            if fallbacks.is_empty() {
+                app.messages.push(ChatMessage::notice("[0box] Aucun modèle de fallback configuré. Utilise la chaîne de bascule standard (rôles + routes)."));
+            } else {
+                let mut s = String::from("[0box] Modèles de fallback configurés:\n");
+                for fb in &fallbacks {
+                    s.push_str(&format!("  - {}\n", fb));
+                }
+                s.push_str("\nCes modèles sont ajoutés EN PREMIER dans la chaîne pour les agents 0box.");
+                app.messages.push(ChatMessage::notice(s));
+            }
+        }
+        Some("add") => {
+            if args.len() < 2 {
+                app.messages.push(ChatMessage::notice("usage: /0box fallback add <provider/model>"));
+                return;
+            }
+            let route = args[1];
+            if crate::route::parse_route(route).is_none() {
+                app.messages.push(ChatMessage::notice(format!("Route invalide: {}. Format: provider/model", route)));
+                return;
+            }
+            let mut g = crate::config::load_global();
+            let fallbacks = g.zero_box_fallbacks.get_or_insert_with(Vec::new);
+            if !fallbacks.contains(&route.to_string()) {
+                fallbacks.push(route.to_string());
+                if let Err(e) = crate::config::save_global(&g) {
+                    app.messages.push(ChatMessage::notice(format!("Erreur: {e}")));
+                } else {
+                    app.messages.push(ChatMessage::notice(format!("[0box] Fallback ajouté: {route}")));
+                }
+            } else {
+                app.messages.push(ChatMessage::notice(format!("[0box] Déjà présent: {route}")));
+            }
+        }
+        Some("remove") => {
+            if args.len() < 2 {
+                app.messages.push(ChatMessage::notice("usage: /0box fallback remove <provider/model>"));
+                return;
+            }
+            let route = args[1];
+            let mut g = crate::config::load_global();
+            if let Some(fallbacks) = &mut g.zero_box_fallbacks {
+                fallbacks.retain(|r| r != route);
+                if let Err(e) = crate::config::save_global(&g) {
+                    app.messages.push(ChatMessage::notice(format!("Erreur: {e}")));
+                } else {
+                    app.messages.push(ChatMessage::notice(format!("[0box] Fallback supprimé: {route}")));
+                }
+            }
+        }
+        _ => {
+            app.messages.push(ChatMessage::notice("usage: /0box fallback <add|remove|list> <provider/model>"));
+        }
+    }
+}
+
+fn show_0box_help(app: &mut App) {
+    app.messages.push(ChatMessage::notice(
+        String::from("[0box] Brainstorm multi-perspectives\n\n")
+        + "Usage:\n"
+        + "  /0box <sujet> [--perspectives main,code,reasoning]  Lance un brainstorm\n"
+        + "  /0box fallback list                                  Liste les fallbacks 0box\n"
+        + "  /0box fallback add <provider/model>                  Ajoute un fallback 0box\n"
+        + "  /0box fallback remove <provider/model>               Retire un fallback 0box\n"
+        + "  /0box help                                           Cette aide\n\n"
+        + "Exemples:\n"
+        + "  /0box comment optimiser mon build Rust --perspectives code,reasoning,fast\n"
+        + "  /0box fallback add openrouter/qwen/qwen-2.5-72b:free\n"
+        + "  /0box fallback add google/gemini-1.5-flash\n"
+        + "\n"
+        + "Le système utilise la chaîne de bascule standard (rôle → routes globales).\n"
+        + "Les fallbacks 0box s'ajoutent EN TÊTE de chaîne pour les agents 0box uniquement."
+    ));
 }
 
 fn handle_kb(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
@@ -2037,8 +2233,7 @@ fn cmd_list_models(app: &App, ui_tx: &UnboundedSender<UiEvent>, free_only: bool)
     let key = app.api_key.clone();
     let ui = ui_tx.clone();
     tokio::spawn(async move {
-        let http = reqwest::Client::new();
-        match models::list(&http, &provider, key.as_deref()).await {
+        match models::list(&http_client::HTTP_CLIENT, &provider, key.as_deref()).await {
             Ok(mut list) => {
                 if free_only {
                     list.retain(models::is_free);
@@ -2076,10 +2271,9 @@ fn cmd_select(problem: &str, ui_tx: &UnboundedSender<UiEvent>) {
     let problem = problem.to_string();
     let ui = ui_tx.clone();
     tokio::spawn(async move {
-        let http = reqwest::Client::new();
         // OpenRouter exposes its model list publicly (no key needed).
         let provider = providers::find("openrouter").unwrap();
-        match models::list(&http, &provider, None).await {
+        match models::list(&http_client::HTTP_CLIENT, &provider, None).await {
             Ok(list) => {
                 let free: Vec<_> = list.into_iter().filter(models::is_free).collect();
                 let (cat, ranked) = select::rank(&problem, &free, 5);
@@ -2201,6 +2395,25 @@ fn handle_input(
     app: &mut App,
     ui_tx: &UnboundedSender<UiEvent>,
 ) {
+    // ========== DÉDUPLICATION GLOBALE (tout en haut, avant tout traitement) ==========
+    if let Event::Key(k) = &ev {
+        // On ne déduplique que les Press (pas Release/Repeat)
+        if k.kind == KeyEventKind::Press {
+            let now = std::time::Instant::now();
+            let code = k.code;
+            let mods = k.modifiers;
+            
+            // Vérifier si c'est un doublon (même touche + mêmes modifs < 50ms)
+            if let Some((last_code, last_mods, last_time)) = app.last_key_event {
+                if last_code == code && last_mods == mods && now.duration_since(last_time).as_millis() < 50 {
+                    return; // Ignorer le doublon
+                }
+            }
+            app.last_key_event = Some((code, mods, now));
+        }
+    }
+    // ================================================================================
+
     // Sélecteur ouvert : il capte tout le clavier.
     if let Event::Key(key) = ev {
         if app.picker.is_some() {
@@ -2465,6 +2678,43 @@ fn handle_input(
         app.sel_anchor = None;
         app.sel_head = None;
         match k.code {
+            // Copier le dernier message assistant (Ctrl+Shift+C)
+            KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT) => {
+                copy_last_assistant(app);
+            }
+            // Coller depuis le presse-papier (Ctrl+V)
+            KeyCode::Char('v') if k.modifiers.contains(KeyModifiers::CONTROL) && !k.modifiers.contains(KeyModifiers::SHIFT) => {
+                match crate::clipboard::paste() {
+                    Some(text) if !text.trim().is_empty() => {
+                        input_insert_str(app, &text);
+                    }
+                    Some(_) => {
+                        app.messages.push(ChatMessage::notice("⚠ presse-papier vide"));
+                    }
+                    None => {
+                        app.messages.push(ChatMessage::notice(
+                            "⚠ presse-papier inaccessible (PowerShell requis sur Windows)"
+                        ));
+                    }
+                }
+            }
+            // Coller depuis le presse-papier (Ctrl+Shift+V) - alias
+            KeyCode::Char('v') if k.modifiers.contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT) => {
+                match crate::clipboard::paste() {
+                    Some(text) if !text.trim().is_empty() => {
+                        input_insert_str(app, &text);
+                    }
+                    Some(_) => {
+                        app.messages.push(ChatMessage::notice("⚠ presse-papier vide"));
+                    }
+                    None => {
+                        app.messages.push(ChatMessage::notice(
+                            "⚠ presse-papier inaccessible (PowerShell requis sur Windows — essayez Ctrl+V du terminal)"
+                        ));
+                    }
+                }
+            }
+            // Ctrl+C simple = quitter (comportement actuel)
             KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => app.should_quit = true,
             KeyCode::Esc => app.should_quit = true,
             KeyCode::Enter => send_message(app, ui_tx),
@@ -3468,8 +3718,7 @@ fn probe_context(app: &App, ui_tx: &UnboundedSender<UiEvent>) {
     let key = app.api_key.clone();
     let ui = ui_tx.clone();
     tokio::spawn(async move {
-        let http = reqwest::Client::new();
-        if let Ok(list) = models::list(&http, &provider, key.as_deref()).await {
+        if let Ok(list) = models::list(&http_client::HTTP_CLIENT, &provider, key.as_deref()).await {
             if let Some(c) = list
                 .iter()
                 .find(|m| m.id == model)
@@ -3490,17 +3739,18 @@ fn input_height(app: &App, width: u16) -> u16 {
 
 fn copy_selection(app: &mut App) {
     if let (Some(a), Some(h)) = (app.sel_anchor, app.sel_head) {
-        let x0 = a.0.min(h.0) as usize;
-        let x1 = a.0.max(h.0) as usize;
-        let y0 = a.1.min(h.1) as usize;
-        let y1 = a.1.max(h.1) as usize;
+        let x0 = a.0.min(h.0);
+        let x1 = a.0.max(h.0);
+        let y0 = a.1.min(h.1);
+        let y1 = a.1.max(h.1);
+
         let mut text = String::new();
         for y in y0..=y1 {
-            if let Some(row) = app.screen.get(y) {
+            if let Some(row) = app.screen.get(y as usize) {
                 let chars: Vec<char> = row.chars().collect();
                 let mut line = String::new();
                 for x in x0..=x1 {
-                    if let Some(c) = chars.get(x) {
+                    if let Some(c) = chars.get(x as usize) {
                         line.push(*c);
                     }
                 }
@@ -3521,6 +3771,34 @@ fn copy_selection(app: &mut App) {
     }
     app.sel_anchor = None;
     app.sel_head = None;
+}
+
+/// Copie le contenu propre d'un message par index (sans UI chrome)
+fn copy_message_content(app: &mut App, msg_idx: usize) {
+    if let Some(msg) = app.messages.get(msg_idx) {
+        if let Some(content) = &msg.content {
+            if !content.trim().is_empty() {
+                crate::clipboard::copy(content);
+                let role_label = match msg.role.as_str() {
+                    "assistant" => "assistant",
+                    "user" => "utilisateur",
+                    "tool" => "outil",
+                    _ => &msg.role,
+                };
+                app.messages.push(ChatMessage::notice(format!(
+                    "📋 message {role_label} copié ({} caractères)",
+                    content.chars().count()
+                )));
+            }
+        }
+    }
+}
+
+/// Copie le dernier message assistant (raccourci Ctrl+Shift+C)
+fn copy_last_assistant(app: &mut App) {
+    if let Some(idx) = app.messages.iter().rposition(|m| m.role == "assistant") {
+        copy_message_content(app, idx);
+    }
 }
 
 fn toggle_mic(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
@@ -3755,3 +4033,10 @@ mod tests {
         assert_eq!(super::block_at(&[], 0), None);
     }
 }
+
+
+
+
+
+
+

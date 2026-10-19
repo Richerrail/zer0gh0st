@@ -4,17 +4,32 @@ use crate::event::UiEvent;
 use crate::llm::llama::ChatOptions;
 use crate::route::Endpoint;
 use crate::tools::ToolSpec;
+use tokio::sync::mpsc::UnboundedSender;
+
+/// Events that a sub-agent can forward to the parent (for visibility).
+#[derive(Debug, Clone)]
+pub enum SubAgentEvent {
+    /// The sub-agent switched to a different endpoint (failover).
+    Fallback { from: String, to: String, reason: String },
+    /// A tool was called.
+    ToolCall { name: String, args: String },
+    /// An error occurred (non-fatal).
+    Error(String),
+    /// Progress info.
+    Info(String),
+}
 
 /// Run an isolated one-shot sub-agent and return its final text.
 ///
 /// The sub-agent gets a fresh conversation (no shared history) and its own
-/// event channel, so it never pollutes the main chat.
+/// event channel. Optionally forwards fallback/progress events via `event_tx`.
 pub async fn run_subagent(
     endpoints: Vec<Endpoint>,
     system: String,
     task: String,
     tools: Vec<ToolSpec>,
     options: ChatOptions,
+    event_tx: Option<UnboundedSender<SubAgentEvent>>,
 ) -> String {
     if endpoints.is_empty() {
         return "Aucun endpoint disponible pour ce rôle.".to_string();
@@ -27,6 +42,7 @@ pub async fn run_subagent(
     });
 
     let mut result = String::new();
+    let mut last_endpoint: Option<String> = None;
     while let Some(ev) = rx.recv().await {
         match ev {
             UiEvent::TurnComplete(full) => {
@@ -40,7 +56,36 @@ pub async fn run_subagent(
             }
             UiEvent::Error(e) => {
                 result = format!("⚠ {e}");
+                if let Some(tx) = &event_tx {
+                    let _ = tx.send(SubAgentEvent::Error(e));
+                }
                 break;
+            }
+            UiEvent::Active(label) => {
+                // Endpoint changed (failover) — forward to parent for visibility.
+                if let Some(prev) = last_endpoint.replace(label.clone()) {
+                    if prev != label {
+                        if let Some(tx) = &event_tx {
+                            let _ = tx.send(SubAgentEvent::Fallback {
+                                from: prev,
+                                to: label.clone(),
+                                reason: "failover (rate limit, error, or empty response)".into(),
+                            });
+                        }
+                    }
+                } else {
+                    last_endpoint = Some(label);
+                }
+            }
+            UiEvent::ToolCall { name, args } => {
+                if let Some(tx) = &event_tx {
+                    let _ = tx.send(SubAgentEvent::ToolCall { name, args });
+                }
+            }
+            UiEvent::Info(info) => {
+                if let Some(tx) = &event_tx {
+                    let _ = tx.send(SubAgentEvent::Info(info));
+                }
             }
             _ => {}
         }
@@ -62,6 +107,7 @@ pub async fn run_jev(
     path: &str,
     content: &str,
     options: ChatOptions,
+    event_tx: Option<UnboundedSender<SubAgentEvent>>,
 ) -> String {
     const MAX_WHOLE: usize = 100_000;
     const CHUNK: usize = 60_000;
@@ -71,7 +117,7 @@ pub async fn run_jev(
 
     if total <= MAX_WHOLE {
         let task = jev_task(path, content, None);
-        return run_subagent(endpoints, system, task, Vec::new(), options).await;
+        return run_subagent(endpoints, system, task, Vec::new(), options, event_tx).await;
     }
 
     let n = total.div_ceil(CHUNK);
@@ -86,6 +132,7 @@ pub async fn run_jev(
             task,
             Vec::new(),
             options.clone(),
+            event_tx.clone(),
         )
         .await;
         if let Some(s) = parse_score(&res) {

@@ -1,3 +1,4 @@
+pub mod box0;
 pub mod code_exec;
 pub mod knowledge_search;
 pub mod memory_save;
@@ -34,6 +35,7 @@ impl ToolSpec {
 /// All tools known to Zer0, regardless of runtime toggles.
 pub fn all() -> Vec<ToolSpec> {
     vec![
+        box0::spec(),
         code_exec::spec(),
         text_editor::spec(),
         memory_save::spec(),

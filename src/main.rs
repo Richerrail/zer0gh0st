@@ -6,6 +6,7 @@ mod convo;
 mod event;
 mod fun;
 mod gwclient;
+mod http_client;
 mod jimmy;
 mod knowledge;
 mod llm;
@@ -533,8 +534,8 @@ async fn provoke_cmd(role: String, task: Vec<String>) -> Result<()> {
         "Le cancre Jimmy devait « {t} » et a seulement répondu : « {jab} ». \
          Une IA compétente ferait mieux. Fais le travail correctement : {t}"
     );
-    let res =
-        agent::subagent::run_subagent(endpoints, system, prompt, tools::all(), options).await;
+    let res = 
+        agent::subagent::run_subagent(endpoints, system, prompt, tools::all(), options, None).await;
     println!("{res}");
     Ok(())
 }
@@ -603,7 +604,7 @@ async fn jev_cmd(file: String) -> Result<()> {
     };
     let nchars = content.chars().count();
     eprintln!("📊 jev : {file} ({nchars} caractères)…");
-    let res = agent::subagent::run_jev(endpoints, system, &file, &content, options).await;
+    let res = agent::subagent::run_jev(endpoints, system, &file, &content, options, None).await;
     println!("{res}");
     Ok(())
 }
@@ -892,8 +893,7 @@ async fn list_models_cmd(free: bool, provider_id: Option<String>) -> Result<()> 
     let id = provider_id.unwrap_or_else(|| config::resolve().provider_id);
     let p = providers::find(&id).ok_or_else(|| anyhow!("provider inconnu: {id}"))?;
     let key = config::key_for(&p);
-    let http = reqwest::Client::new();
-    let mut list = models::list(&http, &p, key.as_deref()).await?;
+    let mut list = models::list(&http_client::HTTP_CLIENT, &p, key.as_deref()).await?;
     if free {
         list.retain(models::is_free);
     }
@@ -1151,8 +1151,7 @@ async fn select_cmd(problem: Vec<String>) -> Result<()> {
         return Err(anyhow!("usage: zer0 select <problème>"));
     }
     let p = providers::find("openrouter").unwrap();
-    let http = reqwest::Client::new();
-    let list = models::list(&http, &p, None).await?;
+    let list = models::list(&http_client::HTTP_CLIENT, &p, None).await?;
     let free: Vec<_> = list.into_iter().filter(models::is_free).collect();
     let (cat, ranked) = select::rank(&problem, &free, 8);
     println!("Problème → catégorie: {}", cat.label());
