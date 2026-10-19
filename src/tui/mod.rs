@@ -1476,13 +1476,26 @@ fn handle_task(app: &mut App, args: &[&str]) {
                 crate::tasks::Status::Claimed
             };
             match crate::tasks::set_status(id, status) {
-                Ok(true) => app.messages.push(ChatMessage::notice(format!(
+                Ok(crate::tasks::Update::Ok(s)) => app.messages.push(ChatMessage::notice(format!(
                     "Tâche {id} → {}",
-                    status.label()
+                    s.label()
                 ))),
-                Ok(false) => app
+                Ok(crate::tasks::Update::NotFound) => app
                     .messages
                     .push(ChatMessage::notice(format!("Tâche {id} introuvable"))),
+                Ok(crate::tasks::Update::Refused(missing)) => {
+                    let mut m = format!(
+                        "⚠ Refusé : {id} ne peut pas être marquée « fait » — livrable(s) en défaut :\n"
+                    );
+                    for (p, why) in &missing {
+                        m.push_str(&format!("  ✗ {p} ({why})\n"));
+                    }
+                    m.push_str(
+                        "« fait » exige le livrable sur disque, non vide — crée-le, ou retire \
+                         le chemin du texte de la tâche (édition manuelle de .zer0/tasks.md).",
+                    );
+                    app.messages.push(ChatMessage::notice(m));
+                }
                 Err(e) => app
                     .messages
                     .push(ChatMessage::notice(format!("Erreur: {e}"))),
@@ -1609,8 +1622,24 @@ fn cmd_work(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
     tokio::spawn(async move {
         let res =
             crate::agent::subagent::run_subagent(endpoints, system, text, tools, options, None).await;
-        let _ = crate::tasks::set_status(&id, crate::tasks::Status::Done);
-        let _ = ui.send(UiEvent::Info(format!("🛠 [{id}] fait\n{res}")));
+        match crate::tasks::set_status(&id, crate::tasks::Status::Done) {
+            Ok(crate::tasks::Update::Ok(_)) => {
+                let _ = ui.send(UiEvent::Info(format!("🛠 [{id}] fait\n{res}")));
+            }
+            Ok(crate::tasks::Update::Refused(missing)) => {
+                let mut m = format!(
+                    "⚠ [{id}] NON marquée faite — livrable(s) en défaut (porte d'honnêteté) :\n"
+                );
+                for (p, why) in &missing {
+                    m.push_str(&format!("  ✗ {p} ({why})\n"));
+                }
+                m.push_str(&format!("\nrésultat du sous-agent :\n{res}"));
+                let _ = ui.send(UiEvent::Info(m));
+            }
+            _ => {
+                let _ = ui.send(UiEvent::Info(format!("🛠 [{id}] (statut inchangé)\n{res}")));
+            }
+        }
     });
 }
 

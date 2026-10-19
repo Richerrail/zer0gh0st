@@ -1,5 +1,12 @@
 ## Non versionné
 
+- **Porte d'honnêteté sur les tâches** : `task_update → done` (outil agent, CLI,
+  TUI, boucle `/work`) **refuse** de marquer une tâche « fait » si un livrable
+  mentionné dans son texte (chemin ancré `~/…`, `/…`, `X:\…`) est **absent ou vide** —
+  conséquence directe du run 0BOX-TEST, qui a révélé des tâches `[x]` sans livrable.
+  Heuristique prudente (jamais de faux positif bloquant) ; contournement assumé :
+  édition manuelle de `.zer0/tasks.md`.
+
 - **Suivi d'usage des modèles** (`/quota`) : Zer0 affiche ce qu'il **observe** — appels
   réussis, 429 réels, et les limites (`X-RateLimit-*`) quand un fournisseur les révèle
   dans le corps d'un 429 (OpenRouter). Les listes `/models` et `/free` portent un badge

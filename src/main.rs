@@ -725,17 +725,23 @@ fn task_cmd(action: TaskAction) -> Result<()> {
             println!("Tâche {} ajoutée: {}", t.id, t.text);
         }
         TaskAction::Done { id } => {
-            if tasks::set_status(&id, tasks::Status::Done)? {
-                println!("Tâche {id} → fait");
-            } else {
-                println!("Tâche {id} introuvable");
+            match tasks::set_status(&id, tasks::Status::Done)? {
+                tasks::Update::Ok(_) => println!("Tâche {id} → fait"),
+                tasks::Update::NotFound => println!("Tâche {id} introuvable"),
+                tasks::Update::Refused(missing) => {
+                    println!("Refusé : livrable(s) manquant(s) pour {id} :");
+                    for (p, why) in missing {
+                        println!("  ✗ {p} ({why})");
+                    }
+                    println!("« fait » exige le livrable sur disque (voir .zer0/tasks.md)");
+                }
             }
         }
         TaskAction::Claim { id } => {
-            if tasks::set_status(&id, tasks::Status::Claimed)? {
-                println!("Tâche {id} → en cours");
-            } else {
-                println!("Tâche {id} introuvable");
+            match tasks::set_status(&id, tasks::Status::Claimed)? {
+                tasks::Update::Ok(_) => println!("Tâche {id} → en cours"),
+                tasks::Update::NotFound => println!("Tâche {id} introuvable"),
+                _ => unreachable!("claim n'est jamais refusé"),
             }
         }
         TaskAction::Rm { id } => {
