@@ -1866,10 +1866,10 @@ async fn run_0box_debate(
                 role
             )
         } else if is_last {
-            // MAIN : synthèse finale + plan d'action
+            // MAIN : synthèse finale + EXÉCUTION IMMÉDIATE
             let history = format_conversation(&conversation);
             format!(
-                "=== DÉBAT 0BOX — TOUR {}/{} (MAIN - SYNTHÈSE FINALE) ===\nSUJET : {}\nHISTORIQUE DU DÉBAT :\n{}\n\nTA MISSION (MAIN) :\n1. SYNTHÉTISE les points d'accord et de désaccord\n2. IDENTIFIE la meilleure approche consensuelle\n3. PROPOSE un PLAN D'ACTION CONCRET, ÉTAPE PAR ÉTAPE\n4. SI le plan nécessite du code/fichiers/recherche → UTILISE LES OUTILS pour l'EXÉCUTER MAINTENANT\n\nRéponds avec : SYNTHÈSE + PLAN D'ACTION + EXÉCUTION (outils si besoin).",
+                "=== DÉBAT 0BOX — TOUR {}/{} (MAIN - SYNTHÈSE + EXÉCUTION) ===\nSUJET : {}\nHISTORIQUE DU DÉBAT :\n{}\n\n⚠️⚠️⚠️ INSTRUCTION CRITIQUE POUR MAIN ⚠️⚠️⚠️\n\nTu es MAIN. Ton rôle : SYNTHÉTISER + EXÉCUTER IMMÉDIATEMENT.\n\nRÈGLE ABSOLUE : Tu DOIS utiliser les outils DANS CETTE RÉPONSE.\nNE RÉPONDS PAS AVEC DU TEXTE SEULEMENT.\n\nPROCÉDURE OBLIGATOIRE :\n1. Appelle text_editor (create) pour CHAQUE fichier à créer\n2. Appelle code_exec pour CHAQUE commande à lancer\n3. Enchaîne les appels d'outils SANS attendre\n4. Continue jusqu'à ce que TOUT soit créé et testé\n\nEXEMPLE DE CE QU'IL FAUT FAIRE :\n- text_editor create path=... file_text=...\n- code_exec command=...\n- text_editor create path=... file_text=...\n- code_exec command=...\n\nSi tu ne fais qu'écrire du texte sans appeler d'outils, TU ÉCHOUES.\n\nCommence MAINTENANT par le premier appel d'outil.",
                 turn_idx + 1,
                 debate_perspectives.len(),
                 topic,
