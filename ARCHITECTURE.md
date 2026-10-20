@@ -15,12 +15,14 @@ src/
 ├── providers.rs       catalogue des providers (intégrés + personnalisés)
 ├── models.rs          découverte /models, détection :free
 ├── quota.rs           usage observé des modèles (200/429 réels, limites révélées par les 429)
+├── vote.rs            vote 👍/👎 : star GitHub (API ou navigateur) + compteur réel
 ├── select.rs          classement de modèles (benchmarks + mots-clés par mot entier)
 ├── route.rs           chaînes d'endpoints, bascule, mémoire d'échecs, rôle → endpoint
 ├── memory.rs          mémoire persistante JSONL + enveloppe d'honnêteté
 ├── tasks.rs           liste de tâches Markdown (.zer0/tasks.md)
 ├── personas.rs        prompts système alternatifs
 ├── vault.rs           chiffrement des clés (Argon2 + ChaCha20-Poly1305)
+├── vote.rs            vote 👍/👎 : star GitHub (device flow OAuth + API)
 ├── pdf.rs             info/text/merge/split (lopdf + pdf-extract)
 ├── search.rs          DuckDuckGo Instant Answer
 ├── knowledge.rs       base de connaissance SQLite + FTS5 (+ vectoriel optionnel)

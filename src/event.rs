@@ -24,6 +24,11 @@ pub enum UiEvent {
     Info(String),
     /// Zero-chan a transcrit une commande vocale.
     Voice(String),
+    /// Vote : compteur de stars GitHub + état du compte (jeton présent ou non).
+    VoteState {
+        stars: Option<u64>,
+        starred: Option<bool>,
+    },
     /// Fenêtre de contexte rapportée par le provider (tokens).
     ContextWindow(u64),
     /// Liste de modèles reçue : ouvre le sélecteur de modèle.

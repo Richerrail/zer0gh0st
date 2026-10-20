@@ -112,6 +112,13 @@ pub struct App {
     pub zc: crate::zerochan::ZeroChan,
     pub btn_0chan: Option<Rect>,
     pub btn_mic: Option<Rect>,
+    /// Vote : compteur de stars GitHub observé (None = inconnu).
+    pub vote_stars: Option<u64>,
+    /// Vote : le compte courant a-t-il starré le dépôt ? (None = inconnu).
+    pub vote_starred: Option<bool>,
+    /// Zones cliquables des pouces (bas-droite de l'écran principal).
+    pub btn_vote_up: Option<Rect>,
+    pub btn_vote_down: Option<Rect>,
     /// Sélection souris (texte affiché à l'écran).
     pub sel_anchor: Option<(u16, u16)>,
     pub sel_head: Option<(u16, u16)>,
@@ -250,6 +257,10 @@ pub async fn run(
         zc: crate::zerochan::ZeroChan::new(),
         btn_0chan: None,
         btn_mic: None,
+        vote_stars: None,
+        vote_starred: None,
+        btn_vote_up: None,
+        btn_vote_down: None,
         sel_anchor: None,
         sel_head: None,
         screen: Vec::new(),
@@ -301,6 +312,15 @@ pub async fn run(
     }
 
     probe_context(&app, &ui_tx);
+
+    // Vote : compteur de stars + état du compte (chargé une fois, en tâche de fond).
+    {
+        let ui = ui_tx.clone();
+        tokio::spawn(async move {
+            let (stars, starred) = crate::vote::state().await;
+            let _ = ui.send(UiEvent::VoteState { stars, starred });
+        });
+    }
 
     let result = event_loop(
         &mut terminal,
@@ -785,6 +805,22 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
             }
         }
         "/quota" => cmd_quota(ui_tx, app.provider_id.clone(), app.api_key.clone()),
+        "/vote" => {
+            let act = args.first().map(|s| s.to_ascii_lowercase());
+            match act.as_deref() {
+                Some("up") | Some("upvote") | Some("👍") => {
+                    vote_click(ui_tx, crate::vote::Action::Up)
+                }
+                Some("down") | Some("downvote") | Some("👎") => {
+                    vote_click(ui_tx, crate::vote::Action::Down)
+                }
+                Some("login") | Some("connect") => cmd_vote_login(ui_tx),
+                Some("status") | Some("info") | None => cmd_vote(ui_tx),
+                Some(other) => app.messages.push(ChatMessage::notice(format!(
+                    "usage : /vote [up|down|status|login] (reçu : {other})"
+                ))),
+            }
+        }
         "/free" => cmd_list_models(app, ui_tx, true),
         "/select" => {
             let problem = args.join(" ");
@@ -817,6 +853,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
              /telegram [on|off]         bot Telegram à distance (long polling)\n\
              /free                      liste les modèles gratuits\n\
              /quota                     usage des modèles (appels, 429, solde de clé)\n\
+             /vote [up|down|status]     vote pour zer0gh0st (👍 = une star GitHub)\n\
              /route [list|add|clear]    chaîne de bascule (failover)\n\
              /route auto [n]            remplit la chaîne avec les modèles :free\n\
              /route add <provider>/<model>\n\
@@ -2681,6 +2718,86 @@ fn cmd_quota(ui_tx: &UnboundedSender<UiEvent>, provider_id: String, key: Option<
     });
 }
 
+/// Clic sur 👍 / 👎 : un upvote = une star GitHub (via l'API si un jeton est
+/// présent, sinon la page du dépôt s'ouvre dans le navigateur).
+fn vote_click(ui_tx: &UnboundedSender<UiEvent>, action: crate::vote::Action) {
+    let ui = ui_tx.clone();
+    tokio::spawn(async move {
+        let msg = crate::vote::act(action).await;
+        let _ = ui.send(UiEvent::Info(msg));
+        // Le navigateur a pu rendre le mode « souris » à la console : on le
+        // réarme, sinon plus aucun clic n'atteindrait le TUI (menu compris).
+        crate::platform::restore_mouse_capture();
+        // Rafraîchit le compteur et l'état du compte après le vote.
+        let (stars, starred) = crate::vote::state().await;
+        let _ = ui.send(UiEvent::VoteState { stars, starred });
+    });
+}
+
+/// `/vote` : état des lieux (compteur, star du compte, URL).
+fn cmd_vote(ui_tx: &UnboundedSender<UiEvent>) {
+    let ui = ui_tx.clone();
+    tokio::spawn(async move {
+        let mut s = crate::vote::status().await;
+        s.push_str("\\n\\n👍 = star · 👎 = retrait de la star (clic ou /vote up|down)");
+        let _ = ui.send(UiEvent::Info(s));
+    });
+}
+
+/// `/vote login` : connexion GitHub par device flow (une seule fois).
+///
+/// Le jeton est rangé **chiffré** dans le coffre. Deux précautions :
+/// - la passphrase du coffre doit être connue (`ZER0_VAULT_PASSPHRASE`) : on ne
+///   peut pas lire le clavier depuis la TUI (mode raw) ;
+/// - si l'écriture échoue, le jeton **n'est pas perdu** : on le propose dans le
+///   presse-papier et on dit comment le stocker, plutôt que de demander à
+///   l'utilisateur de recommencer la connexion.
+fn cmd_vote_login(ui_tx: &UnboundedSender<UiEvent>) {
+    let ui = ui_tx.clone();
+    tokio::spawn(async move {
+        // Sans passphrase connue, on ne peut pas ecrire le coffre chiffre
+        // (et on ne peut pas lire le clavier depuis la TUI : mode raw).
+        let pass_env = std::env::var("ZER0_VAULT_PASSPHRASE").unwrap_or_default();
+        if pass_env.is_empty() && !crate::vault::is_unlocked() {
+            let _ = ui.send(UiEvent::Info(
+                "Pas de coffre disponible : la connexion GitHub ne peut pas etre stockee.\n\nLance `zer0 vault setup` puis `zer0 vote login` dans un terminal normal :\nle jeton sera range chiffre, et les votes deviendront automatiques."
+                    .to_string(),
+            ));
+            return;
+        }
+
+        let res = crate::vote::device_login(|code, url| {
+            let _ = ui.send(UiEvent::Info(format!(
+                "Connexion GitHub : ouvre {url} et saisis le code {code} - puis valide."
+            )));
+        })
+        .await;
+
+        match res {
+            Ok(token) => match crate::vault::put("github", &token) {
+                Ok(()) => {
+                    let _ = ui.send(UiEvent::Info(
+                        "Jeton GitHub enregistre (chiffre dans le coffre) : le vote est desormais automatique (pouce haut = une star)."
+                            .to_string(),
+                    ));
+                }
+                Err(e) => {
+                    // Le jeton est bon mais non stocke : on ne le perd pas.
+                    crate::clipboard::copy(&token);
+                    let _ = ui.send(UiEvent::Info(format!(
+                        "Jeton obtenu mais non stocke dans le coffre : {e}\n\nIl est copie dans le presse-papier : colle-le dans\n\
+~/.config/zer0/config.toml  →  [keys]  github = \"…\"\n\
+(ou relance `zer0 vote login` dans un terminal normal)."
+                    )));
+                }
+            },
+            Err(e) => {
+                let _ = ui.send(UiEvent::Info(format!("Connexion GitHub : {e}")));
+            }
+        }
+    });
+}
+
 fn cmd_list_models(app: &App, ui_tx: &UnboundedSender<UiEvent>, free_only: bool) {
     let Some(provider) = providers::find(&app.provider_id) else {
         return;
@@ -2909,11 +3026,10 @@ fn handle_input(
         };
         match me.kind {
             MouseEventKind::Down(MouseButton::Left) => {
-                if inside(app.btn_0chan) {
-                    app.zc.toggle_on();
-                } else if inside(app.btn_mic) {
-                    toggle_mic(app, ui_tx);
-                } else if let Some((idx, code, is_group)) = app
+                // Le menu passe EN PREMIER : ses zones sont des lignes entières
+                // et ne croisent pas les pouces (bas-droite). Le vote est
+                // ensuite vérifié, avant toute sélection de texte.
+                if let Some((idx, code, is_group)) = app
                     .menu_hits
                     .iter()
                     .enumerate()
@@ -2944,6 +3060,14 @@ fn handle_input(
                         // Après une commande, on rend la main à la saisie.
                         app.menu_focus = false;
                     }
+                } else if inside(app.btn_vote_up) {
+                    vote_click(ui_tx, crate::vote::Action::Up);
+                } else if inside(app.btn_vote_down) {
+                    vote_click(ui_tx, crate::vote::Action::Down);
+                } else if inside(app.btn_0chan) {
+                    app.zc.toggle_on();
+                } else if inside(app.btn_mic) {
+                    toggle_mic(app, ui_tx);
                 } else {
                     // Clic hors menu : on retire le focus du menu.
                     app.menu_focus = false;
@@ -3353,6 +3477,10 @@ fn handle_ui(ev: UiEvent, app: &mut App) {
             app.reasoning_text.clear();
         }
         UiEvent::Info(t) => app.messages.push(ChatMessage::notice(t)),
+        UiEvent::VoteState { stars, starred } => {
+            app.vote_stars = stars;
+            app.vote_starred = starred;
+        }
         UiEvent::Voice(_) => {}
         UiEvent::ContextWindow(c) => {
             if !app.ctx_manual {
@@ -3605,7 +3733,7 @@ fn draw_agent(f: &mut Frame, area: Rect, app: &mut App, show_menu: bool) {
         app.btn_0chan = None;
         app.btn_mic = None;
     }
-    draw_footer(f, chunks[5]);
+    draw_footer(f, chunks[5], app);
 }
 
 fn draw_status(f: &mut Frame, area: Rect, app: &App) {
@@ -4336,7 +4464,7 @@ fn history_down(app: &mut App) {
     }
 }
 
-fn draw_footer(f: &mut Frame, area: Rect) {
+fn draw_footer(f: &mut Frame, area: Rect, app: &mut App) {
     let key = Style::default().fg(Color::Black).bg(Color::Cyan);
     let txt = Style::default().fg(Color::Gray);
     let spans = vec![
@@ -4359,7 +4487,19 @@ fn draw_footer(f: &mut Frame, area: Rect) {
         Span::styled(" Ctrl+O ", key),
         Span::styled(" détail ", txt),
     ];
-    f.render_widget(Paragraph::new(Line::from(spans)), area);
+    // Le vote (👍/👎) occupe la droite du pied de page : c'est le bas-droite
+    // de l'écran principal. Les raccourcis gardent la place restante.
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Min(0),
+            Constraint::Length(crate::vote::WIDTH),
+        ])
+        .split(area);
+    f.render_widget(Paragraph::new(Line::from(spans)), cols[0]);
+    let (up, down) = crate::vote::draw(f, cols[1], app.vote_stars, app.vote_starred);
+    app.btn_vote_up = up;
+    app.btn_vote_down = down;
 }
 
 fn estimate_tokens(app: &App) -> usize {
@@ -4398,6 +4538,149 @@ fn wrap_text(s: &str, width: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// App minimal pour les tests headless (rendu + clics).
+    fn test_app() -> App {
+        App {
+            messages: vec![],
+            input: String::new(),
+            cursor: 0,
+            should_quit: false,
+            streaming: false,
+            streaming_text: String::new(),
+            reasoning_text: String::new(),
+            anim_phase: 0,
+            scroll: 0,
+            auto_scroll: false,
+            max_scroll: 0,
+            thinking: false,
+            max_tokens: 0,
+            temperature: 0.0,
+            conversation: vec![],
+            display_mark: 0,
+            system: String::new(),
+            base_system: String::new(),
+            persona: None,
+            all_tools: vec![],
+            read_write: false,
+            code_exec: false,
+            provider_id: "local".into(),
+            provider_name: "local".into(),
+            base_url: String::new(),
+            api_key: None,
+            model: String::new(),
+            active_endpoint: String::new(),
+            forced_role: None,
+            last_role: String::new(),
+            roles_enabled: true,
+            picker: None,
+            pending_image: None,
+            pending_image_name: None,
+            vision_models: vec![],
+            chat_rect: Rect::default(),
+            chat_scroll: 0,
+            block_ranges: vec![],
+            mode: crate::fun::Mode::Chat,
+            radio: crate::fun::radio::Radio::new(),
+            bintime: crate::fun::bintime::BinTime::new(),
+            pong: crate::fun::pong::Pong::new(),
+            side_mode: None,
+            focus_panel: false,
+            kb_auto: false,
+            history: vec![],
+            hist_pos: None,
+            hist_draft: String::new(),
+            zc: crate::zerochan::ZeroChan::new(),
+            btn_0chan: None,
+            btn_mic: None,
+            vote_stars: None,
+            vote_starred: None,
+            btn_vote_up: None,
+            btn_vote_down: None,
+            sel_anchor: None,
+            sel_head: None,
+            screen: vec![],
+            chats_popup: None,
+            context_window: 0,
+            ctx_manual: false,
+            tg: None,
+            menu_open: None,
+            menu_hits: vec![],
+            menu_scroll: 0,
+            menu_rect: Rect::default(),
+            menu_focus: false,
+            menu_sel: 0,
+            last_key_event: None,
+        }
+    }
+
+    /// Régression : le menu ET les boutons de vote doivent rester cliquables.
+    ///
+    /// Le clic sur le menu ne doit pas être traité comme une sélection de texte,
+    /// et le clic sur un pouce non plus. Avant, un clic upvote ouvrait un
+    /// navigateur via un process enfant qui héritait de la console : la capture
+    /// souris était perdue et AUCUN clic n'atteignait plus le TUI (menu
+    /// compris). D'où `platform::open()` sans héritage de console et
+    /// `platform::restore_mouse_capture()`.
+    #[tokio::test]
+    async fn clicks_reach_menu_and_vote_buttons() {
+        use crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let mut app = test_app();
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut term = Terminal::new(TestBackend::new(120, 40)).unwrap();
+
+        // Rendu initial : remplit menu_hits + btn_vote_*.
+        term.draw(|f| draw(f, &mut app)).unwrap();
+
+        // 1) Le menu doit exposer des zones cliquables.
+        assert!(
+            !app.menu_hits.is_empty(),
+            "le menu n'expose aucune zone cliquable"
+        );
+
+        // 2) Un clic sur une entrée du menu est routé vers le menu.
+        let (r, _hit) = app.menu_hits[0];
+        let before = app.menu_hits.len();
+        handle_input(
+            Event::Mouse(MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: r.x + 1,
+                row: r.y,
+                modifiers: KeyModifiers::NONE,
+            }),
+            &mut app,
+            &tx,
+        );
+        assert!(
+            app.sel_anchor.is_none(),
+            "le clic sur le menu a été traité comme une sélection de texte"
+        );
+        assert_eq!(app.menu_hits.len(), before);
+
+        // 3) Un clic sur un pouce n'est pas une sélection de texte non plus.
+        let up = app.btn_vote_up.expect("pas de zone upvote");
+        let down = app.btn_vote_down.expect("pas de zone downvote");
+        assert!(up.x > 100, "upvote pas à droite : {up:?}");
+        assert!(down.x > up.x, "downvote pas après upvote");
+        handle_input(
+            Event::Mouse(MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: up.x,
+                row: up.y,
+                modifiers: KeyModifiers::NONE,
+            }),
+            &mut app,
+            &tx,
+        );
+        assert!(
+            app.sel_anchor.is_none(),
+            "le clic sur l'upvote a été traité comme une sélection de texte"
+        );
+    }
+
 
     #[test]
     fn parse_ctx_units() {

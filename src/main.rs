@@ -26,6 +26,7 @@ mod tasks;
 mod telegram;
 mod update;
 mod vault;
+mod vote;
 mod zerochan;
 mod tools;
 mod tui;
@@ -226,6 +227,11 @@ enum Command {
         /// Provider à interroger (défaut : provider actif).
         #[arg(long)]
         provider: Option<String>,
+    },
+    /// Vote pour zer0gh0st : le pouce haut = une star GitHub, le bas = son retrait.
+    Vote {
+        /// Action : `up` (star), `down` (retrait), `status`, `login`, `logout`.
+        action: Option<String>,
     },
 }
 
@@ -578,6 +584,47 @@ async fn run_command(cmd: Command) -> Result<()> {
             println!("{}", crate::quota::report());
             if let Some(live) = crate::quota::fetch_live(&pid, key.as_deref()).await {
                 println!("\n{live}");
+            }
+            Ok(())
+        }
+        Command::Vote { action } => {
+            let act = action
+                .unwrap_or_else(|| "status".to_string())
+                .to_ascii_lowercase();
+            match act.as_str() {
+                "up" | "👍" | "upvote" => {
+                    println!("{}", crate::vote::act(crate::vote::Action::Up).await);
+                }
+                "down" | "👎" | "downvote" => {
+                    println!("{}", crate::vote::act(crate::vote::Action::Down).await);
+                }
+                "login" | "connect" => {
+                    // Device flow OAuth : l'utilisateur valide un code dans son
+                    // navigateur, une fois. Le jeton est ensuite rangé dans le
+                    // coffre → les votes suivants sont automatiques.
+                    let token = crate::vote::device_login(|code, url| {
+                        println!("Ouvre {url} et saisis le code : {code}");
+                    })
+                    .await?;
+                    crate::vault::put("github", &token)?;
+                    println!("✅ Jeton GitHub enregistré dans le coffre.");
+                    println!("   Le vote est désormais automatique (👍 = une star).");
+                }
+                "logout" => {
+                    if crate::vault::remove("github")? {
+                        println!("Jeton GitHub retiré du coffre.");
+                    } else {
+                        println!("Aucun jeton GitHub dans le coffre.");
+                    }
+                }
+                "status" | "info" => {
+                    println!("{}", crate::vote::status().await);
+                }
+                other => {
+                    return Err(anyhow!(
+                        "action inconnue : {other}\nusage : zer0 vote [up|down|status|login|logout]"
+                    ));
+                }
             }
             Ok(())
         }

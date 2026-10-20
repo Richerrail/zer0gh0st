@@ -49,6 +49,10 @@ pub struct GlobalConfig {
     /// Modèles de fallback spécifiques pour /0box (ajoutés en tête de chaîne).
     #[serde(default)]
     pub zero_box_fallbacks: Option<Vec<String>>,
+    /// `client_id` de l'application OAuth GitHub (device flow du vote).
+    /// Public par nature : ce n'est pas un secret.
+    #[serde(default)]
+    pub github_client_id: Option<String>,
 }
 
 // `Default` manuel : `roles_enabled` doit valoir `true` sur une config neuve
@@ -69,6 +73,7 @@ impl Default for GlobalConfig {
             telegram_token: None,
             telegram_allow: Vec::new(),
             zero_box_fallbacks: None,
+            github_client_id: None,
         }
     }
 }
