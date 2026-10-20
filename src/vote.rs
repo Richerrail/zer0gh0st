@@ -83,6 +83,89 @@ pub fn token() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// Combien de fois l'invitation GitHub a deja ete proposee a cet utilisateur.
+///
+/// Au-dela, on ne propose plus : on se contente du rappel discret.
+const MAX_INVITATIONS: u32 = 3;
+
+/// L'utilisateur a-t-il deja eu droit a l'invitation de connexion GitHub ?
+fn invitation_deja_vue() -> bool {
+    crate::config::load_global().github_prompted
+}
+
+/// Nombre de rappels deja effectues (pour la config).
+fn rappels_effectues() -> u32 {
+    crate::config::load_global().github_prompt_count
+}
+
+/// Incremente le compteur de rappels et marque l'invitation comme vue.
+///
+/// Ecrit dans la config : l'utilisateur n'est donc pas relance a chaque
+/// demarrage.
+pub fn note_rappel() {
+    let mut g = crate::config::load_global();
+    g.github_prompt_count = g.github_prompt_count.saturating_add(1);
+    g.github_prompted = true;
+    let _ = crate::config::save_global(&g);
+}
+
+/// Ce qu'on dit a l'utilisateur au demarrage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Invitation {
+    /// Rien a dire : deja connecte, ou rappels epuises.
+    Rien,
+    /// Premiere fois : invitation claire, avec la marche a suivre.
+    Claire,
+    /// Deja propose : rappel discret, on n'importune plus.
+    Rappel,
+}
+
+/// Decide quoi dire au demarrage (logique pure, testable).
+///
+/// - deja connecte -> `Rien` (le vote est deja automatique) ;
+/// - jamais propose et moins de `MAX_INVITATIONS` rappels -> `Claire` ;
+/// - deja propose -> `Rappel` (discret) ;
+/// - rappels epuises -> `Rien` (on laisse l'utilisateur tranquille).
+pub fn invitation_pour(deja_vue: bool, rappels: u32, connecte: bool) -> Invitation {
+    if connecte {
+        return Invitation::Rien;
+    }
+    if deja_vue {
+        return Invitation::Rappel;
+    }
+    if rappels < MAX_INVITATIONS {
+        Invitation::Claire
+    } else {
+        Invitation::Rien
+    }
+}
+
+/// Message a proposer au demarrage, selon la situation.
+///
+/// - **jamais connecte** et invitation disponible -> invitation claire
+///   (une fois, puis elle devient un rappel discret) ;
+/// - **deja connecte** -> rien (le vote est deja automatique) ;
+/// - **rappels epuises** -> plus d'invitation, seulement un rappel discret.
+///
+/// `None` = rien a dire (l'utilisateur est deja connecte).
+pub fn invitation_startup() -> Option<String> {
+    let connecte = token().is_some();
+    match invitation_pour(invitation_deja_vue(), rappels_effectues(), connecte) {
+        Invitation::Rien => None,
+        Invitation::Claire => Some(
+            "🤖 Tu peux voter pour zer0gh0st (le 👍 en bas a droite = une star GitHub) :\n\n
+Lance `zer0 vote login` : GitHub affiche un code, tu le valides dans ton\n
+navigateur, et le jeton est range chiffre chez toi ; ensuite les 👍 votent\n
+directement, sans plus jamais de manipulation."
+                .to_string(),
+        ),
+        Invitation::Rappel => Some(
+            "🤖 Vote : `zer0 vote login` connecte ton compte GitHub (une fois) — le 👍 devient alors une vraie star."
+                .to_string(),
+        ),
+    }
+}
+
 /// Extrait le compteur d'un corps JSON `{"count": 42}`.
 pub fn parse_count(body: &str) -> Option<u64> {
     let v: serde_json::Value = serde_json::from_str(body).ok()?;
@@ -580,5 +663,30 @@ mod tests {
         let buf = term.backend().buffer();
         let line: String = (0..80).map(|x| buf[(x, 23)].symbol()).collect();
         assert!(line.contains("42"), "compteur absent : {line}");
+    }
+}
+
+#[cfg(test)]
+mod tests_prompt {
+    use super::*;
+
+    #[test]
+    fn invitation_decision() {
+        // Deja connecte : on ne dit rien.
+        assert_eq!(invitation_pour(false, 0, true), Invitation::Rien);
+        assert_eq!(invitation_pour(true, 5, true), Invitation::Rien);
+
+        // Jamais propose : invitation claire.
+        assert_eq!(invitation_pour(false, 0, false), Invitation::Claire);
+        assert_eq!(invitation_pour(false, 1, false), Invitation::Claire);
+
+        // Deja propose : rappel discret (une seule ligne).
+        assert_eq!(invitation_pour(true, 1, false), Invitation::Rappel);
+
+        // Rappels epuises : silence, on n'importune plus.
+        assert_eq!(
+            invitation_pour(false, MAX_INVITATIONS, false),
+            Invitation::Rien
+        );
     }
 }

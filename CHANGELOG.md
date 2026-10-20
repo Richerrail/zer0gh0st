@@ -14,6 +14,12 @@
   inventé.
 - **CLI** : `zer0 vote up|down|status` · **TUI** : `/vote [up|down|status]`, plus
   les clics sur les pouces. Le vote est aussi dans la palette `/` et dans l'aide.
+- **Invitation à la connexion GitHub** : au **premier lancement**, la fenêtre
+  principale propose `zer0 vote login` (device flow OAuth : un code à valider
+  dans le navigateur, une fois pour toutes). Les lancements suivants se
+  contentent d'un **rappel discret** d'une ligne. Le compteur vit dans la
+  config (`github_prompted`, `github_prompt_count`) : l'utilisateur n'est ni
+  harcelé, ni relancé à chaque démarrage.
 - Tests : parsing du compteur, URLs, et un test de rendu (les deux pouces sont
   bien cliquables, ordonnés et alignés à droite).
 

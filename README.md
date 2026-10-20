@@ -397,6 +397,10 @@ zer0 vote login        # ou /vote login dans la TUI
 # → ouvre https://github.com/login/device : colle le code affiché
 ```
 
+Au **premier lancement**, zer0 te propose cette connexion dans la fenêtre
+principale (et y glisse un rappel discret les fois suivantes). Sans jeton, le 👍
+ouvre simplement la page du dépôt : pour une vraie star, connecte ton compte.
+
 Le jeton est rangé **chiffré dans le coffre** (créé automatiquement au premier
 `vote login`) : les votes suivants sont automatiques. Depuis la TUI, le coffre
 doit déjà exister — le premier `vote login` se fait en CLI (une passphrase ne

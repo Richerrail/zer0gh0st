@@ -313,6 +313,14 @@ pub async fn run(
 
     probe_context(&app, &ui_tx);
 
+    // Vote : au tout premier lancement, on propose de connecter GitHub (une
+    // fois) ; ensuite on se contente d'un rappel discret. Sans jeton, le 👍
+    // ouvre le navigateur au lieu de poser une vraie star.
+    if let Some(msg) = crate::vote::invitation_startup() {
+        app.messages.push(ChatMessage::notice(msg));
+        crate::vote::note_rappel();
+    }
+
     // Vote : compteur de stars + état du compte (chargé une fois, en tâche de fond).
     {
         let ui = ui_tx.clone();
