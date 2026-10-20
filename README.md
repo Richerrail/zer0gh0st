@@ -10,7 +10,7 @@
 ![CLI only](https://img.shields.io/badge/interface-CLI%20%2F%20TUI-black.svg)
 ![CI](https://github.com/Richerrail/zer0gh0st/actions/workflows/ci.yml/badge.svg)
 
-**Version** : 0.5.6 · **Licence** : MIT · **Interface** : terminal uniquement (pas de GUI web).
+**Version** : 0.5.7 · **Licence** : MIT · **Interface** : terminal uniquement (pas de GUI web).
 
 ![Aperçu de ZER0│GH0ST](./screenshot.png)
 

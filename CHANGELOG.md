@@ -1,3 +1,20 @@
+## v0.5.7 — Catalogue d'APIs, fichiers communities (2026-10-20)
+
+- **`/apis <besoin>`** : catalogue de **2 000+ APIs publiques** (source
+  [public-apis/public-apis](https://github.com/public-apis/public-apis), MIT), importé par
+  `scripts/kb-import-public-apis.sh` (réf épinglée, **date d'import conservée**) dans une
+  **table SQLite dédiée** (`public_apis`) : recherche par nom/description/catégorie,
+  colonne **« clé : oui/non »**, filtre `keyless`, rappel « candidat, à vérifier ».
+  L'agent peut s'en servir seul (le catalogue est aussi indexé pour
+  `knowledge_search`).
+- **Deux bugs corrigés au passage** : `kb ingest` ignorait les `.tsv`/`.csv` ; l'appel
+  d'**embeddings** partait en direct (401 « clé absente ») au lieu de passer par `zer0-gw`.
+- **Fichiers communities** (checklist « Repository health » de GitHub) :
+  `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, `ACCESSIBILITY.md`,
+  templates d'issues (YAML) et de PR. Description du dépôt + topics posés via l'API.
+- Le tag `v0.5.6` reste sur un commit **antérieur** aux correctifs 0box : la 0.5.7 est
+  la version de référence.
+
 ## Catalogue d'APIs publiques : `/apis` (2026-10-20)
 
 - **Script d'import** `scripts/kb-import-public-apis.sh` : télécharge le catalogue
