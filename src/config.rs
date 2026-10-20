@@ -142,7 +142,18 @@ pub fn project_path() -> PathBuf {
 /// Autonome : tu copies le dossier du projet, tu gardes tout. Seule la **config/clés**
 /// reste hors du projet (`~/.config/zer0`). Migration depuis les anciens emplacements XDG.
 pub fn data_dir() -> PathBuf {
-    let dir = crate::mods::project_root().join("data");
+    let root = crate::mods::project_root();
+    let dir = if root.join("Cargo.toml").is_file() {
+        // Checkout source : les données restent dans le projet (<projet>/data).
+        root.join("data")
+    } else {
+        // Binaire installé hors checkout (ex. /usr/local/bin/zer0) : la racine
+        // déduite n'existe pas — on utilise le dossier de données XDG
+        // (~/.local/share/zer0gh0st), sinon on tenterait d'écrire dans « / ».
+        directories::ProjectDirs::from("", "", "zer0gh0st")
+            .map(|d| d.data_dir().to_path_buf())
+            .unwrap_or_else(|| root.join("data"))
+    };
     migrate_old_data(&dir);
     dir
 }

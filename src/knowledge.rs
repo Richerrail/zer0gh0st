@@ -12,15 +12,35 @@ use std::path::{Path, PathBuf};
 use crate::mods;
 
 /// Fichier SQLite de la base de connaissance.
+///
+/// Dans un checkout source : `<projet>/knowledge.db` (comme `data/`).
+/// Pour un binaire **installé** ailleurs (ex. `/usr/local/bin/zer0`), la racine
+/// du projet déduite du chemin de l'exécutable n'existe pas — on écrit alors
+/// dans le dossier de données de l'utilisateur, sinon la base part à la
+/// racine du système et échoue en « unable to open database file ».
 pub fn db_path() -> PathBuf {
-    mods::project_root().join("knowledge.db")
+    let root = mods::project_root();
+    if root.join("Cargo.toml").is_file() {
+        root.join("knowledge.db")
+    } else {
+        crate::config::data_dir().join("knowledge.db")
+    }
 }
 
 /// Dossier source par défaut (`<ZER0v1>/base_connaissance`).
 pub fn default_dir() -> PathBuf {
     std::env::var("ZER0_KB_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| mods::project_root().join("base_connaissance"))
+        .unwrap_or_else(|_| {
+            let root = mods::project_root();
+            if root.join("Cargo.toml").is_file() {
+                root.join("base_connaissance")
+            } else {
+                // Binaire installé hors checkout : pas de dossier projet →
+                // on reste dans le dossier de données de l'utilisateur.
+                crate::config::data_dir().join("base_connaissance")
+            }
+        })
 }
 
 #[derive(Debug, Clone)]
