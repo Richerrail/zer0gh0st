@@ -1,3 +1,20 @@
+## Catalogue d'APIs publiques : `/apis` (2026-10-20)
+
+- **Script d'import** `scripts/kb-import-public-apis.sh` : télécharge le catalogue
+  [public-apis/public-apis](https://github.com/public-apis/public-apis) (MIT) à une **réf
+  épinglée**, saute l'en-tête publicitaire, convertit les tableaux markdown en **TSV**
+  (une API par ligne : nom, description, url, auth, https, cors, catégorie) et l'importe
+  dans une **table SQLite dédiée** (`public_apis`) avec la **source et la date d'import**.
+  `--kb` indexe aussi le TSV dans la base de connaissance (pour l'outil `knowledge_search`).
+- **`/apis [besoin]`** (TUI) et **`zer0 apis search|import|categories|stats`** (CLI) :
+  recherche structurée (nom > description > catégorie), colonne **« clé : oui/non »**,
+  filtre `keyless` (uniquement les APIs sans clé), rappel « candidat, à vérifier » et
+  source/date à chaque résultat.
+- **Deux bugs trouvés au passage** :
+  - `kb ingest` ignorait les `.tsv`/`.csv` (« aucun fichier texte ») → extension acceptée ;
+  - l'appel d'**embeddings** partait **en direct** (401 « clé absente ») au lieu de passer
+    par `zer0-gw` → `config::endpoint_for()` utilisé aussi pour l'embedder.
+
 ## v0.5.6 — 0box réel, CI verte, transport par la passerelle (2026-10-20)
 
 Points saillants :

@@ -32,7 +32,7 @@ pub struct Hit {
     pub score: f32,
 }
 
-fn open() -> Result<Connection> {
+pub(crate) fn open() -> Result<Connection> {
     let c = Connection::open(db_path())?;
     init(&c)?;
     Ok(c)
@@ -79,7 +79,9 @@ fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) {
                 .and_then(|s| s.to_str())
                 .unwrap_or("")
                 .to_ascii_lowercase();
-            if matches!(ext.as_str(), "txt" | "md" | "rst" | "org") {
+            // `tsv`/`csv` : catalogues tabulaires (ex. le catalogue d'APIs
+            // publiques, importé par scripts/kb-import-public-apis.sh).
+            if matches!(ext.as_str(), "txt" | "md" | "rst" | "org" | "tsv" | "csv") {
                 out.push(p);
             }
         }

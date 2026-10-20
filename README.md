@@ -127,6 +127,7 @@ Détail complet du modèle de menace : [`SAFETY.md`](./SAFETY.md).
 | **Rôles** | `main/code/reasoning/writing/vision/fast/utility/review`, sélection auto par catégorie · `/role off` = un seul modèle, sans bascule |
 | **Mémoire** | store JSONL, recherche sémantique optionnelle, **enveloppe d'honnêteté** |
 | **Connaissance** | base **SQLite + FTS5** (hybride), **injection auto** dans le prompt (+ outil `knowledge_search`) |
+| **Catalogue d'APIs** | `/apis <besoin>` — 2 000+ APIs publiques (source community, **datée**), avec colonne « clé requise » et filtre `keyless` |
 | **Zero-chan** | assistante vocale **intégrée à la TUI** : bloc d'état à droite du banner + boutons `0chan`/`micro` à droite de la saisie. **Réutilise le chat et l'input de l'agent**. STT = Whisper local. |
 | **Menu cliquable** | panneau **Commandes** à droite (entre zero-chan et le badge 0chan/mic) : tous les groupes/sous-commandes **cliquables** (dépliage, exécution, ou insertion dans la saisie). Molette pour défiler. |
 | **Sorties d'outils** | repliées à **3 lignes**, dépliage **par bloc** (clic droit) ou `Ctrl+O` (dernier) ; appels d'outils résumés sur une ligne (fini le script entier dans le fil) |
@@ -238,6 +239,32 @@ zer0 select "Écris une fonction Rust"      # recommande un modèle :free
 Voir [`SPEC.md`](./SPEC.md) §1 pour le périmètre exact.
 
 ---
+
+### Catalogue d'APIs publiques
+
+Le dépôt [public-apis/public-apis](https://github.com/public-apis/public-apis) (MIT) recense
+2 000+ APIs gratuites. Un script l'importe dans une **table structurée** (recherche par
+nom/description/catégorie, colonne « clé requise ») :
+
+```bash
+./scripts/kb-import-public-apis.sh          # importe (réf épinglée, date conservée)
+./scripts/kb-import-public-apis.sh --kb     # indexe aussi pour l'agent (knowledge_search)
+```
+
+Puis, dans la TUI :
+
+```
+/apis                    → état : nb d'APIs, source, date d'import, catégories
+/apis météo gratuit      → les APIs correspondantes
+/apis crypto keyless     → seulement celles qui marchent SANS clé
+```
+
+CLI : `zer0 apis search "weather" --keyless`, `zer0 apis categories`, `zer0 apis stats`.
+
+> **Honnêteté** : c'est une **liste communautaire de liens**, un *candidat* — pas une
+> garantie. Beaucoup d'APIs sont mortes ; la source et la date d'import sont affichées
+> avec chaque résultat, et le rappel « à vérifier » est explicite. Le catalogue n'est
+> **pas** versionné dans le dépôt (il est réimporté quand on veut) → jamais périmé.
 
 ### Mise à jour
 
@@ -351,7 +378,8 @@ Roadmap et détails : [`BRAINSTORM_ZEROCHAN.md`](./BRAINSTORM_ZEROCHAN.md).
 | `<projet>/data/conversation.jsonl` | historique de conversation (rechargé au démarrage) |
 | `<projet>/data/personas/` | personas (`/whoami`) |
 | `<projet>/knowledge.db` | base de connaissance (SQLite + FTS5) |
-| `<projet>/base_connaissance/` | sources indexables (texte/markdown) |
+| `<projet>/base_connaissance/` | sources indexables (texte/markdown/tsv) |
+| `<projet>/knowledge.db` | base de connaissance (SQLite + FTS5) **+ table `public_apis`** |
 | `.zer0/project.toml` | surcharge par projet (provider, modèle, rôles, routes, prompt) |
 | `./music/` | dossier audio par défaut (`/radio`) |
 | `./mods/` | programmes fun copiés |

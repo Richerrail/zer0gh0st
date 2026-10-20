@@ -630,6 +630,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
         "/jev" => cmd_jev(app, &args, ui_tx),
         "/0box" => cmd_0box(app, &args, ui_tx),
         "/kb" => handle_kb(app, &args, ui_tx),
+        "/apis" => handle_apis(app, &args),
         "/radio" => {
             let arg = args.join(" ");
             if !arg.trim().is_empty() {
@@ -842,6 +843,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
              /pdf info|text|merge|split  outils PDF locaux\n\
              /jev <fichier>              score qualité code 0-3 (rôle review)\n\
              /kb [stats|search|ingest|auto|rebuild] base de connaissance (+ injection auto)\n\
+             /apis [besoin]              catalogue d'APIs publiques (community, daté)\n\
              /radio [dossier|fichier|url] panneau audio à droite (Tab pour focus, s stop)\n\
              /bintime                    panneau horloge binaire (à droite)\n\
              /panel                      ferme le panneau latéral\n\
@@ -2333,6 +2335,31 @@ fn show_0box_help(app: &mut App) {
         + "Le système utilise la chaîne de bascule standard (rôle → routes globales).\n"
         + "Les fallbacks 0box s'ajoutent EN TÊTE de chaîne pour les agents 0box uniquement."
     ));
+}
+
+/// `/apis [besoin]` : catalogue d'APIs publiques (source community, datée).
+fn handle_apis(app: &mut App, args: &[&str]) {
+    // `/apis <besoin> keyless` → uniquement les APIs sans clé.
+    let mut words: Vec<&str> = args.to_vec();
+    let keyless = words.iter().any(|w| w.eq_ignore_ascii_case("keyless"));
+    words.retain(|w| !w.eq_ignore_ascii_case("keyless"));
+    let q = words.join(" ");
+    if q.trim().is_empty() {
+        match crate::apis::stats() {
+            Ok(s) => app.messages.push(ChatMessage::notice(s)),
+            Err(e) => app.messages.push(ChatMessage::notice(format!("Erreur: {e}"))),
+        }
+        return;
+    }
+    match (crate::apis::search_opts(q.trim(), 12, keyless), crate::apis::meta()) {
+        (Ok(entries), Ok(meta)) => {
+            app.messages
+                .push(ChatMessage::notice(crate::apis::format_entries(&entries, &meta)));
+        }
+        (Err(e), _) | (_, Err(e)) => {
+            app.messages.push(ChatMessage::notice(format!("Erreur: {e}")))
+        }
+    }
 }
 
 fn handle_kb(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {

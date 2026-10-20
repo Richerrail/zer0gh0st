@@ -124,6 +124,7 @@ pub const TREE: &[Node] = &[
         n("ingest", "/kb ingest"),
         n("rebuild", "/kb rebuild"),
         n("auto", "/kb auto"),
+        n("apis", "/apis "),
     ]),
     g("project", &[
         n("status", "/project"),

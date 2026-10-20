@@ -1,4 +1,5 @@
 mod agent;
+mod apis;
 mod cancel;
 mod clipboard;
 mod config;
@@ -146,6 +147,11 @@ enum Command {
     Embeddings {
         #[command(subcommand)]
         action: EmbeddingsAction,
+    },
+    /// Catalogue of public APIs (source: public-apis/public-apis).
+    Apis {
+        #[command(subcommand)]
+        action: ApisAction,
     },
     /// Markdown task list (division of work).
     Task {
@@ -414,6 +420,26 @@ enum KbAction {
     Rebuild,
 }
 
+/// Catalogue d'APIs publiques (public-apis/public-apis).
+#[derive(Subcommand, Debug)]
+enum ApisAction {
+    /// Import a TSV catalogue (see scripts/kb-import-public-apis.sh).
+    Import { path: String },
+    /// Search the catalogue.
+    Search {
+        query: Vec<String>,
+        #[arg(long)]
+        k: Option<usize>,
+        /// Only APIs usable without an API key.
+        #[arg(long)]
+        keyless: bool,
+    },
+    /// Categories and counts.
+    Categories,
+    /// Catalogue status (count, source, import date).
+    Stats,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // Ancien schéma `gw-<id>` → identifiant simple (migration silencieuse, une fois).
@@ -518,6 +544,7 @@ async fn run_command(cmd: Command) -> Result<()> {
         Command::Jimmy { task } => jimmy_cmd(task).await,
         Command::Provoke { role, task } => provoke_cmd(role, task).await,
         Command::Kb { action } => kb_cmd(action).await,
+        Command::Apis { action } => apis_cmd(action),
         Command::Telegram { token, allow } => telegram::run(token, allow).await,
         Command::ZeroBox { topic, perspectives } => zerobox_cmd(topic, perspectives).await,
     }
@@ -669,6 +696,29 @@ async fn kb_cmd(action: KbAction) -> Result<()> {
             knowledge::rebuild_fts()?;
             println!("Index FTS5 reconstruit.");
         }
+    }
+    Ok(())
+}
+
+fn apis_cmd(action: ApisAction) -> Result<()> {
+    match action {
+        ApisAction::Import { path } => {
+            let p = std::path::PathBuf::from(&path);
+            let (n, meta) = crate::apis::import_tsv(&p)?;
+            println!("Catalogue importé : {n} API(s) — source : {} — importé le {}", meta.source, meta.imported_at);
+        }
+        ApisAction::Search { query, k, keyless } => {
+            let q = query.join(" ");
+            let entries = crate::apis::search_opts(&q, k.unwrap_or(10), keyless)?;
+            let meta = crate::apis::meta()?;
+            println!("{}", crate::apis::format_entries(&entries, &meta));
+        }
+        ApisAction::Categories => {
+            for (c, n) in crate::apis::categories()? {
+                println!("  {c:<30} {n}");
+            }
+        }
+        ApisAction::Stats => println!("{}", crate::apis::stats()?),
     }
     Ok(())
 }

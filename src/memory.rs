@@ -123,9 +123,11 @@ pub async fn embed(text: &str) -> Result<Vec<f32>> {
     let model = e.model.ok_or_else(|| anyhow!("modèle d'embedding manquant"))?;
     let provider = providers::find(&provider_id)
         .ok_or_else(|| anyhow!("provider inconnu: {provider_id}"))?;
-    let key = config::key_for(&provider);
+    // Même transport que le chat : passerelle si elle tourne (clé jamais dans
+    // l'agent), sinon direct. Sinon l'embedding partait en direct → 401.
+    let (base_url, key) = config::endpoint_for(&provider);
 
-    let url = format!("{}/embeddings", provider.base_url.trim_end_matches('/'));
+    let url = format!("{}/embeddings", base_url.trim_end_matches('/'));
     let body = serde_json::json!({ "model": model, "input": text });
     let mut req = http_client::HTTP_CLIENT.post(&url).json(&body);
     if let Some(k) = key {
