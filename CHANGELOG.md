@@ -1,4 +1,27 @@
-## Non versionné
+## v0.5.6 — 0box réel, CI verte, transport par la passerelle (2026-10-20)
+
+Points saillants :
+
+- **L'outil `0box` est RÉEL** : il renvoyait une chaîne prefabricée (« 3 agents
+  confinés ont débattu ») sans qu'aucun débat ait lieu. Il lance maintenant le vrai
+  débat (`tui::run_0box_debate`, le même que `/0box` et `zer0 0box`) et renvoie la
+  transcription au modèle.
+- **CI remise au vert** (`cargo clippy -D warnings` échouait : la CI de `main` était
+  rouge) + test presse-papier rendu indépendant de la machine.
+- **Bug de transport** : les `routes` et les rôles partaient en direct alors que le
+  provider actif passait par `zer0-gw` → replis en 401 « clé absente ».
+- **0box testable de bout en bout** : CLI `zer0 0box <sujet>` headless, résultats
+  d'outils visibles, résumés compacts, historique du débat enrichi des actions,
+  budget d'endiguement paramétrable, arrêt d'endiguement ≠ échec.
+- **Porte d'honnêteté sur les tâches** : `task_update → done` refuse si un livrable
+  mentionné est absent ou vide.
+- **Suivi d'usage des modèles** (`/quota`) : ce que l'agent **observe** (appels OK,
+  429 réels, limites `X-RateLimit-*`).
+- Clés hors de l'agent (`zer0-gw`), un seul identifiant par provider, menus (palette
+  `/`, sélection `/model` et `/provider`, dépliage par bloc, molette), vision réelle
+  (`/img`, `--img`), provider Z.ai, `zer0 update` — détails dans l'historique.
+
+### Détail des correctifs
 
 - **CI remise au vert après le travail 0box** (`cargo clippy -D warnings` échouait :
   3 erreurs → la CI de `main` était rouge) :
