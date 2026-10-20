@@ -155,8 +155,11 @@ pub async fn fetch_latest() -> Result<Release> {
 /// Remplace le binaire en cours d'exécution.
 /// Unix : `rename` atomique (l'ancien inode reste valide pour le process courant).
 /// Windows : impossible d'écraser un `.exe` en cours → on renomme l'ancien puis
-/// on installe le nouveau (l'ancien est supprimé au mieux).
-pub fn replace_current_exe(bytes: &[u8]) -> Result<()> {
+/// on installe le nouveau ; l'ancien reste verrouillé jusqu'à la fin du
+/// processus (Windows refuse sa suppression) → on le signale, il est nettoyé au
+/// lancement suivant.
+/// Retourne une note à afficher (None si rien à signaler).
+pub fn replace_current_exe(bytes: &[u8]) -> Result<Option<String>> {
     let exe = std::env::current_exe().context("chemin de l'exécutable")?;
     let dir = exe
         .parent()
@@ -178,21 +181,51 @@ pub fn replace_current_exe(bytes: &[u8]) -> Result<()> {
     #[cfg(windows)]
     {
         let old = dir.join(format!("{stem}.old"));
+        // Reliquat d'une mise à jour précédente : le processus qui le tenait
+        // est quitté, il est donc supprimable.
         let _ = std::fs::remove_file(&old);
         std::fs::rename(&exe, &old).context("renommage de l'ancien binaire")?;
         std::fs::rename(&new, &exe).context("installation du nouveau binaire")?;
-        let _ = std::fs::remove_file(&old);
+        // L'ancien binaire reste chargé par le processus courant → Windows
+        // refuse de le supprimer : on le dit plutôt que de l'ignorer.
+        match std::fs::remove_file(&old) {
+            Ok(()) => Ok(None),
+            Err(e) => Ok(Some(format!(
+                "l'ancien binaire est resté en {} ({e}) — il sera supprimé au prochain lancement",
+                old.display()
+            ))),
+        }
     }
 
     #[cfg(not(windows))]
-    std::fs::rename(&new, &exe)
-        .with_context(|| format!("remplacement de {}", exe.display()))?;
+    {
+        std::fs::rename(&new, &exe)
+            .with_context(|| format!("remplacement de {}", exe.display()))?;
+        Ok(None)
+    }
+}
 
-    Ok(())
+/// Nettoie le reliquat d'une mise à jour Windows (`zer0.old`) : le processus
+/// qui le tenait est quitté, il est donc supprimable. Sans effet ailleurs.
+pub fn cleanup_leftover() {
+    #[cfg(windows)]
+    {
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                let stem = exe
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+                let _ = std::fs::remove_file(dir.join(format!("{stem}.old")));
+            }
+        }
+    }
 }
 
 /// Flux complet. Retourne un rapport lisible (aussi utilisé par la TUI).
 pub async fn run(check_only: bool, force: bool) -> Result<String> {
+    cleanup_leftover();
     let rel = fetch_latest().await?;
     let cur = current_version();
     let newer = is_newer(&rel.tag, cur);
@@ -265,7 +298,9 @@ pub async fn run(check_only: bool, force: bool) -> Result<String> {
         None => out.push_str("⚠ aucun SHA256SUMS publié — intégrité non vérifiée\n"),
     }
 
-    replace_current_exe(&bytes)?;
+    if let Some(note) = replace_current_exe(&bytes)? {
+        out.push_str(&format!("⚠ {note}\n"));
+    }
     out.push_str("binaire remplacé ✓ — relance zer0 pour utiliser la nouvelle version.");
     Ok(out)
 }
