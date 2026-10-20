@@ -79,6 +79,19 @@ Points saillants :
   le point unique : passerelle si elle tourne (clé jamais dans l'agent), sinon
   direct.
 
+- **Suivi d'usage des modèles** (`/quota`, `zer0 quota [--provider id]`) :
+  - **format chiffré** : `0/50 (0 %) restant`, `47/50 (94 %)`, etc. — à partir des
+    limites révélées par le fournisseur (corps des 429 OpenRouter, en-têtes
+    `X-RateLimit-*` quand un provider les envoie) ;
+  - **solde de clé en direct** : OpenRouter `/auth/key` interrogeable à la
+    demande (usage total/journalier/mensuel, crédit restant en $ et %) ;
+  - **Cline ne publie rien** (404 sur tous les endpoints d'usage testés) : seuls
+    les appels observés et 429 y sont comptés — dit explicitement.
+
+- **Alias débat `zer0box`** : `zer0box "<sujet>"` == `zer0 0box "<sujet>"` — via
+  `visible_alias` clap et détection du nom du binaire (lien dur/copie nommé
+  `zer0box.exe`), ou `scripts/zer0box.cmd` depuis les sources.
+
 - **0box testable de bout en bout + corrections issues du run réel** (0BOX-TEST
   complet via le module 0box uniquement) :
   - **CLI `zer0 0box <sujet> [--perspectives a,b,c]`** : le débat séquentiel

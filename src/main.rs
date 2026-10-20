@@ -213,13 +213,19 @@ enum Command {
         allow: Vec<i64>,
     },
     /// Débat séquentiel multi-agents (0box) — headless, sans TUI.
-    #[command(name = "0box")]
+    #[command(name = "0box", visible_alias = "zer0box")]
     ZeroBox {
         /// Le sujet du débat (une phrase).
         topic: Vec<String>,
         /// Perspectives du débat, séparées par des virgules (défaut : code,reasoning,main).
         #[arg(long, value_delimiter = ',')]
         perspectives: Vec<String>,
+    },
+    /// Usage observé des modèles + solde de la clé si le provider le publie.
+    Quota {
+        /// Provider à interroger (défaut : provider actif).
+        #[arg(long)]
+        provider: Option<String>,
     },
 }
 
@@ -444,7 +450,19 @@ enum ApisAction {
 async fn main() -> Result<()> {
     // Ancien schéma `gw-<id>` → identifiant simple (migration silencieuse, une fois).
     let _ = config::migrate_gateway_prefix();
-    let cli = Cli::parse();
+    // Alias binaire : une copie ou un lien dur de `zer0(.exe)` nommé `zer0box(.exe)`
+    // lance directement le débat — `zer0box "sujet"` == `zer0 0box "sujet"`.
+    // Créer le lien : New-Item -ItemType HardLink -Path zer0box.exe -Target zer0.exe
+    let mut args: Vec<String> = std::env::args().collect();
+    let invoked = std::path::Path::new(&args[0])
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if invoked.starts_with("zer0box") {
+        args.insert(1, "0box".to_string());
+    }
+    let cli = Cli::parse_from(args);
 
     if let Some(cmd) = cli.command {
         if !matches!(cmd, Command::Vault { .. }) {
@@ -547,6 +565,22 @@ async fn run_command(cmd: Command) -> Result<()> {
         Command::Apis { action } => apis_cmd(action),
         Command::Telegram { token, allow } => telegram::run(token, allow).await,
         Command::ZeroBox { topic, perspectives } => zerobox_cmd(topic, perspectives).await,
+        Command::Quota { provider } => {
+            let settings = config::resolve();
+            let (pid, key) = match provider {
+                Some(id) => {
+                    let p = providers::find(&id)
+                        .ok_or_else(|| anyhow::anyhow!("provider inconnu: {id}"))?;
+                    (p.id.clone(), config::key_for(&p))
+                }
+                None => (settings.provider_id.clone(), settings.api_key.clone()),
+            };
+            println!("{}", crate::quota::report());
+            if let Some(live) = crate::quota::fetch_live(&pid, key.as_deref()).await {
+                println!("\n{live}");
+            }
+            Ok(())
+        }
     }
 }
 
@@ -606,7 +640,7 @@ async fn zerobox_cmd(topic: Vec<String>, perspectives: Vec<String>) -> Result<()
 
     let topic = topic.join(" ");
     if topic.trim().is_empty() {
-        anyhow::bail!("usage: zer0 0box <sujet> [--perspectives code,reasoning,main]");
+        anyhow::bail!("usage: zer0 0box <sujet> (alias : zer0box <sujet>, zer0 zer0box <sujet>) [--perspectives code,reasoning,main]");
     }
     let perspectives = if perspectives.is_empty() {
         vec!["code".to_string(), "reasoning".to_string(), "main".to_string()]

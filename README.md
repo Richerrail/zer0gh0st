@@ -342,7 +342,7 @@ Zer0 agit : tu décris un but, il appelle les outils nécessaires.
 `/stop` `/context` `/whoami` `/vault` `/pdf` `/jev` `/kb` `/new` `/history` `/radio` `/bintime`
 `/pong` `/kristal` `/streaming` `/retro` `/panel` `/clear` `/quit` `/img` `/update` `/embeddings`.
 
-**CLI** : `zer0 provider|models|model|select|route|role|project|memory|embeddings|task|search|whoami|vault|pdf|jev|bintime|pong|kb|update`.
+**CLI** : `zer0 provider|models|model|select|route|role|project|memory|embeddings|task|search|whoami|vault|pdf|jev|bintime|pong|kb|update|quota|0box` — alias débat : `zer0box "<sujet>"` (binaire-lien ou `scripts/zer0box.cmd` depuis les sources).
 
 Détails : `zer0 --help`, ou les `ROADMAP*.md`.
 

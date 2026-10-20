@@ -784,7 +784,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
                 });
             }
         }
-        "/quota" => app.messages.push(ChatMessage::notice(crate::quota::report())),
+        "/quota" => cmd_quota(ui_tx, app.provider_id.clone(), app.api_key.clone()),
         "/free" => cmd_list_models(app, ui_tx, true),
         "/select" => {
             let problem = args.join(" ");
@@ -816,7 +816,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
              /ctx [N|1M|auto]           contexte du modèle (auto/override)\n\
              /telegram [on|off]         bot Telegram à distance (long polling)\n\
              /free                      liste les modèles gratuits\n\
-             /quota                     usage observé des modèles (appels, 429)\n\
+             /quota                     usage des modèles (appels, 429, solde de clé)\n\
              /route [list|add|clear]    chaîne de bascule (failover)\n\
              /route auto [n]            remplit la chaîne avec les modèles :free\n\
              /route add <provider>/<model>\n\
@@ -2660,6 +2660,25 @@ fn handle_route(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) 
         }
         _ => app.messages.push(ChatMessage::notice("usage: /route [list|add|clear]")),
     }
+}
+
+/// `/quota` : usage observé + solde de la clé quand le provider le publie
+/// (OpenRouter `/auth/key` ; Cline ne publie rien). Le fetch live est async.
+fn cmd_quota(ui_tx: &UnboundedSender<UiEvent>, provider_id: String, key: Option<String>) {
+    let ui = ui_tx.clone();
+    tokio::spawn(async move {
+        let mut s = crate::quota::report();
+        if let Some(live) = crate::quota::fetch_live(&provider_id, key.as_deref()).await {
+            s.push_str("\n\n");
+            s.push_str(&live);
+        } else if provider_id != "openrouter" {
+            s.push_str(&format!(
+                "\n\n{provider_id} ne publie aucun solde interrogable — seuls les \
+                 appels observés et les limites révélées dans les 429 sont comptés."
+            ));
+        }
+        let _ = ui.send(UiEvent::Info(s));
+    });
 }
 
 fn cmd_list_models(app: &App, ui_tx: &UnboundedSender<UiEvent>, free_only: bool) {
