@@ -1,0 +1,72 @@
+name: 🐛 Bug
+description: Quelque chose ne fonctionne pas comme annoncé
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Merci ! Astuce : pour un bug de **sécurité**, ne remplis pas ce formulaire —
+        vois [SECURITY.md](https://github.com/Richerrail/zer0gh0st/blob/main/SECURITY.md).
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: Que s'est-il passé ?
+      description: Ce qui a été fait, et ce qui s'est produit.
+      placeholder: "`/provider add openrouter …` a renvoyé « clé manquante »"
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Ce qui était attendu
+      description: Le comportement attendu, en une phrase.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: Les étapes exactes (une commande suffit), ou le prompt exact.
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "`zer0 --version`"
+      placeholder: "zer0 0.5.6"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Système
+      options:
+        - Linux
+        - macOS
+        - Windows
+        - Autre
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Provider / modèle
+      description: "Tel qu'affiché dans la barre de statut (ex. gw-openrouter/…)."
+      placeholder: "gw-openrouter/nvidia/nemotron-3.5-super-vl:free"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: "Sortie de la commande, ou `journalctl -u zer0-gw -n 30` si le problème vient de la passerelle."
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Vérifications
+      options:
+        - label: J'ai lu [SAFETY.md](https://github.com/Richerrail/zer0gh0st/blob/main/SAFETY.md) (le projet n'a pas de bac à sable)
+          required: false
+        - label: Le problème ne vient pas de ma configuration (clé / provider / modèle)
+          required: false

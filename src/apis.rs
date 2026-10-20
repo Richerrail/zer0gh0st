@@ -243,8 +243,28 @@ pub fn categories() -> Result<Vec<(String, usize)>> {
 /// Rendu lisible (TUI + CLI).
 pub fn format_entries(entries: &[ApiEntry], meta: &Meta) -> String {
     if entries.is_empty() {
-        return "Aucune API trouvée. Importe le catalogue : scripts/kb-import-public-apis.sh"
-            .to_string();
+        // Distingue « catalogue vide » de « aucun résultat » : le message
+        // doit être vrai dans les deux cas.
+        if meta.count == 0 {
+            return "Catalogue d'APIs publiques vide.\n\
+                    Importe-le : scripts/kb-import-public-apis.sh"
+                .to_string();
+        }
+        return format!(
+            "Aucune API ne correspond dans le catalogue ({} entrées, importé le {}).\n\
+             ⚠ Le catalogue est en ANGLAIS : cherche « weather », « crypto », « translate »…\n\
+             Catégories : {}",
+            meta.count,
+            meta.imported_at,
+            categories()
+                .map(|c| {
+                    c.iter()
+                        .map(|(n, k)| format!("{n} ({k})"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .unwrap_or_default()
+        );
     }
     let mut s = String::new();
     for e in entries {
@@ -343,5 +363,19 @@ mod tests {
     fn empty_result_points_to_the_import_script() {
         let s = format_entries(&[], &Meta::default());
         assert!(s.contains("kb-import-public-apis.sh"));
+        assert!(s.contains("vide"), "catalogue vide → message explicite");
+    }
+
+    #[test]
+    fn no_match_says_so_and_hints_english() {
+        let m = Meta {
+            source: "public-apis@x".into(),
+            imported_at: "2026-10-20".into(),
+            count: 2161,
+        };
+        let s = format_entries(&[], &m);
+        assert!(s.contains("Aucune API ne correspond"));
+        assert!(s.contains("ANGLAIS"), "l'astuce doit être donnée");
+        assert!(!s.contains("kb-import-public-apis.sh"), "le catalogue est là : pas de rappel d'import");
     }
 }

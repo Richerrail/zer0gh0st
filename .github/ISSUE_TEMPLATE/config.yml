@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Question / discussion
+    url: https://github.com/Richerrail/zer0gh0st/discussions
+    about: Questions d'usage, idées, retours sur les rôles ou les providers.
+  - name: Problème de sécurité
+    url: https://github.com/Richerrail/zer0gh0st/security/advisories/new
+    about: Signaler une faille — ne pas ouvrir d'issue publique.

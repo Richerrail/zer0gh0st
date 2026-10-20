@@ -1,0 +1,42 @@
+name: ✨ Idée / fonctionnalité
+description: Proposer une amélioration
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: L'idée
+      description: En une ou deux phrases : quel problème résout-elle ?
+    validations:
+      required: true
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Cas d'usage concret
+      description: "Comment tu l'utiliserais, concrètement ? (une commande, un flux, un workflow)"
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives existantes
+      description: "Ce que tu as essayé, ou comment tu le fais aujourd'hui."
+  - type: dropdown
+    id: area
+    attributes:
+      label: Domaine
+      options:
+        - TUI / ergonomie
+        - Outils / agent
+        - Providers / modèles
+        - Sécurité / durcissement
+        - Documentation
+        - Build / CI / packaging
+        - Autre
+    validations:
+      required: true
+  - type: textarea
+    id: limits
+    attributes:
+      label: Limites connues
+      description: "Si tu connais déjà les limites ou les risques de cette idée, ils sont utiles (principe directeur : documenter les limites)."
