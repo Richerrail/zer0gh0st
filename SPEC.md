@@ -30,6 +30,15 @@ L'agent peut appeler (si activés) :
 | `memory_save` / `memory_search` | mémoire persistante | toujours |
 | `task_add` / `task_list` / `task_update` | tâches Markdown | toujours |
 
+### 1.2 bis Passerelle `zer0-gw` (3 modes de sécurité)
+Le trafic peut transiter par le binaire séparé `zer0-gw` (dossier distant) :
+
+| Mode | Principe | Confiance requise |
+|---|---|---|
+| **standard** | Relais du dossier distant en clair. | Confiance totale |
+| **anonyme** | Le dossier distant voit les métadonnées, jamais la clé. | Partielle |
+| **zero-knowledge** | Chiffrement de bout en bout, passphrase exigée à chaque lancement (`ZER0_GW_PASSPHRASE`). Le dossier distant ne peut jamais déchiffrer les données — perte de passphrase = perte de données. | Aucune
+
 ### 1.3 Modules fun (`mods/`) — hors noyau
 `/radio`, `/bintime`, `/pong` (TUI) ; `/kristal`, `/streaming`, `/retro` (fenêtre séparée).
 Périmètre et portabilité : [`ECOSYSTEM.md`](./ECOSYSTEM.md).

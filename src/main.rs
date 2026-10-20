@@ -446,8 +446,28 @@ async fn main() -> Result<()> {
     }
 
     if let Some(prompt) = cli.once.clone() {
+        // Contexte runtime : l'outil `0box` (appelé par le modèle) a besoin des
+        // mêmes réglages que l'agent pour lancer un vrai débat.
+        tools::init_runtime(tools::Runtime {
+            settings: settings.clone(),
+            system: system.clone(),
+            options: options.clone(),
+            all_tools: all_tools.clone(),
+            read_write: true,
+            code_exec: true,
+        });
         return run_once(settings, system, prompt, all_tools, options, cli.img.clone()).await;
     }
+
+    // Même contexte pour la TUI (l'outil 0box y est atteignable par le modèle).
+    tools::init_runtime(tools::Runtime {
+        settings: settings.clone(),
+        system: system.clone(),
+        options: options.clone(),
+        all_tools: all_tools.clone(),
+        read_write: true,
+        code_exec: cli.allow_exec,
+    });
 
     tui::run(
         settings,
@@ -581,13 +601,15 @@ async fn zerobox_cmd(topic: Vec<String>, perspectives: Vec<String>) -> Result<()
         tui::run_0box_debate(
             topic,
             perspectives,
-            settings,
-            system,
-            options,
-            true, // text_editor
-            true, // code_exec
-            tools::all(),
-            tx,
+            tui::DebateSetup {
+                settings,
+                system,
+                options,
+                read_write: true, // text_editor
+                code_exec: true,  // code_exec
+                all_tools: tools::all(),
+                ui: tx,
+            },
         )
         .await;
     });

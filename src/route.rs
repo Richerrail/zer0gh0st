@@ -57,11 +57,15 @@ pub fn parse_route(route: &str) -> Option<Endpoint> {
         return None;
     }
     let model = normalize_model(&provider.id, model);
+    // Même transport que le provider actif : passerelle si elle tourne
+    // (routes et rôles ne doivent PAS contourner zer0-gw — sinon ils
+    // partaient en direct, sans clé → 401).
+    let (base_url, api_key) = config::endpoint_for(&provider);
     Some(Endpoint {
         provider_id: provider.id.to_string(),
         label: format!("{}/{}", provider.id, model),
-        base_url: provider.base_url.to_string(),
-        api_key: config::key_for(&provider),
+        base_url,
+        api_key,
         model,
     })
 }

@@ -10,6 +10,36 @@ pub mod text_editor;
 pub mod web_search;
 
 use serde_json::json;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::OnceLock;
+
+/// Contexte d'exécution, accessible aux outils.
+///
+/// Pourquoi : l'outil `0box` doit pouvoir lancer le **vrai** débat multi-agents
+/// (le même que `/0box` et `zer0 0box`), pas en simuler un. Il lui faut donc
+/// les réglages, le prompt système, les options de tour et la liste d'outils.
+pub struct Runtime {
+    pub settings: crate::config::Settings,
+    pub system: String,
+    pub options: crate::llm::llama::ChatOptions,
+    pub all_tools: Vec<ToolSpec>,
+    pub read_write: bool,
+    pub code_exec: bool,
+}
+
+static RUNTIME: OnceLock<Runtime> = OnceLock::new();
+
+/// Initialise le contexte (au démarrage de l'agent). Idempotent : le premier
+/// appel gagne.
+pub fn init_runtime(rt: Runtime) {
+    let _ = RUNTIME.set(rt);
+}
+
+/// Contexte d'exécution, s'il a été initialisé.
+pub fn runtime() -> Option<&'static Runtime> {
+    RUNTIME.get()
+}
 
 /// A tool definition advertised to the model in OpenAI function format.
 #[derive(Debug, Clone)]
@@ -48,10 +78,25 @@ pub fn all() -> Vec<ToolSpec> {
     ]
 }
 
+/// Variante à effacement de type de `execute`.
+///
+/// Nécessaire parce que l'outil `0box` relance un débat → sous-agent → appel
+/// d'outils → … : sans `dyn Future`, le compilateur doit calculer le type
+/// concret de la future et tourne en rond (E0391 « cycle detected »).
+pub fn execute_boxed(
+    name: &str,
+    args: &str,
+) -> Pin<Box<dyn Future<Output = String> + Send>> {
+    // On possède les données (la future doit être 'static).
+    let name = name.to_string();
+    let args = args.to_string();
+    Box::pin(async move { execute(&name, &args).await })
+}
+
 /// Execute a tool by name. Errors are returned as text so the model can react.
 pub async fn execute(name: &str, args: &str) -> String {
     match name {
-        "0box" => box0::run(args),
+        "0box" => box0::run(args).await,
         "code_exec" => code_exec::run(args),
         "text_editor" => text_editor::run(args),
         "memory_save" => memory_save::run(args).await,

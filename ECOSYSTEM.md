@@ -13,6 +13,7 @@
 |---|---|
 | **Noyau** | boucle d'agent, TUI, providers, mémoire, tâches, sous-agents, config, coffre |
 | **Outils intégrés** | `code_exec`, `text_editor`, `web_search`, `memory_*`, `task_*`, `/pdf`, `/search`, `/vault` |
+| **Passerelle** | binaire `zer0-gw` séparé (3 modes de sécurité) — hors noyau de la TUI |
 | **Écosystème** | modules `mods/` (audio, horloge, jeu, vidéo, jeux rétro) — **hors noyau** |
 
 Les modules de l'écosystème sont **autonomes** : tous les programmes sont **copiés dans
@@ -91,6 +92,12 @@ Formats : `mp3 wav ogg flac m4a opus aac wma`. Lecture en **playlist** (enchaîn
   `pipewire` / `pulseaudio-utils` / `alsa-utils` ; `wl-clipboard` **ou** `xclip` ; `mpv`/`ffmpeg`.
 - **macOS** : Xcode Command Line Tools (`xcode-select --install`) ; `brew install sox mpv ffmpeg`.
 - **Windows** : **Visual Studio Build Tools (C++)** ; `choco install sox ffmpeg`.
+
+### Passerelle `zer0-gw`
+Le binaire `zer0-gw` est **autonome** (hors noyau) : il fait transiter le trafic vers un dossier
+distant en mode **standard**, **anonyme** ou **zero-knowledge** (chiffrement de bout en bout,
+passphrase exigée à chaque lancement). Il n'est **pas** prévu pour être lancé par la TUI elle-même
+— c'est un processus à part, lancé sur le dossier distant.
 
 ### Limites connues (Windows)
 - `code_exec` utilise **`cmd /C`** : installe **Git Bash** ou **WSL** pour les commandes bash.

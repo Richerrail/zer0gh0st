@@ -27,6 +27,7 @@ src/
 ├── mods.rs            lanceurs /kristal /streaming /retro (depuis mods/)
 ├── cancel.rs          drapeau d'annulation global (/stop)
 ├── event.rs           UiEvent (Token, Reasoning, ToolCall, …, Compacted, Active)
+├── gwclient.rs        client du zer0-gw (3 modes de sécurité, passphrase zero-knowledge)
 ├── llm/llama.rs       client SSE OpenAI-compatible + tool_calls
 ├── agent/
 │   ├── history.rs     ChatMessage (wire OpenAI)
@@ -36,6 +37,7 @@ src/
 ├── tools/             code_exec, text_editor, web_search, memory_*, task_*
 ├── tui/               ratatui : banner, statut, chat, input, footer, panneau latéral
 ├── fun/               bintime, pong, radio (modes) + runner standalone
+├── bin/zer0-gw.rs     binaire passerelle séparé (3 modes : standard/anonyme/zero-knowledge)
 └── prompts/system.md  prompt système (include_str!)
 ```
 

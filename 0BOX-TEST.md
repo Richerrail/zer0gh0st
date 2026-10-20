@@ -78,6 +78,8 @@ Mockup ASCII — rendu attendu du rapport « compteur »
 > **Honnêteté** : ZER0v1 n'a **pas d'entrée image** (les captures d'écran ne
 > sont pas envoyées au modèle). Le rôle `vision` est donc testé en **lecture de
 > schéma ASCII** — c'est son vrai périmètre actuel, pas une démo trompeuse.
+> Le rôle `vision` n'est pas concerné par la passerelle `zer0-gw` (voir
+> [`ECOSYSTEM.md`](./ECOSYSTEM.md) §Passerelle).
 
 ## 4. Critères de réussite de 0box
 

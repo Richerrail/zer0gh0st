@@ -57,3 +57,7 @@ run-zer0-gw.ps1
 # Démo (générée par VHS ; non versionnée)
 /demo.gif
 /demo.mp4
+
+# Clone local du dépôt GitHub + notes de travail
+/gh0st
+/notes.html

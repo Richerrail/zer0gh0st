@@ -1,5 +1,27 @@
 ## Non versionné
 
+- **CI remise au vert après le travail 0box** (`cargo clippy -D warnings` échouait :
+  3 erreurs → la CI de `main` était rouge) :
+  - `iter().cloned().collect()` → `to_vec()` ; `run_0box_debate` et
+    `run_0box_turn_with_retry` regroupés en `DebateSetup` / `DebateTurn`
+    (9 arguments → trop pour clippy, et illisibles).
+  - **Test presse-papier** : `wl-copy` ajoute TOUJOURS un `\n` final (le drapeau
+    `--trim-newline` concerne l'*entrée*, pas l'ajout) → `paste()` retire
+    **exactement un** retour à la ligne (une fin de ligne de l'utilisateur reste
+    intacte) ; + test dédié.
+- **L'outil `0box` est désormais RÉEL** : il renvoyait une chaîne prefabricée
+  (« 3 agents confinés ont débattu ») alors qu'aucun débat n'avait lieu — le
+  modèle croyait à un résultat inexistant. Il lance maintenant le **vrai** débat
+  (`tui::run_0box_debate`, le même que `/0box` et `zer0 0box`) et renvoie la
+  transcription au modèle. Contexte d'exécution partagé (`tools::init_runtime`).
+  *Cycle de types async* (outil → débat → sous-agent → outil) cassé par
+  `tools::execute_boxed` (effacement de type) — sinon E0391 « cycle detected ».
+- **Bug de transport** : les `routes` et les rôles (`provider/model`) passaient
+  **en direct** alors que le provider actif passait par `zer0-gw` → les replis
+  échouaient en **401 « clé absente »**. `config::endpoint_for()` est désormais
+  le point unique : passerelle si elle tourne (clé jamais dans l'agent), sinon
+  direct.
+
 - **0box testable de bout en bout + corrections issues du run réel** (0BOX-TEST
   complet via le module 0box uniquement) :
   - **CLI `zer0 0box <sujet> [--perspectives a,b,c]`** : le débat séquentiel

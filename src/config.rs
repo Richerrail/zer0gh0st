@@ -237,6 +237,30 @@ pub fn key_for(provider: &Provider) -> Option<String> {
 }
 
 /// Merge project over global config into effective settings.
+/// URL + clé **effectives** d'un provider.
+///
+/// - passerelle activée (et provider intégré) : URL de `zer0-gw` et **aucune clé**
+///   (elle reste dans la passerelle — l'agent ne la détient jamais) ;
+/// - sinon : URL du provider et clé locale (env / coffre / config).
+///
+/// Utilisé par `resolve()` **et** par `route::parse_route` (routes et rôles) :
+/// sinon le provider actif passait par la passerelle mais tous les replis
+/// partaient en direct → 401 « clé absente ».
+pub fn endpoint_for(p: &Provider) -> (String, Option<String>) {
+    if gateway_enabled() && !p.custom {
+        (
+            format!(
+                "{}/{}/v1",
+                crate::gwclient::gw_base().trim_end_matches('/'),
+                p.id
+            ),
+            None,
+        )
+    } else {
+        (p.base_url.to_string(), key_for(p))
+    }
+}
+
 pub fn resolve() -> Settings {
     let g = load_global();
     let p = load_project();
@@ -262,19 +286,7 @@ pub fn resolve() -> Settings {
     // Un seul identifiant par provider : si la passerelle tourne (ou si
     // `gateway = true`), les providers intégrés passent par elle — la clé
     // reste dans zer0-gw et n'est jamais résolue dans l'agent.
-    let via_gw = gateway_enabled() && !provider.custom;
-    let (base_url, api_key) = if via_gw {
-        (
-            format!(
-                "{}/{}/v1",
-                crate::gwclient::gw_base().trim_end_matches('/'),
-                provider.id
-            ),
-            None,
-        )
-    } else {
-        (provider.base_url.to_string(), key_for(&provider))
-    };
+    let (base_url, api_key) = endpoint_for(&provider);
 
     Settings {
         provider_id: provider.id.to_string(),

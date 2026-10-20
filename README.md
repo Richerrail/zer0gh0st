@@ -107,6 +107,8 @@ Zer0 ne réimplémente **aucun** modèle.
   plus des variables secrètes — voir `deploy/` et [`SAFETY.md`](./SAFETY.md) §7.
 - `code_exec` **ne voit plus les secrets dans son environnement** : les variables
   `*API_KEY*`, `*TOKEN*`, `*PASSPHRASE*`, … sont retirées des processus enfants.
+- Avec `/img`, l'image (base64) **part au provider** : elle n'est pas écrite dans
+  l'historique, mais elle quitte la machine — ne l'utilise pas sur du contenu sensible.
 
 Détail complet du modèle de menace : [`SAFETY.md`](./SAFETY.md).
 
@@ -116,10 +118,10 @@ Détail complet du modèle de menace : [`SAFETY.md`](./SAFETY.md).
 
 | Domaine | Détail |
 |---|---|
-| **TUI** | banner `ZER0│GH0ST` (`ghost in the shell`) animé, statut, scroll, raisonnement affiché, **panneau latéral**, **saisie style Pi** (règles haut/bas + `ctx · cwd`, blocs de messages), **historique ↑↓** |
+| **TUI** | banner `ZER0│GH0ST` (`ghost in the shell`) animé, statut, **palette `/` filtrante**, **sélection navigable** `/model` et `/provider`, **molette** (conversation / panneaux), raisonnement affiché, **panneau latéral**, **saisie style Pi**, **historique ↑↓** |
 | **Boucle d'agent** | appels d'outils, streaming SSE, max 8 itérations, budget 24 outils/tour, détection de boucle |
 | **Containment** | réponse coupée à 1 Mo, timeout d'inactivité 120 s, `/stop` |
-| **Multi-provider** | 9 providers intégrés + personnalisés, clés en config ou **coffre chiffré** |
+| **Multi-provider** | 10 providers intégrés + personnalisés, **transport automatique** via `zer0-gw` (clés hors de l'agent) ou direct, failover |
 | **Résilience** | bascule d'endpoints, backoff 429, blacklist d'échecs 120 s, messages par code HTTP |
 | **Gratuit** | découverte des modèles `:free` (OpenRouter public), `select` par **benchmarks réels** |
 | **Rôles** | `main/code/reasoning/writing/vision/fast/utility/review`, sélection auto par catégorie · `/role off` = un seul modèle, sans bascule |
@@ -127,6 +129,9 @@ Détail complet du modèle de menace : [`SAFETY.md`](./SAFETY.md).
 | **Connaissance** | base **SQLite + FTS5** (hybride), **injection auto** dans le prompt (+ outil `knowledge_search`) |
 | **Zero-chan** | assistante vocale **intégrée à la TUI** : bloc d'état à droite du banner + boutons `0chan`/`micro` à droite de la saisie. **Réutilise le chat et l'input de l'agent**. STT = Whisper local. |
 | **Menu cliquable** | panneau **Commandes** à droite (entre zero-chan et le badge 0chan/mic) : tous les groupes/sous-commandes **cliquables** (dépliage, exécution, ou insertion dans la saisie). Molette pour défiler. |
+| **Sorties d'outils** | repliées à **3 lignes**, dépliage **par bloc** (clic droit) ou `Ctrl+O` (dernier) ; appels d'outils résumés sur une ligne (fini le script entier dans le fil) |
+| **Vision** | `/img <fichier>` (TUI) et `--img` (CLI) : l'image part en **content-parts** vers un modèle multimodal ; **jamais persistée** dans l'historique |
+| **Mise à jour** | `zer0 update` / `/update` : binaire brut + `SHA256SUMS` depuis les Releases GitHub, intégrité vérifiée, remplacement atomique |
 | **Telegram** | bot à distance : `/telegram on\|off` dans la TUI ; chat, **vocal** (Whisper), **fichiers**, `/progress`, `/exec on\|off`, `/shutdown`. **Long polling** (aucune exposition réseau). |
 | **Historique** | **conversation persistée** (JSONL) ; au démarrage = **nouvelle conversation** (l'ancienne est archivée, `--resume` pour reprendre) ; `/history`, `/new` ; **F6** liste/recharge les sessions |
 | **Sélection** | clic + glisser dans le chat/saisie → surbrillance + **copie presse-papier** auto |
@@ -291,13 +296,15 @@ Zer0 agit : tu décris un but, il appelle les outils nécessaires.
 |---|---|
 | `Entrée` | envoyer · `Maj+Entrée` / `Alt+Entrée` : nouvelle ligne |
 | `↑` `↓` | historique de saisie |
+| **taper `/`** | palette de commandes (filtre en tapant, ↑↓, Entrée) |
 | `PgUp` `PgDn` · **molette** | faire défiler la conversation |
+| `Ctrl+O` · **clic droit** | déplier/replier une sortie d'outil |
 | `F4` | activer/désactiver `code_exec` |
 | `F6` | gérer les conversations (sessions sauvegardées) |
 | `F7` | relancer/poursuivre l'agent (nudge) |
 | `F8` / `F10` | zero-chan (assistante) / micro |
 | `Ctrl+C` / `/stop` | interrompre la génération |
-| souris | clic + glisser → sélection, relâcher → copie |
+| souris | clic + glisser → sélection, relâcher → copie ; **clic droit** = déplier un bloc |
 
 ---
 
@@ -306,9 +313,9 @@ Zer0 agit : tu décris un but, il appelle les outils nécessaires.
 **TUI** (extrait) : `/help` `/think` `/provider` `/model` `/models` `/quota` `/ctx` `/free` `/select` `/route` `/telegram` `/tg`
 `/role` `/project` `/memory` `/recall` `/compact` `/task` `/work` `/ask` `/review` `/search`
 `/stop` `/context` `/whoami` `/vault` `/pdf` `/jev` `/kb` `/new` `/history` `/radio` `/bintime`
-`/pong` `/kristal` `/streaming` `/retro` `/panel` `/clear` `/quit`.
+`/pong` `/kristal` `/streaming` `/retro` `/panel` `/clear` `/quit` `/img` `/update` `/embeddings`.
 
-**CLI** : `zer0 provider|models|model|select|route|role|project|memory|embeddings|task|search|whoami|vault|pdf|jev|bintime|pong|kb`.
+**CLI** : `zer0 provider|models|model|select|route|role|project|memory|embeddings|task|search|whoami|vault|pdf|jev|bintime|pong|kb|update`.
 
 Détails : `zer0 --help`, ou les `ROADMAP*.md`.
 
@@ -334,11 +341,15 @@ Roadmap et détails : [`BRAINSTORM_ZEROCHAN.md`](./BRAINSTORM_ZEROCHAN.md).
 
 | Chemin | Rôle |
 |---|---|
-| `~/.config/zer0/config.toml` | clés, provider/modèle actifs, routes, rôles (chmod 600) — modèle fourni : [`config.example.toml`](./config.example.toml) |
-| `~/.config/zer0/vault.enc` | clés chiffrées (Argon2 + ChaCha20-Poly1305) |
-| `~/.local/share/zer0/memory.jsonl` | mémoire persistante |
-| `~/.local/share/zer0/conversation.jsonl` | historique de conversation (rechargé au démarrage) |
-| `~/.local/share/zer0/personas/` | personas (`/whoami`) |
+| `~/.config/zer0/config.toml` | **réglages** (provider/modèle, routes, rôles) — **aucun secret** (chmod 600) — modèle : [`config.example.toml`](./config.example.toml) |
+| `~/.config/zer0/telegram.env` | token du bot Telegram (chmod 600) |
+| `~/.config/zer0/vault.enc` | coffre **optionnel** de clés (Argon2 + ChaCha20-Poly1305) |
+| `/etc/zer0-gw/gw.toml` | **passerelle** : upstreams + chemins autorisés (user `zer0-gw`) |
+| `/etc/zer0-gw/keys.managed` | clés déposées via `/provider add` (0600, jamais lisibles par l'agent) |
+| `/etc/zer0-gw/keys.env` | clés « style variable d'env » (injectées par systemd) |
+| `<projet>/data/memory.jsonl` | mémoire persistante |
+| `<projet>/data/conversation.jsonl` | historique de conversation (rechargé au démarrage) |
+| `<projet>/data/personas/` | personas (`/whoami`) |
 | `<projet>/knowledge.db` | base de connaissance (SQLite + FTS5) |
 | `<projet>/base_connaissance/` | sources indexables (texte/markdown) |
 | `.zer0/project.toml` | surcharge par projet (provider, modèle, rôles, routes, prompt) |

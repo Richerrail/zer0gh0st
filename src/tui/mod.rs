@@ -193,6 +193,14 @@ pub async fn run(
         .or_else(|| known_context(&settings.model))
         .unwrap_or(200_000);
 
+    // Contexte runtime pour l'outil `0box` (débat réel lancé par le modèle) :
+    // mêmes réglages, mêmes options, mêmes outils que la TUI.
+    // (cloné AVANT le moves ci-dessous : App prend `settings.model` et `all_tools`.)
+    let rt_settings = settings.clone();
+    let rt_tools = all_tools.clone();
+    let rt_system = system.clone();
+    let rt_options = options.clone();
+
     let mut app = App {
         messages: vec![ChatMessage::notice("Bonjour 👋, je suis Zer0. Comment puis-je t'aider ?")],
         input: String::new(),
@@ -260,6 +268,17 @@ pub async fn run(
         max_tokens: options.max_tokens,
         temperature: options.temperature,
     };
+
+    // Contexte runtime pour l'outil `0box` (débat réel lancé par le modèle) :
+    // mêmes réglages, mêmes options, mêmes outils que la TUI.
+    crate::tools::init_runtime(crate::tools::Runtime {
+        settings: rt_settings,
+        system: rt_system,
+        options: rt_options,
+        all_tools: rt_tools,
+        read_write: app.read_write,
+        code_exec: app.code_exec,
+    });
 
     // Démarrage = NOUVELLE conversation (l'ancienne est archivée → F6).
     // Avec `--resume`, on reprend la conversation active à la place.
@@ -1825,7 +1844,7 @@ pub fn cmd_0box(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) 
         }
     }
     
-    let topic = args.iter().cloned().collect::<Vec<_>>().join(" ");
+    let topic = args.to_vec().join(" ");
     if topic.trim().is_empty() {
         app.messages.push(ChatMessage::notice("usage: /0box <sujet> [--perspectives main,code,reasoning]\n       /0box fallback <add|remove|list> <provider/model>\n       /0box help"));
         return;
@@ -1873,15 +1892,38 @@ pub fn cmd_0box(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) 
         run_0box_debate(
             topic_owned,
             perspectives_owned,
-            app_settings,
-            system,
-            options,
-            read_write,
-            code_exec,
-            all_tools,
-            ui
-        ).await;
+            DebateSetup {
+                settings: app_settings,
+                system,
+                options,
+                read_write,
+                code_exec,
+                all_tools,
+                ui,
+            },
+        )
+        .await;
     });
+}
+
+/// Contexte d'un débat 0box (regroupé : la fonction principale dépassait la
+/// limite d'arguments de clippy, et 9 paramètres ne se lisent pas).
+pub struct DebateSetup {
+    pub settings: crate::config::Settings,
+    pub system: String,
+    pub options: ChatOptions,
+    pub read_write: bool,
+    pub code_exec: bool,
+    pub all_tools: Vec<crate::tools::ToolSpec>,
+    pub ui: UnboundedSender<UiEvent>,
+}
+
+/// Tour de débat : qui parle, à quoi, vers quels endpoints.
+struct DebateTurn<'a> {
+    role: &'a str,
+    role_label: &'a str,
+    prompt: &'a str,
+    endpoints: &'a [crate::route::Endpoint],
 }
 
 /// Lance un vrai débat séquentiel : chaque modèle reçoit la conversation complète
@@ -1890,14 +1932,17 @@ pub fn cmd_0box(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) 
 pub async fn run_0box_debate(
     topic: String,
     perspectives: Vec<String>,
-    app_settings: crate::config::Settings,
-    system: String,
-    options: ChatOptions,
-    read_write: bool,
-    code_exec: bool,
-    all_tools: Vec<crate::tools::ToolSpec>,
-    ui: UnboundedSender<UiEvent>,
+    setup: DebateSetup,
 ) {
+    let DebateSetup {
+        settings: app_settings,
+        system,
+        options,
+        read_write,
+        code_exec,
+        all_tools,
+        ui,
+    } = setup;
     // Build tools available (respect F3/F4)
     let tools: Vec<crate::tools::ToolSpec> = all_tools
         .iter()
@@ -1987,10 +2032,12 @@ pub async fn run_0box_debate(
         
         // Exécute le tour avec validation et retry si échec
         let (speaker, response) = run_0box_turn_with_retry(
-            role,
-            role_label,
-            &prompt,
-            &endpoints,
+            DebateTurn {
+                role,
+                role_label,
+                prompt: &prompt,
+                endpoints: &endpoints,
+            },
             &debate_system,
             &tools,
             &options,
@@ -2016,16 +2063,19 @@ pub async fn run_0box_debate(
 /// Exécute un tour du débat 0box avec retry automatique et validation de la réponse.
 /// Retourne (speaker, response) garanti valide (non vide, non erreur).
 async fn run_0box_turn_with_retry(
-    role: &str,
-    role_label: &str,
-    prompt: &str,
-    endpoints: &[crate::route::Endpoint],
+    turn: DebateTurn<'_>,
     debate_system: &str,
     tools: &[crate::tools::ToolSpec],
     options: &ChatOptions,
     ui: &UnboundedSender<UiEvent>,
     max_retries: u32,
 ) -> (String, String) {
+    let DebateTurn {
+        role,
+        role_label,
+        prompt,
+        endpoints,
+    } = turn;
     let mut last_error = String::new();
     
     for attempt in 0..=max_retries {

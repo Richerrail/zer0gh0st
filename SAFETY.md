@@ -42,6 +42,7 @@ Le document n'impose pas C ; il exige que vous le sachiez et le décidiez.
 | **Coffre dans le même processus** | `text_editor` lit un fichier ; `code_exec` peut le faire sortir. | Le coffre protège le **disque au repos**, pas l'exfiltration par le processus. |
 | **Data path provider** | Prompts et réponses passent par le provider (et son gateway). | Rétention/logging = termes du provider. Ne pas router de données sensibles. |
 | **Modèles `:free` gated** | Un modèle peut être réservé à des apps whitelistées (403). | Non prévisible (absent du catalogue) → bascule automatique, jamais un mensonge sur la fiabilité. |
+| **Passerelle `zer0-gw` (zero-knowledge)** | Les données transitent par un dossier distant. | Le mode zero-knowledge chiffre de bout en bout (le dossier distant ne déchiffre jamais) ; en mode standard/anonyme la confiance au dossier distant est requise. La passphrase n'est jamais stockée. |
 
 ---
 

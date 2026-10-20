@@ -97,12 +97,28 @@ pub fn copy(text: &str) {
 
 /// Lit le presse-papier. Ordre : `wl-paste` -> `xclip -o` / `xsel -o`
 /// -> `pbpaste` -> PowerShell `Get-Clipboard` (Windows).
+/// Retire le « \n » final que `wl-copy` ajoute **toujours** (une seule fois).
+/// On en retire exactement un : si le texte de l'utilisateur se terminait déjà
+/// par un retour à la ligne, il est préservé.
+fn strip_one_trailing_newline(s: &str) -> &str {
+    if let Some(rest) = s.strip_suffix('\n') {
+        rest.strip_suffix('\r').unwrap_or(rest)
+    } else {
+        s
+    }
+}
+
 /// Retourne `None` si aucun outil n'est dispo ou en cas d'erreur.
 pub fn paste() -> Option<String> {
-    // Wayland
+    // Wayland — wl-copy ajoute un « \n » final : on le retire (exactement un).
     if let Ok(out) = Command::new("wl-paste").output() {
         if out.status.success() && !out.stdout.is_empty() {
-            return String::from_utf8(out.stdout).ok();
+            if let Ok(s) = String::from_utf8(out.stdout) {
+                let s = strip_one_trailing_newline(&s);
+                if !s.is_empty() {
+                    return Some(s.to_string());
+                }
+            }
         }
     }
     // X11: xclip
@@ -177,5 +193,14 @@ mod tests {
         let pasted = paste();
         assert!(pasted.is_some(), "paste() returned None");
         assert_eq!(pasted.unwrap(), test_text);
+    }
+
+    #[test]
+    fn strip_one_trailing_newline_keeps_user_newline() {
+        // wl-copy ajoute TOUJOURS un \n : on n'en retire qu'un.
+        assert_eq!(strip_one_trailing_newline("abc\n"), "abc");
+        assert_eq!(strip_one_trailing_newline("abc\n\n"), "abc\n");
+        assert_eq!(strip_one_trailing_newline("abc\r\n"), "abc");
+        assert_eq!(strip_one_trailing_newline("abc"), "abc");
     }
 }

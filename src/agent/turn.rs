@@ -206,7 +206,9 @@ pub async fn run_turn_budgeted(
                 name: call.function.name.clone(),
                 args: call.function.arguments.clone(),
             });
-            let result = tools::execute(&call.function.name, &call.function.arguments).await;
+            // `execute_boxed` (effacement de type) : casse le cycle de types
+            // async (l'outil `0box` → débat → sous-agent → outils → …).
+            let result = tools::execute_boxed(&call.function.name, &call.function.arguments).await;
             let _ = ui.send(UiEvent::ToolResult(result.clone()));
             let tool_msg = ChatMessage::tool_result(call.id.clone(), result);
             messages.push(tool_msg);
