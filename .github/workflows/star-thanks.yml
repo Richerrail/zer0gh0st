@@ -34,7 +34,7 @@ jobs:
             echo "- **Par** : @${{ github.event.sender.login }}"
             echo "- **Quand** : $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
           } >> "$GITHUB_STEP_SUMMARY"
-          echo "Starrer : ${{ github.event.sender.login }}" >> "$GITHUB_OUTPUT"
+          echo "starrer=${{ github.event.sender.login }}" >> "$GITHUB_OUTPUT"
         id: star
 
       - name: Compteur (étoiles)
