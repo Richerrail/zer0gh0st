@@ -2767,10 +2767,10 @@ fn cmd_vote_login(ui_tx: &UnboundedSender<UiEvent>) {
         // (et on ne peut pas lire le clavier depuis la TUI : mode raw).
         let pass_env = std::env::var("ZER0_VAULT_PASSPHRASE").unwrap_or_default();
         if pass_env.is_empty() && !crate::vault::is_unlocked() {
-            let _ = ui.send(UiEvent::Info(
-                "Pas de coffre disponible : la connexion GitHub ne peut pas etre stockee.\n\nLance `zer0 vault setup` puis `zer0 vote login` dans un terminal normal :\nle jeton sera range chiffre, et les votes deviendront automatiques."
-                    .to_string(),
-            ));
+            let _ = ui.send(UiEvent::Info(format!(
+                "Pas de coffre disponible : la connexion GitHub ne peut pas etre stockee.\n\nLance `{cmd} vault setup` puis `{cmd} vote login` dans un terminal normal :\nle jeton sera range chiffre, et les votes deviendront automatiques.",
+                cmd = crate::vote::self_cmd(),
+            )));
             return;
         }
 
@@ -2795,7 +2795,8 @@ fn cmd_vote_login(ui_tx: &UnboundedSender<UiEvent>) {
                     let _ = ui.send(UiEvent::Info(format!(
                         "Jeton obtenu mais non stocke dans le coffre : {e}\n\nIl est copie dans le presse-papier : colle-le dans\n\
 ~/.config/zer0/config.toml  →  [keys]  github = \"…\"\n\
-(ou relance `zer0 vote login` dans un terminal normal)."
+(ou relance `{cmd} vote login` dans un terminal normal).",
+                        cmd = crate::vote::self_cmd(),
                     )));
                 }
             },

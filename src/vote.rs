@@ -147,22 +147,35 @@ pub fn invitation_pour(deja_vue: bool, rappels: u32, connecte: bool) -> Invitati
 /// - **deja connecte** -> rien (le vote est deja automatique) ;
 /// - **rappels epuises** -> plus d'invitation, seulement un rappel discret.
 ///
+/// Commande à taper pour réutiliser **ce** binaire.
+///
+/// Le nom « zer0 » codé en dur pouvait désigner un autre programme (chez
+/// moi, `zer0` est une ancienne appli Python sans commande `vote`) : on
+/// affiche donc le chemin réel de l'exécutant en cours — toujours
+/// copiable et toujours juste.
+pub fn self_cmd() -> String {
+    std::env::current_exe()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| "zer0".to_string())
+}
+
 /// `None` = rien a dire (l'utilisateur est deja connecte).
 pub fn invitation_startup() -> Option<String> {
     let connecte = token().is_some();
+    let cmd = self_cmd();
     match invitation_pour(invitation_deja_vue(), rappels_effectues(), connecte) {
         Invitation::Rien => None,
         Invitation::Claire => Some(
-            "🤖 Tu peux voter pour zer0gh0st (le 👍 en bas a droite = une star GitHub) :\n\n
-Lance `zer0 vote login` : GitHub affiche un code, tu le valides dans ton\n
-navigateur, et le jeton est range chiffre chez toi ; ensuite les 👍 votent\n
+            format!(
+                "🤖 Tu peux voter pour zer0gh0st (le 👍 en bas a droite = une star GitHub) :\n\n\
+Lance `{cmd} vote login` : GitHub affiche un code, tu le valides dans ton\n\
+navigateur, et le jeton est range chiffre chez toi ; ensuite les 👍 votent\n\
 directement, sans plus jamais de manipulation."
-                .to_string(),
+            ),
         ),
-        Invitation::Rappel => Some(
-            "🤖 Vote : `zer0 vote login` connecte ton compte GitHub (une fois) — le 👍 devient alors une vraie star."
-                .to_string(),
-        ),
+        Invitation::Rappel => Some(format!(
+            "🤖 Vote : `{cmd} vote login` connecte ton compte GitHub (une fois) — le 👍 devient alors une vraie star."
+        )),
     }
 }
 
@@ -177,7 +190,7 @@ pub fn parse_count(body: &str) -> Option<u64> {
 /// C'est un **identifiant public** : GitHub l'affiche publiquement sur la page
 /// de l'application, et le device flow n'a besoin d'aucun `client_secret`.
 /// Il permet à tout utilisateur de connecter son compte en un clic
-/// (`zer0 vote login`) sans rien configurer.
+/// (`{cmd} vote login`) sans rien configurer.
 pub const DEFAULT_CLIENT_ID: &str = "Ov23lioyZzAN5wtt0j0o";
 
 /// Client ID de l'application OAuth du projet (device flow).
@@ -620,7 +633,7 @@ mod tests {
 
     #[test]
     fn default_client_id_is_embedded() {
-        // Sans client_id, `zer0 vote login` est impossible : le device flow
+        // Sans client_id, `{cmd} vote login` est impossible : le device flow
         // est le seul moyen d'obtenir un jeton sans configuration.
         assert!(!DEFAULT_CLIENT_ID.is_empty());
         assert_eq!(client_id().as_deref(), Some(DEFAULT_CLIENT_ID));
