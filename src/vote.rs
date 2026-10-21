@@ -154,6 +154,13 @@ pub fn invitation_pour(deja_vue: bool, rappels: u32, connecte: bool) -> Invitati
 /// affiche donc le chemin réel de l'exécutant en cours — toujours
 /// copiable et toujours juste.
 pub fn self_cmd() -> String {
+    // Le lanceur (ex. « zer0gh0st ») indique son nom → les messages le citent.
+    if let Ok(v) = std::env::var("ZER0_CMD_NAME") {
+        let v = v.trim();
+        if !v.is_empty() {
+            return v.to_string();
+        }
+    }
     std::env::current_exe()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| "zer0".to_string())
@@ -619,6 +626,18 @@ mod tests {
             stargazers_url(),
             "https://github.com/Richerrail/zer0gh0st/stargazers"
         );
+    }
+
+    #[test]
+    fn self_cmd_prefers_the_launcher_name() {
+        // Le lanceur (ex. « zer0gh0st ») indique son nom → les messages le citent.
+        unsafe { std::env::set_var("ZER0_CMD_NAME", "zer0gh0st") };
+        assert_eq!(self_cmd(), "zer0gh0st");
+        // Valeur vide → on retombe sur le chemin réel de l'exécutant.
+        unsafe { std::env::set_var("ZER0_CMD_NAME", "   ") };
+        let s = self_cmd();
+        assert!(s.contains("zer0") || s.contains("ZER0"), "{s}");
+        unsafe { std::env::remove_var("ZER0_CMD_NAME") };
     }
 
     #[test]
