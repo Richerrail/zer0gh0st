@@ -1,0 +1,45 @@
+# Étoile → trace visible + mesure de conversion.
+#
+# But : on ne peut pas *exiger* une étoile pour cloner — un clone anonyme
+# n'a pas d'identité, il n'y a donc rien à exiger. On peut en revanche
+# **mesurer** ce que devient le trafic : chaque étoile est un clone
+# « converti ».
+#
+# Événement : `watch` = quelqu'un met une étoile sur le dépôt
+# (l'événement `star` de GitHub ne concerne que les issues).
+#
+# Ce workflow est volontairement minimal et sans permission particulière :
+# il journalise chaque nouvelle étoile. Tu peux ensuite l'étendre (ouvrir
+# une discussion, notifier,…) si tu le trouves utile.
+
+name: ⭐ Étoile
+
+on:
+  watch:
+    types: [started]
+
+permissions:
+  contents: read
+
+jobs:
+  star:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Journaliser l'étoile
+        run: |
+          echo "⭐ ${{ github.event.sender.login }} a mis une étoile." >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "### ⭐ Nouvelle étoile"
+            echo ""
+            echo "- **Par** : @${{ github.event.sender.login }}"
+            echo "- **Quand** : $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "starrer=${{ github.event.sender.login }}" >> "$GITHUB_OUTPUT"
+        id: star
+
+      - name: Compteur (étoiles)
+        run: |
+          total=$(gh api repos/${{ github.repository }}/stargazers --jq '. | length' 2>/dev/null || echo "?")
+          echo "Total étoiles : $total" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          GH_TOKEN: ${{ github.token }}
