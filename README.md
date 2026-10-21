@@ -2,7 +2,7 @@
 
 > **Un agent IA qui vit dans ton terminal.** Rust · TUI · local ou cloud · aucune clé requise.
 
-<img src="./logo.svg" alt="ZER0│GH0ST" width="520">
+<img src="./logo.png" alt="ZER0│GH0ST" width="520">
 
 ![ZER0│GH0ST](./zer0-ghost.png)
 
