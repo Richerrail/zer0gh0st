@@ -62,13 +62,18 @@ pub fn shell_command(script: &str) -> Command {
 /// shell, qui peuvent ré-exporter des variables — ne mettez pas de clés dans
 /// `~/.bashrc`. Le découpage fort reste `zer0-gw` (voir SAFETY.md §7).
 pub fn scrub_secrets(cmd: &mut Command) {
-    for (name, _) in std::env::vars_os() {
-        if let Some(name) = name.to_str() {
-            if is_secret_like(name) {
-                cmd.env_remove(name);
-            }
-        }
+    for name in secret_names(std::env::vars_os().filter_map(|(k, _)| {
+        k.to_str().map(str::to_string)
+    })) {
+        cmd.env_remove(name);
     }
+}
+
+/// Noms de variables « à secret » dans une liste donnée (fonction **pure** :
+/// les tests peuvent la tester sans muter l'environnement, ce qui serait une
+/// course — les tests Rust tournent en parallèle).
+pub fn secret_names<I: IntoIterator<Item = String>>(names: I) -> Vec<String> {
+    names.into_iter().filter(|n| is_secret_like(n)).collect()
 }
 
 /// `true` si le nom de variable ressemble à un secret (comparaison insensible
@@ -296,20 +301,12 @@ mod tests {
 
     #[test]
     fn scrub_removes_secrets_keeps_rest() {
-        unsafe { std::env::set_var("TEST_SECRET_TOKEN", "x") };
-        unsafe { std::env::set_var("TEST_PLAIN_VAR", "y") };
-        let mut cmd = Command::new("true");
-        scrub_secrets(&mut cmd);
-        // env_remove est enregistré : on vérifie via get_envs (API stable depuis 1.57)
-        let removed = cmd
-            .get_envs()
-            .any(|(k, _)| k == std::ffi::OsStr::new("TEST_SECRET_TOKEN"));
-        let kept = cmd
-            .get_envs()
-            .any(|(k, _)| k == std::ffi::OsStr::new("TEST_PLAIN_VAR"));
-        assert!(removed, "TEST_SECRET_TOKEN devait être retiré");
-        assert!(!kept, "TEST_PLAIN_VAR ne devait pas être touché");
-        unsafe { std::env::remove_var("TEST_SECRET_TOKEN") };
-        unsafe { std::env::remove_var("TEST_PLAIN_VAR") };
+        // Test sur la fonction **pure** : pas de mutation d'environnement
+        // (les tests tournent en parallèle → la CI devenait instable).
+        let names = secret_names(
+            ["TEST_SECRET_TOKEN".to_string(), "TEST_PLAIN_VAR".to_string()],
+        );
+        assert_eq!(names, vec!["TEST_SECRET_TOKEN".to_string()]);
+        assert!(!names.contains(&"TEST_PLAIN_VAR".to_string()));
     }
 }

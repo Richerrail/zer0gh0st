@@ -154,16 +154,23 @@ pub fn invitation_pour(deja_vue: bool, rappels: u32, connecte: bool) -> Invitati
 /// affiche donc le chemin réel de l'exécutant en cours — toujours
 /// copiable et toujours juste.
 pub fn self_cmd() -> String {
-    // Le lanceur (ex. « zer0gh0st ») indique son nom → les messages le citent.
-    if let Ok(v) = std::env::var("ZER0_CMD_NAME") {
+    self_cmd_from(
+        std::env::var("ZER0_CMD_NAME").ok(),
+        std::env::current_exe().ok(),
+    )
+}
+
+/// Version **pure** de `self_cmd` (testable sans toucher à l'environnement :
+/// les tests Rust tournent en parallèle, et muter l'env y est une course).
+pub fn self_cmd_from(env_name: Option<String>, exe: Option<std::path::PathBuf>) -> String {
+    if let Some(v) = env_name {
         let v = v.trim();
         if !v.is_empty() {
             return v.to_string();
         }
     }
-    std::env::current_exe()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|_| "zer0".to_string())
+    exe.map(|p| p.display().to_string())
+        .unwrap_or_else(|| "zer0".to_string())
 }
 
 /// `None` = rien a dire (l'utilisateur est deja connecte).
@@ -207,14 +214,22 @@ pub const DEFAULT_CLIENT_ID: &str = "Ov23lioyZzAN5wtt0j0o";
 /// fourni par `ZER0_GITHUB_CLIENT_ID` ou stocké dans la config ; à défaut on
 /// utilise celui de l'application *Zer0* (constante ci-dessus).
 pub fn client_id() -> Option<String> {
-    if let Ok(v) = std::env::var("ZER0_GITHUB_CLIENT_ID") {
-        if !v.trim().is_empty() {
-            return Some(v.trim().to_string());
+    client_id_from(
+        std::env::var("ZER0_GITHUB_CLIENT_ID").ok(),
+        crate::config::load_global().github_client_id,
+    )
+}
+
+/// Version **pure** de `client_id` (testable sans l'environnement : les tests
+/// tournent en parallèle, muter l'env y serait une course).
+pub fn client_id_from(env: Option<String>, cfg: Option<String>) -> Option<String> {
+    if let Some(v) = env {
+        let v = v.trim();
+        if !v.is_empty() {
+            return Some(v.to_string());
         }
     }
-    crate::config::load_global()
-        .github_client_id
-        .map(|s| s.trim().to_string())
+    cfg.map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .or_else(|| Some(DEFAULT_CLIENT_ID.to_string()))
 }
@@ -729,14 +744,16 @@ mod tests {
 
     #[test]
     fn self_cmd_prefers_the_launcher_name() {
-        // Le lanceur (ex. « zer0gh0st ») indique son nom → les messages le citent.
-        unsafe { std::env::set_var("ZER0_CMD_NAME", "zer0gh0st") };
-        assert_eq!(self_cmd(), "zer0gh0st");
-        // Valeur vide → on retombe sur le chemin réel de l'exécutant.
-        unsafe { std::env::set_var("ZER0_CMD_NAME", "   ") };
-        let s = self_cmd();
-        assert!(s.contains("zer0") || s.contains("ZER0"), "{s}");
-        unsafe { std::env::remove_var("ZER0_CMD_NAME") };
+        // Version **pure** : pas de mutation d'environnement (course en
+        // parallèle → la CI devenait instable).
+        assert_eq!(self_cmd_from(Some("zer0gh0st".into()), None), "zer0gh0st");
+        // Valeur vide → chemin réel de l'exécutant.
+        assert_eq!(
+            self_cmd_from(Some("   ".into()), Some("/usr/local/bin/zer0".into())),
+            "/usr/local/bin/zer0"
+        );
+        // Sans rien : le nom générique.
+        assert_eq!(self_cmd_from(None, None), "zer0");
     }
 
     #[test]
@@ -754,14 +771,22 @@ mod tests {
         // Sans client_id, `{cmd} vote login` est impossible : le device flow
         // est le seul moyen d'obtenir un jeton sans configuration.
         assert!(!DEFAULT_CLIENT_ID.is_empty());
-        // On ne compare PAS à `client_id()` : celle-ci lit la config de
-        // l'utilisateur (son client_id) — le test doit être indépendant de
-        // l'environnement.
-        unsafe { std::env::set_var("ZER0_GITHUB_CLIENT_ID", "TEST_CLIENT_ID") };
-        assert_eq!(client_id().as_deref(), Some("TEST_CLIENT_ID"));
-        unsafe { std::env::remove_var("ZER0_GITHUB_CLIENT_ID") };
-        // Sans variable d'env : config de l'utilisateur, sinon le défaut.
-        assert!(client_id().is_some(), "client_id() ne doit jamais être vide");
+        // Test sur la version **pure** : on ne touche PAS à l'environnement
+        // (les tests tournent en parallèle → muter l'env est une course, et
+        // cela rendait la CI instable).
+        assert_eq!(client_id_from(None, None).as_deref(), Some(DEFAULT_CLIENT_ID));
+        // La variable d'env prime sur la config.
+        assert_eq!(
+            client_id_from(Some("ENV_ID".into()), Some("CFG_ID".into())).as_deref(),
+            Some("ENV_ID")
+        );
+        // Sinon la config, sinon le défaut.
+        assert_eq!(client_id_from(None, Some("CFG_ID".into())).as_deref(), Some("CFG_ID"));
+        // Une valeur vide est ignorée.
+        assert_eq!(
+            client_id_from(Some("  ".into()), Some("CFG_ID".into())).as_deref(),
+            Some("CFG_ID")
+        );
     }
 
     #[test]

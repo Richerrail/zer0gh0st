@@ -105,18 +105,28 @@ struct ProviderCfg {
     allowed_paths: Option<Vec<String>>,
 }
 
+/// Résolution de la clé d'un provider (**pur** : testable sans muter
+/// l'environnement — les tests Rust tournent en parallèle, y muter l'env
+/// serait une course et rendait la CI instable).
+/// Ordre : clé littérale → variable d'environnement.
+fn key_from(literal: Option<&str>, env_value: Option<&str>) -> Option<String> {
+    if let Some(k) = literal.map(str::trim).filter(|k| !k.is_empty()) {
+        return Some(k.to_owned());
+    }
+    env_value
+        .map(|v| v.trim().to_owned())
+        .filter(|v| !v.is_empty())
+}
+
 impl ProviderCfg {
     /// Résout la clé (variable d'env prioritaire dans les faits : `api_key` ne
     /// devrait servir qu'aux tests). Aucune clé n'est jamais journalisée.
     fn key(&self) -> Option<String> {
-        if let Some(k) = self.api_key.as_deref().map(str::trim).filter(|k| !k.is_empty()) {
-            return Some(k.to_owned());
-        }
-        self.api_key_env
+        let env_value = self
+            .api_key_env
             .as_ref()
-            .and_then(|e| std::env::var(e).ok())
-            .map(|v| v.trim().to_owned())
-            .filter(|v| !v.is_empty())
+            .and_then(|e| std::env::var(e).ok());
+        key_from(self.api_key.as_deref(), env_value.as_deref())
     }
 }
 
@@ -695,16 +705,16 @@ mod tests {
 
     #[test]
     fn key_from_env_and_blank_ignored() {
-        let mut p = pcfg("https://x.example", None);
-        p.api_key = Some("  ".to_owned());
-        assert_eq!(p.key(), None);
-        p.api_key = Some("sk-test".to_owned());
-        assert_eq!(p.key(), Some("sk-test".to_owned()));
-        unsafe { std::env::set_var("ZGW_TEST_KEY", "sk-env") };
-        p.api_key = None;
-        p.api_key_env = Some("ZGW_TEST_KEY".to_owned());
-        assert_eq!(p.key(), Some("sk-env".to_owned()));
-        unsafe { std::env::remove_var("ZGW_TEST_KEY") };
+        // Fonction **pure** : pas de mutation d'environnement (course en
+        // parallèle → la CI devenait instable).
+        // Littéral vide → ignoré.
+        assert_eq!(key_from(Some("  "), None), None);
+        // Littéral → il prime.
+        assert_eq!(key_from(Some("sk-test"), Some("sk-env")), Some("sk-test".to_owned()));
+        // Sinon la variable d'environnement.
+        assert_eq!(key_from(None, Some("sk-env")), Some("sk-env".to_owned()));
+        // Variable vide → ignorée.
+        assert_eq!(key_from(None, Some("  ")), None);
     }
 
     #[test]

@@ -51,11 +51,18 @@ pub fn available() -> bool {
 }
 
 /// Requête HTTP/1.1 minimale sur loopback. Retourne `(status, corps)`.
-fn http_req(method: &str, path: &str, body: Option<&str>) -> Result<(u16, String), String> {
-    let base = gw_base();
+/// Hôte loopback extrait d'une URL de passerelle (**pur** : testable sans
+/// muter l'environnement — les tests tournent en parallèle).
+fn loopback_host(base: &str) -> Result<&str, String> {
     let rest = base
         .strip_prefix("http://")
         .ok_or_else(|| format!("ZER0_GW_URL doit être http:// (loopback) : {base}"))?;
+    Ok(rest.trim_end_matches('/'))
+}
+
+fn http_req(method: &str, path: &str, body: Option<&str>) -> Result<(u16, String), String> {
+    let base = gw_base();
+    let rest = loopback_host(&base)?;
     let host = rest.trim_end_matches('/');
     let addr = host
         .to_socket_addrs()
@@ -202,10 +209,10 @@ mod tests {
 
     #[test]
     fn gw_url_rejects_non_loopback_scheme() {
-        // Pas de réseau ici : on valide seulement le refus de scheme non-http.
-        unsafe { std::env::set_var("ZER0_GW_URL", "https://evil.example") };
-        let err = http_req("GET", "/health", None).err().unwrap();
-        unsafe { std::env::remove_var("ZER0_GW_URL") };
+        // Fonction **pure** : pas de mutation d'environnement (course en
+        // parallèle → CI instable).
+        let err = loopback_host("https://evil.example").err().unwrap();
         assert!(err.contains("http://"));
+        assert!(loopback_host("http://127.0.0.1:8787").is_ok());
     }
 }
