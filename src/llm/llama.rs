@@ -275,6 +275,12 @@ impl ApiClient {
                             .and_then(|h| h.to_str().ok())
                             .and_then(|s| s.parse::<u64>().ok())
                             .unwrap_or(2u64.pow(3 - retries2));
+                        // Limites éventuelles dans les en-têtes (avant le corps).
+                        crate::quota::record_limits(
+                            &quota_label,
+                            crate::quota::header_u64(resp2.headers(), crate::quota::LIMIT_HEADERS),
+                            crate::quota::header_u64(resp2.headers(), crate::quota::REMAIN_HEADERS),
+                        );
                         let text = resp2.text().await.unwrap_or_default();
                         crate::quota::record_rate_limited(&quota_label, &text);
                         if retries2 == 0 { break; }
@@ -287,6 +293,11 @@ impl ApiClient {
                     }
                     Ok(resp2) if resp2.status().is_success() => {
                         crate::quota::record_success(&quota_label);
+                        crate::quota::record_limits(
+                            &quota_label,
+                            crate::quota::header_u64(resp2.headers(), crate::quota::LIMIT_HEADERS),
+                            crate::quota::header_u64(resp2.headers(), crate::quota::REMAIN_HEADERS),
+                        );
                         if let Ok(v) = resp2.json::<serde_json::Value>().await {
                             if let Some(msg) = v["choices"].get(0).and_then(|ch| ch.get("message")) {
                                 let c = msg

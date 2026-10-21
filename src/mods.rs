@@ -44,6 +44,6 @@ pub fn launch_streaming() -> Result<String> {
 pub fn launch_retro() -> Result<String> {
     let html = mod_path("Zer0-Retr0/index.html");
     require(&html)?;
-    crate::platform::open(&html.to_string_lossy())?;
+    crate::platform::open_file(&html.to_string_lossy())?;
     Ok(format!("🕹️ retro ouvert — {}", html.display()))
 }

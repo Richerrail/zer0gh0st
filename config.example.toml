@@ -71,3 +71,26 @@
 # [custom.gw-local]
 # name     = "llama-server (loopback direct)"
 # base_url = "http://127.0.0.1:8787/local/v1"
+
+# ── Vote 👍/👎 (star GitHub) ────────────────────────────────
+# Pour que le pouce haut pose une VRAIE star (1 upvote = 1 star),
+# il faut un jeton GitHub. Trois possibilités :
+#
+# 1) Connexion interactive (recommandé) : `zer0 vote login`
+#    → device flow OAuth : GitHub affiche un code, tu le valides dans
+#      ton navigateur, le jeton est rangé CHIFFRÉ dans le coffre.
+#    → les votes suivants sont automatiques, sans rien demander.
+#
+# 2) Variable d'environnement (pratique en CI) :
+#      export ZER0_GITHUB_TOKEN=ghp_xxx
+#
+# 3) Ici même (en clair : préfère le coffre !) :
+#      [keys]
+#      github = "ghp_xxx"
+#
+# `client_id` de l'application OAuth (device flow). PUBLIC : ce n'est
+# pas un secret, seul le client_secret serait confidentiel (et il n'est
+# pas nécessaire ici). Alternative : ZER0_GITHUB_CLIENT_ID.
+# Par défaut, l'application « Zer0 » est utilisée (client_id ci-dessous) :
+# `zer0 vote login` fonctionne donc out of the box, sans configuration.
+# github_client_id = "Ov23lioyZzAN5wtt0j0o"

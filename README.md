@@ -33,14 +33,15 @@ le **shell** est ton terminal Unix, le **ghost** est l'IA dedans.
 6. [Usage & exemples](#6-usage--exemples)
 7. [Commandes](#7-commandes)
 8. [Zero-chan (voix)](#8-zero-chan-voix)
-9. [Configuration](#9-configuration)
-10. [Modules fun](#10-modules-fun)
-11. [Limites connues](#11-limites-connues)
-12. [Documentation](#12-documentation)
-13. [Contribuer](#13-contribuer)
-14. [Crédits](#14-crédits)
-15. [Soutenez le projet](#soutenez-le-projet)
-16. [Licence](#16-licence)
+9. [Vote (👍 / 👎)](#8bis-vote-👍-)
+10. [Configuration](#9-configuration)
+11. [Modules fun](#10-modules-fun)
+12. [Limites connues](#11-limites-connues)
+13. [Documentation](#12-documentation)
+14. [Contribuer](#13-contribuer)
+15. [Crédits](#14-crédits)
+16. [Soutenez le projet](#soutenez-le-projet)
+17. [Licence](#16-licence)
 
 ---
 
@@ -140,6 +141,7 @@ Détail complet du modèle de menace : [`SAFETY.md`](./SAFETY.md).
 | **Tâches** | liste Markdown `.zer0/tasks.md`, `claim/done`, boucle `/work` par sous-agent ; **porte d'honnêteté** : `done` refusé si un livrable mentionné est absent ou vide |
 | **Sous-agents** | `/ask`, `/review`, `/jev` en contexte isolé |
 | **Outils** | `code_exec`, `text_editor`, `web_search`, `memory_*`, `task_*` |
+| **Vote** | **👍 / 👎 en bas à droite de l'écran principal** (cliquables) : le pouce haut = **une star GitHub** sur [Richerrail/zer0gh0st](https://github.com/Richerrail/zer0gh0st), le bas retire la star. `/vote` ou `zer0 vote up\|down\|status\|login\|logout`. Compteur réel lu sur l'API GitHub. Connexion GitHub par device flow OAuth (`vote login`) → votes ensuite automatiques. |
 | **Divers** | `/vault`, `/pdf`, personas `/whoami`, recherche `/search` |
 
 ---
@@ -337,12 +339,12 @@ Zer0 agit : tu décris un but, il appelle les outils nécessaires.
 
 ## 7. Commandes
 
-**TUI** (extrait) : `/help` `/think` `/provider` `/model` `/models` `/quota` `/ctx` `/free` `/select` `/route` `/telegram` `/tg`
+**TUI** (extrait) : `/help` `/think` `/provider` `/model` `/models` `/quota` `/vote` `/ctx` `/free` `/select` `/route` `/telegram` `/tg`
 `/role` `/project` `/memory` `/recall` `/compact` `/task` `/work` `/ask` `/review` `/search`
 `/stop` `/context` `/whoami` `/vault` `/pdf` `/jev` `/kb` `/new` `/history` `/radio` `/bintime`
 `/pong` `/kristal` `/streaming` `/retro` `/panel` `/clear` `/quit` `/img` `/update` `/embeddings`.
 
-**CLI** : `zer0 provider|models|model|select|route|role|project|memory|embeddings|task|search|whoami|vault|pdf|jev|bintime|pong|kb|update`.
+**CLI** : `zer0 provider|models|model|select|route|role|project|memory|embeddings|task|search|whoami|vault|pdf|jev|bintime|pong|kb|update|quota|vote|0box` — alias débat : `zer0box "<sujet>"` (binaire-lien ou `scripts/zer0box.cmd` depuis les sources).
 
 Détails : `zer0 --help`, ou les `ROADMAP*.md`.
 
@@ -364,13 +366,67 @@ Roadmap et détails : [`BRAINSTORM_ZEROCHAN.md`](./BRAINSTORM_ZEROCHAN.md).
 
 ---
 
+## 8bis. Vote (👍 / 👎)
+
+Deux petits pouces **en bas à droite de l'écran principal** (dans le pied de page),
+cliquables à la souris :
+
+- **👍 (upvote) = une star GitHub** sur [Richerrail/zer0gh0st](https://github.com/Richerrail/zer0gh0st).
+- **👎 (downvote) = le retrait de cette star.**
+- Le nombre affiché est le **compteur réel** lu sur l'API GitHub (`stargazers/count`),
+  pas un chiffre décoratif. S'il est inconnu, c'est `?`.
+
+Deux modes, selon le jeton disponible :
+
+| Jeton | Effet du 👍 |
+|---|---|
+| `ZER0_GITHUB_TOKEN` / `GITHUB_TOKEN` / `GH_TOKEN`, ou clé `github` dans la config / le coffre | **star posée via l'API** (`PUT /user/starred/...`) — 1 upvote = 1 star, automatiquement |
+| aucun | la **page du dépôt s'ouvre** dans le navigateur : clique sur « ★ Star » |
+
+> Le jeton n'est **jamais stocké** par Zer0 : il est lu dans l'environnement, le coffre
+> chiffré ou `config.toml` (comme les autres clés). Le vote est aussi accessible sans
+> souris : `/vote up`, `/vote down`, `/vote status`, ou `zer0 vote up|down|status`.
+
+### Se connecter à GitHub (une fois)
+
+Pour que le 👍 pose une vraie star sans intervention, il faut un jeton GitHub.
+Zer0 l'obtient via le **device flow OAuth** :
+
+```bash
+zer0 vote login        # ou /vote login dans la TUI
+# → ouvre https://github.com/login/device : colle le code affiché
+```
+
+Au **premier lancement**, zer0 te propose cette connexion dans la fenêtre
+principale (et y glisse un rappel discret les fois suivantes). Sans jeton, le 👍
+ouvre simplement la page du dépôt : pour une vraie star, connecte ton compte.
+
+Le jeton est rangé **chiffré dans le coffre** (créé automatiquement au premier
+`vote login`) : les votes suivants sont automatiques. Depuis la TUI, le coffre
+doit déjà exister — le premier `vote login` se fait en CLI (une passphrase ne
+saisit pas en mode raw). L'application OAuth **Zer0** est préconfigurée : `zer0 vote login` fonctionne
+donc out of the box, sans rien configurer. (Le `client_id` est public — c'est un
+identifiant, pas un secret — et le device flow n'a besoin d'aucun
+`client_secret`. Pour pointer une autre application :
+`ZER0_GITHUB_CLIENT_ID` ou `github_client_id` dans `config.toml`.)
+
+```bash
+zer0 vote logout       # retire le jeton du coffre
+```
+
+Le jeton est aussi cherché dans l'environnement
+(`ZER0_GITHUB_TOKEN` / `GITHUB_TOKEN` / `GH_TOKEN`) et dans `config.toml`
+(`[keys] github`) — pratique pour la CI.
+
+---
+
 ## 9. Configuration
 
 | Chemin | Rôle |
 |---|---|
 | `~/.config/zer0/config.toml` | **réglages** (provider/modèle, routes, rôles) — **aucun secret** (chmod 600) — modèle : [`config.example.toml`](./config.example.toml) |
 | `~/.config/zer0/telegram.env` | token du bot Telegram (chmod 600) |
-| `~/.config/zer0/vault.enc` | coffre **optionnel** de clés (Argon2 + ChaCha20-Poly1305) |
+| `~/.config/zer0/vault.enc`<br>(Windows : `%APPDATA%\zer0\config\vault.enc`) | coffre **optionnel** de clés (Argon2 + ChaCha20-Poly1305) |
 | `/etc/zer0-gw/gw.toml` | **passerelle** : upstreams + chemins autorisés (user `zer0-gw`) |
 | `/etc/zer0-gw/keys.managed` | clés déposées via `/provider add` (0600, jamais lisibles par l'agent) |
 | `/etc/zer0-gw/keys.env` | clés « style variable d'env » (injectées par systemd) |

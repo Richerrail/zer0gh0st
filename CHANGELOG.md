@@ -1,3 +1,88 @@
+## Non publié — vote 👍/👎 (star GitHub)
+
+- **Nouveau module `vote.rs`** : deux petits pouces **en bas à droite de l'écran
+  principal** (pied de page, clicables à la souris) — le **pouce haut = une star
+  GitHub** sur `Richerrail/zer0gh0st`, le **pouce bas = le retrait de cette star**.
+- **1 upvote = 1 star, vraiment** : avec un jeton GitHub (`ZER0_GITHUB_TOKEN`,
+  `GITHUB_TOKEN`, `GH_TOKEN`, ou clé `github` dans la config / le coffre), la star
+  est posée via l'API GitHub (`PUT /user/starred/{owner}/{repo}`) — pas un simple
+  lien. **Sans jeton**, la page du dépôt s'ouvre dans le navigateur, là où se
+  trouve le bouton « ★ Star » (le message dit explicitement ce qui s'est passé :
+  rien n'est simulé).
+- **Le compteur affiché est réel** : lu sur l'API publique
+  (`GET /repos/{owner}/{repo}/stargazers/count`). Inconnu → `?`, jamais un chiffre
+  inventé.
+- **CLI** : `zer0 vote up|down|status` · **TUI** : `/vote [up|down|status]`, plus
+  les clics sur les pouces. Le vote est aussi dans la palette `/` et dans l'aide.
+- **Invitation à la connexion GitHub** : au **premier lancement**, la fenêtre
+  principale propose `zer0 vote login` (device flow OAuth : un code à valider
+  dans le navigateur, une fois pour toutes). Les lancements suivants se
+  contentent d'un **rappel discret** d'une ligne. Le compteur vit dans la
+  config (`github_prompted`, `github_prompt_count`) : l'utilisateur n'est ni
+  harcelé, ni relancé à chaque démarrage.
+- Tests : parsing du compteur, URLs, et un test de rendu (les deux pouces sont
+  bien cliquables, ordonnés et alignés à droite).
+
+### Correctif : le menu et les boutons de vote ne répondaient plus aux clics
+
+- **Cause racine (mesurée)** : ouvrir un navigateur via `cmd /C start` — l'ancien
+  `platform::open()` sous Windows — **hérite de la console** du TUI et lui
+  **reprend le mode « capture souris »** de la console à sa sortie. Après un
+  simple clic sur le 👍, le terminal ne recevait **plus aucun événement souris** :
+  ni les pouces, ni le menu « Commandes ». Mesuré : `mouse=true` avant →
+  `mouse=false` après `cmd /C start`.
+- **Correctif** : `platform::open_url()` passe désormais par
+  `rundll32 url.dll,FileProtocolHandler` (aucune console annexe) et détache les
+  flux stdio ; `platform::restore_mouse_capture()` **réarme** mode brut + capture
+  souris après l'ouverture. Mesuré : `mouse=true` après `rundll32`.
+- **`open_file()` (le mod `/retro`) corrigé aussi** : il utilisait encore
+  `cmd /C start`, qui réinvoquait le même problème. Il reçoit maintenant
+  `CREATE_NO_WINDOW` : mesuré, `cmd /C start` **sans** ce drapeau perd la capture
+  souris, **avec** il la conserve.
+- **Multiplateforme** : `open_url()` / `open_file()` couvrent Linux
+  (`xdg-open`, repli `gio`), macOS (`open`) et Windows (`rundll32` pour les URL,
+  `cmd /C start` + `CREATE_NO_WINDOW` pour les fichiers) ; stdio détaché partout
+  pour qu'un enfant ne corrompt pas l'affichage du TUI.
+  `restore_mouse_capture()` est défini pour les 3 systèmes (le mode souris est
+  porté par la console sous Windows, par les séquences ANSI ailleurs).
+- **Ordre de routage des clics** : le menu passe désormais **en premier** (ses
+  zones sont des lignes entières et ne croisent pas les pouces), puis les pouces,
+  puis 0chan/mic, et enfin la sélection de texte.
+- **Zones des pouces élargies d'une cellule** : un emoji occupe 1 ou 2 cellules
+  selon le terminal, un clic « à côté » doit compter.
+- Test de régression : `tui::tests::clicks_reach_menu_and_vote_buttons`.
+
+### Deux pièges de l'API GitHub rencontrés et corrigés
+
+- l'API **exige un en-tête `User-Agent`** → sans lui, `403 Request forbidden by
+  administrative rules` (le compteur restait invisible) ;
+- GitHub **met cet endpoint en cache 60 s** (CDN) et **propage le compteur en
+  ~1 min** → on demande `Cache-Control: no-cache` et le message de vote annonce
+  le délai, pour ne pas afficher un compte faux.
+
+### Connexion GitHub automatique (device flow OAuth)
+
+- `zer0 vote login` (ou `/vote login`) : GitHub affiche un code, l'utilisateur
+  le valide dans son navigateur, le jeton est rangé **chiffré dans le coffre**
+  (`vault::put("github", …)`). Ensuite, chaque 👍 est une vraie star, sans rien
+  demander à l'utilisateur.
+- L'application OAuth **Zer0** est **préconfigurée** (`client_id` embarqué) :
+  `zer0 vote login` fonctionne out of the box, sans configuration. Le `client_id`
+  est **public** (ce n'est pas un secret) ; le `client_secret` n'est **jamais**
+  nécessaire (device flow). Pour pointer une autre application :
+  `ZER0_GITHUB_CLIENT_ID` ou `github_client_id` dans `config.toml`.
+- Le jeton est cherché dans cet ordre : `ZER0_GITHUB_TOKEN` → `GITHUB_TOKEN` →
+  `GH_TOKEN` → coffre → `config.toml` (`[keys] github`). Rien n'est stocké en
+  clair par Zer0 si le coffre est utilisé.
+- `zer0 vote logout` retire le jeton du coffre.
+- **Le coffre se crée tout seul** au premier `vote login` (il n'existait pas
+  forcément) et `zer0 vault setup` accepte une config sans clé API (le coffre
+  peut ne contenir que le jeton GitHub).
+- **Le jeton n'est jamais perdu** : si l'écriture chiffrée échoue, il est copié
+  dans le presse-papier et la façon de le stocker est expliquée. Depuis la TUI,
+  le coffre doit être initialisé en CLI (`zer0 vault setup`) : on ne peut pas
+  saisir une passphrase en mode raw.
+
 ## v0.5.7 — Catalogue d'APIs, fichiers communities (2026-10-20)
 
 - **`/apis <besoin>`** : catalogue de **2 000+ APIs publiques** (source
@@ -78,6 +163,19 @@ Points saillants :
   échouaient en **401 « clé absente »**. `config::endpoint_for()` est désormais
   le point unique : passerelle si elle tourne (clé jamais dans l'agent), sinon
   direct.
+
+- **Suivi d'usage des modèles** (`/quota`, `zer0 quota [--provider id]`) :
+  - **format chiffré** : `0/50 (0 %) restant`, `47/50 (94 %)`, etc. — à partir des
+    limites révélées par le fournisseur (corps des 429 OpenRouter, en-têtes
+    `X-RateLimit-*` quand un provider les envoie) ;
+  - **solde de clé en direct** : OpenRouter `/auth/key` interrogeable à la
+    demande (usage total/journalier/mensuel, crédit restant en $ et %) ;
+  - **Cline ne publie rien** (404 sur tous les endpoints d'usage testés) : seuls
+    les appels observés et 429 y sont comptés — dit explicitement.
+
+- **Alias débat `zer0box`** : `zer0box "<sujet>"` == `zer0 0box "<sujet>"` — via
+  `visible_alias` clap et détection du nom du binaire (lien dur/copie nommé
+  `zer0box.exe`), ou `scripts/zer0box.cmd` depuis les sources.
 
 - **0box testable de bout en bout + corrections issues du run réel** (0BOX-TEST
   complet via le module 0box uniquement) :

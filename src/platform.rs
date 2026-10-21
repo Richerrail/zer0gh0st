@@ -3,7 +3,7 @@
 //! Linux reste la cible principale ; macOS et Windows passent par des replis
 //! (shell, presse-papier, ouverture de fichiers, enregistreur micro).
 
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 /// `true` si `cmd` est trouvé dans le PATH (gère `.exe`/`.cmd` sur Windows).
 pub fn has(cmd: &str) -> bool {
@@ -108,16 +108,127 @@ pub fn image_data_url(path: &str) -> Result<(String, usize), String> {
     Ok((format!("data:{mime};base64,{b64}"), bytes.len()))
 }
 
-/// Ouvre un fichier/URL dans l'application par défaut.
-pub fn open(path: &str) -> std::io::Result<std::process::Child> {
+/// Ouvre une **URL** dans le navigateur par défaut.
+///
+/// **Windows** : on passe par `rundll32 url.dll,FileProtocolHandler` plutôt
+/// que par `cmd /C start`. Raison : `cmd` **hérite de la console** du TUI —
+/// or c'est le mode de la console qui porte la **capture souris** de crossterm.
+/// Un `cmd` enfant reprenait ce mode à sa sortie : après un simple clic sur le
+/// 👍, le terminal ne recevait **plus aucun événement souris** (menu compris).
+/// Mesuré : `mouse=true` avant → `mouse=false` après `cmd /C start`.
+/// `rundll32` n'ouvre aucune console annexe : le terminal garde la main.
+///
+/// Dans tous les cas, les flux stdio sont détachés (`Stdio::null()`) : un
+/// enfant qui écrit dans le stdout du TUI casserait l'affichage.
+pub fn open_url(url: &str) -> std::io::Result<std::process::Child> {
+    if cfg!(target_os = "macos") {
+        Command::new("open")
+            .arg(url)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+    } else if cfg!(windows) {
+        Command::new("rundll32")
+            .arg("url.dll,FileProtocolHandler")
+            .arg(url)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+    } else if has("xdg-open") {
+        Command::new("xdg-open")
+            .arg(url)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+    } else {
+        // `gio open` : repli GNOME (xdg-open absent).
+        Command::new("gio")
+            .args(["open", url])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+    }
+}
+
+/// Ouvre un **fichier local** dans l'application par défaut (ex. `/retro`).
+///
+/// Même principe que [`open_url`], mais le lanceur doit gérer un chemin de
+/// fichier : sous Windows, `cmd /C start "" <chemin>` est le lanceur fiable.
+///
+/// **Windows** : on ajoute `CREATE_NO_WINDOW` — sans ce drapeau, `cmd`
+/// **hérite de la console** du TUI et lui reprend le mode « capture souris »
+/// (même symptôme que pour les URLs : plus aucun clic n'atteint le TUI).
+/// `CREATE_NO_WINDOW` empêche explicitement cet héritage.
+pub fn open_file(path: &str) -> std::io::Result<std::process::Child> {
     if cfg!(target_os = "macos") {
         Command::new("open").arg(path).spawn()
     } else if cfg!(windows) {
-        Command::new("cmd").args(["/C", "start", "", path]).spawn()
+        // `CommandExt` n'existe que sous Windows : l'import doit être dans le
+        // bloc `cfg(windows)`, sinon la compilation Linux/macOS échoue.
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            let mut c = Command::new("cmd");
+            c.args(["/C", "start", "", path]);
+            c.stdin(Stdio::null());
+            c.creation_flags(CREATE_NO_WINDOW);
+            c.spawn()
+        }
+        #[cfg(not(windows))]
+        {
+            unreachable!("bloc Windows")
+        }
     } else if has("xdg-open") {
-        Command::new("xdg-open").arg(path).spawn()
+        Command::new("xdg-open")
+            .arg(path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
     } else {
-        Command::new("gio").args(["open", path]).spawn()
+        Command::new("gio")
+            .args(["open", path])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+    }
+}
+
+/// Réactive la capture souris du terminal.
+///
+/// Utile après avoir lancé un programme externe : celui-ci a pu hériter du
+/// terminal (console Windows) ou du TTY (Unix) et lui reprendre la main —
+/// auquel cas le TUI ne recevrait plus **aucun** clic.
+///
+/// - **Windows** : la capture souris est portée par le *mode de la console*
+///   (ENABLE_MOUSE_INPUT). Un process enfant qui hérite de la console peut
+///   rendre ce mode au terminal : on le réactive donc explicitement.
+/// - **Linux / macOS** : la capture souris est portée par les séquences ANSI
+///   émises au démarrage (`?1000h`, `?1006h`…). Elles restent actives, mais un
+///   enfant qui a hérité du TTY a pu désorganiser le terminal ; on les
+///   réémet pour être sûr.
+pub fn restore_mouse_capture() {
+    #[cfg(windows)]
+    {
+        use crossterm::event::EnableMouseCapture;
+        use crossterm::terminal::enable_raw_mode;
+        // Mode brut d'abord, puis capture souris : un programme tiers ayant
+        // hérité de la console a pu modifier l'un ou l'autre.
+        let _ = enable_raw_mode();
+        let _ = crossterm::execute!(std::io::stdout(), EnableMouseCapture);
+    }
+    #[cfg(not(windows))]
+    {
+        use crossterm::event::EnableMouseCapture;
+        // Sur Unix, EnableMouseCapture écrit les séquences ANSI de suivi
+        // souris. On les renvoie : inoffensif si elles sont déjà actives.
+        let _ = crossterm::execute!(std::io::stdout(), EnableMouseCapture);
     }
 }
 

@@ -49,6 +49,17 @@ pub struct GlobalConfig {
     /// Modèles de fallback spécifiques pour /0box (ajoutés en tête de chaîne).
     #[serde(default)]
     pub zero_box_fallbacks: Option<Vec<String>>,
+    /// `client_id` de l'application OAuth GitHub (device flow du vote).
+    /// Public par nature : ce n'est pas un secret.
+    #[serde(default)]
+    pub github_client_id: Option<String>,
+    /// Combien de fois zer0 a déjà proposé la connexion GitHub (vote).
+    /// Sert à ne pas harceler : le rappel devient discret après quelques fois.
+    #[serde(default)]
+    pub github_prompt_count: u32,
+    /// L'utilisateur a déjà vu l'invitation de connexion GitHub.
+    #[serde(default)]
+    pub github_prompted: bool,
 }
 
 // `Default` manuel : `roles_enabled` doit valoir `true` sur une config neuve
@@ -69,6 +80,9 @@ impl Default for GlobalConfig {
             telegram_token: None,
             telegram_allow: Vec::new(),
             zero_box_fallbacks: None,
+            github_client_id: None,
+            github_prompt_count: 0,
+            github_prompted: false,
         }
     }
 }
