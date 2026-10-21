@@ -1,4 +1,28 @@
-## Non publié — vote 👍/👎 (star GitHub)
+## v0.5.8 — Vote 👍 (vraie star GitHub), /quota live, correctifs (2026-10-21)
+
+Points saillants :
+
+- **👍 dans la TUI = une vraie étoile GitHub** sur `Richerrail/zer0gh0st`, posée avec le
+  compte de l'utilisateur (OAuth *device flow* : un code à coller, **aucun
+  `client_secret`** dans le code). Sans jeton, la page du dépôt s'ouvre dans le
+  navigateur — **rien n'est simulé**. Compteur d'étoiles réel (API publique, cache 10 min).
+  Le jeton n'est **jamais** stocké en clair : env → **coffre chiffré** (Argon2 +
+  ChaCha20-Poly1305, fichier 0600) ; aucun champ `github_token` dans `config.toml`.
+- **`/quota`** : quotas et crédits OpenRouter en direct.
+- **Correctif capture souris (Windows)** : `cmd /C start` réinheritait le mode console
+  qui porte la capture de la souris de crossterm → après un clic, plus aucun événement
+  souris (menu compris). Mesuré : `mouse=true` → `mouse=false`. Correctif :
+  `rundll32 url.dll,FileProtocolHandler` (aucune console annexe) + stdio détachés.
+- **Les messages nomment le bon binaire** : « `zer0` codé en dur » pouvait désigner un
+  autre programme (une ancienne appli Python, p. ex.) → la commande indiquée était
+  fausse. `ZER0_CMD_NAME` (posé par le lanceur) est prioritaire, sinon le chemin réel
+  de l'exécutant.
+- **Fichiers communities** GitHub (`CONTRIBUTING`, `CODE_OF_CONDUCT`, `SECURITY`,
+  `ACCESSIBILITY`, templates d'issues et de PR) + description et topics du dépôt.
+- Corrige aussi : la base de connaissances partait à `/` pour un binaire installé hors
+  checkout source → désormais dans `~/.local/share/zer0gh0st/`.
+
+### Détail — vote 👍/👎
 
 - **Nouveau module `vote.rs`** : deux petits pouces **en bas à droite de l'écran
   principal** (pied de page, clicables à la souris) — le **pouce haut = une star
