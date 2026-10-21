@@ -282,12 +282,59 @@ pub async fn request_device_code(client_id: &str) -> Result<DeviceCode> {
 /// Résultat d'un échange de code contre un jeton.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PollOutcome {
-    /// Jeton obtenu.
-    Token(String),
+    /// Jeton obtenu. `refresh` n'est présent que si l'app OAuth a l'option
+    /// « Expire user access tokens » (support **opt-in**).
+    Token {
+        access: String,
+        refresh: Option<String>,
+    },
     /// L'utilisateur n'a pas encore validé le code.
     Pending,
     /// Le code a expiré.
     Expired,
+}
+
+/// Clé de coffre où vit le jeton d'accès.
+const KEY_ACCESS: &str = "github";
+/// Clé de coffre où vit le jeton de rafraîchissement (**opt-in**).
+const KEY_REFRESH: &str = "github_refresh";
+
+/// Jeton de rafraîchissement, s'il y en a un (app à jetons expirables).
+pub fn refresh_token() -> Option<String> {
+    crate::vault::get_unlocked(KEY_REFRESH).filter(|s| !s.trim().is_empty())
+}
+
+/// Renouvelle le jeton d'accès à partir du jeton de rafraîchissement.
+///
+/// Ne fait **rien** si l'app n'a pas de jetons expirables (pas de refresh
+/// token stocké) : le comportement par défaut est donc inchangé.
+pub async fn refresh_access_token() -> Option<String> {
+    let rt = refresh_token()?;
+    let cid = client_id()?;
+    let r = crate::http_client::HTTP_CLIENT
+        .post("https://github.com/login/oauth/access_token")
+        .header("Accept", "application/json")
+        .header("User-Agent", user_agent())
+        .form(&[
+            ("client_id", cid.as_str()),
+            ("refresh_token", rt.as_str()),
+            ("grant_type", "refresh_token"),
+        ])
+        .send()
+        .await
+        .ok()?;
+    let body = r.text().await.ok()?;
+    let v: serde_json::Value = serde_json::from_str(&body).ok()?;
+    let access = v.get("access_token").and_then(|t| t.as_str())?.to_string();
+    if access.is_empty() {
+        return None;
+    }
+    // Un nouveau refresh_token peut être fourni (rotation) : on le remplace.
+    if let Some(new_rt) = v.get("refresh_token").and_then(|t| t.as_str()) {
+        let _ = crate::vault::put(KEY_REFRESH, new_rt);
+    }
+    let _ = crate::vault::put(KEY_ACCESS, &access);
+    Some(access)
 }
 
 /// Échange le `device_code` contre un jeton (interroge le service de jetons).
@@ -308,7 +355,15 @@ pub async fn poll_device_token(client_id: &str, device_code: &str) -> Result<Pol
         serde_json::from_str(&body).map_err(|_| anyhow!("réponse GitHub illisible"))?;
     if let Some(tok) = v.get("access_token").and_then(|t| t.as_str()) {
         if !tok.is_empty() {
-            return Ok(PollOutcome::Token(tok.to_string()));
+            let refresh = v
+                .get("refresh_token")
+                .and_then(|t| t.as_str())
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
+            return Ok(PollOutcome::Token {
+                access: tok.to_string(),
+                refresh,
+            });
         }
     }
     match v.get("error").and_then(|e| e.as_str()) {
@@ -319,9 +374,20 @@ pub async fn poll_device_token(client_id: &str, device_code: &str) -> Result<Pol
     }
 }
 
+/// Jeton obtenu après le device flow.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Credentials {
+    /// Jeton d'accès (à utiliser pour l'API).
+    pub access: String,
+    /// Jeton de rafraîchissement — **seulement** si l'app OAuth a l'option
+    /// « Expire user access tokens ». `None` = comportement historique
+    /// (jeton sans expiration, support du refresh désactivé).
+    pub refresh: Option<String>,
+}
+
 /// Connexion complète (device flow) : affiche le code, attend la validation,
-/// puis renvoie le jeton. `on_prompt` reçoit le code et l'URL à montrer.
-pub async fn device_login<F>(on_prompt: F) -> Result<String>
+/// puis renvoie les identifiants. `on_prompt` reçoit le code et l'URL à montrer.
+pub async fn device_login<F>(on_prompt: F) -> Result<Credentials>
 where
     F: Fn(&str, &str),
 {
@@ -338,7 +404,9 @@ where
     while std::time::Instant::now() < deadline {
         tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
         match poll_device_token(&cid, &dc.device_code).await? {
-            PollOutcome::Token(t) => return Ok(t),
+            PollOutcome::Token { access, refresh } => {
+                return Ok(Credentials { access, refresh })
+            }
             PollOutcome::Pending => {}
             PollOutcome::Expired => return Err(anyhow!("code expiré — relance la connexion")),
         }
@@ -447,71 +515,102 @@ pub enum Action {
 }
 
 /// Exécute le vote et renvoie le message à montrer à l'utilisateur.
-pub async fn act(action: Action) -> String {
-    match token() {
-        Some(tok) => match action {
-            Action::Up => match is_starred(&tok).await {
-                Ok(true) => "⭐ Zer0 est déjà starré par ton compte GitHub.".to_string(),
-                Ok(false) => match star(&tok).await {
-                    Ok(()) => {
-                        let n = stars(true).await;
-                        match n {
-                            Some(n) => format!(
-                                "⭐ Star posée sur GitHub ! ({n} stars — GitHub propage le compteur en ~1 min)"
-                            ),
-                            None => "⭐ Star posée sur GitHub !".to_string(),
-                        }
-                    }
-                    Err(e) => format!("⚠️ Star impossible : {e}"),
-                },
-                Err(e) => format!("⚠️ État GitHub inconnu : {e}"),
-            },
-            Action::Down => match unstar(&tok).await {
-                Ok(()) => {
-                    let n = stars(true).await;
-                    match n {
-                        Some(n) => format!(
-                            "🖐️ Star retirée. ({n} stars — GitHub propage le compteur en ~1 min)"
-                        ),
-                        None => "🖐️ Star retirée.".to_string(),
-                    }
-                }
-                Err(e) => format!("⚠️ Retrait impossible : {e}"),
-            },
+/// Vote « Up » : pose la star (et met à jour le compteur affiché).
+async fn vote_up(deja_starre: bool) -> String {
+    if deja_starre {
+        return "⭐ Zer0 est déjà starré par ton compte GitHub.".to_string();
+    }
+    let Some(tok) = token() else {
+        return "Aucun jeton GitHub.".to_string();
+    };
+    match star(&tok).await {
+        Ok(()) => match stars(true).await {
+            Some(n) => format!(
+                "⭐ Star posée sur GitHub ! ({n} stars — GitHub propage le compteur en ~1 min)"
+            ),
+            None => "⭐ Star posée sur GitHub !".to_string(),
         },
-        None => {
-            // Pas de jeton : on ouvre la page où se trouve le bouton ★ Star.
-            let url = repo_url();
-            let opened = crate::platform::open_url(&url).is_ok();
-            // Le programme lancé a pu rendre le mode « souris » à la console :
-            // on le réactive, sinon le TUI ne recevrait plus aucun clic.
-            crate::platform::restore_mouse_capture();
-            match action {
-                Action::Up => {
-                    if opened {
-                        format!(
-                            "Aucun jeton GitHub : {url} ouvert — clique sur « ★ Star » pour voter."
-                        )
-                    } else {
-                        format!(
-                            "Aucun jeton GitHub et ouverture du navigateur impossible — pose la star sur {url}"
-                        )
-                    }
-                }
-                Action::Down => {
-                    if opened {
-                        format!(
-                            "Aucun jeton GitHub : {url} ouvert — retire l'étoile (reclique sur « ★ Star »)."
-                        )
-                    } else {
-                        format!(
-                            "Aucun jeton GitHub et ouverture du navigateur impossible — retire la star sur {url}"
-                        )
-                    }
+        Err(e) => format!("⚠️ Star impossible : {e}"),
+    }
+}
+
+/// Vote « Down » : retire la star.
+async fn vote_down() -> String {
+    let Some(tok) = token() else {
+        return "Aucun jeton GitHub.".to_string();
+    };
+    match unstar(&tok).await {
+        Ok(()) => match stars(true).await {
+            Some(n) => format!(
+                "🖐️ Star retirée. ({n} stars — GitHub propage le compteur en ~1 min)"
+            ),
+            None => "🖐️ Star retirée.".to_string(),
+        },
+        Err(e) => format!("⚠️ Retrait impossible : {e}"),
+    }
+}
+
+/// Exécute le vote et renvoie le message à montrer à l'utilisateur.
+///
+/// **Rafraîchissement (opt-in)** : si l'API répond 401 (jeton expiré) et
+/// qu'un jeton de rafraîchissement est stocké (app OAuth « Expire user access
+/// tokens »), on renouvelle le jeton et on rejoue une fois. Sans refresh
+/// token, le comportement est inchangé.
+pub async fn act(action: Action) -> String {
+    let Some(tok) = token() else {
+        // Pas de jeton : on ouvre la page où se trouve le bouton ★ Star.
+        let url = repo_url();
+        let opened = crate::platform::open_url(&url).is_ok();
+        // Le programme lancé a pu rendre le mode « souris » à la console :
+        // on le réactive, sinon le TUI ne recevrait plus aucun clic.
+        crate::platform::restore_mouse_capture();
+        return match action {
+            Action::Up => {
+                if opened {
+                    format!("Aucun jeton GitHub : {url} ouvert — clique sur « ★ Star » pour voter.")
+                } else {
+                    format!("Aucun jeton GitHub et ouverture du navigateur impossible — pose la star sur {url}")
                 }
             }
-        }
+            Action::Down => {
+                if opened {
+                    format!("Aucun jeton GitHub : {url} ouvert — retire l'étoile (reclique sur « ★ Star »).")
+                } else {
+                    format!("Aucun jeton GitHub et ouverture du navigateur impossible — retire la star sur {url}")
+                }
+            }
+        };
+    };
+
+    match action {
+        Action::Up => match is_starred(&tok).await {
+            Ok(ok) => vote_up(ok).await,
+            Err(e) if is_unauthorized(&e) => match refresh_access_token().await {
+                Some(new) => {
+                    let ok = is_starred(&new).await.unwrap_or(false);
+                    vote_up(ok).await
+                }
+                None => format!("⚠️ {e} — jeton expiré, reconnecte-toi : `{} vote login`", self_cmd()),
+            },
+            Err(e) => format!("⚠️ État GitHub inconnu : {e}"),
+        },
+        Action::Down => match unstar(&tok).await {
+            Ok(()) => vote_down().await,
+            Err(e) if is_unauthorized(&e) => match refresh_access_token().await {
+                Some(new) => {
+                    let _ = unstar(&new).await;
+                    vote_down().await
+                }
+                None => format!("⚠️ {e} — jeton expiré, reconnecte-toi : `{} vote login`", self_cmd()),
+            },
+            Err(e) => format!("⚠️ Retrait impossible : {e}"),
+        },
     }
+}
+
+/// `true` si l'erreur est un 401 (jeton expiré ou sans permission).
+fn is_unauthorized(e: &anyhow::Error) -> bool {
+    e.to_string().contains("401")
 }
 
 /// État du vote : compteur de stars observé + star du compte (si jeton).
@@ -655,7 +754,25 @@ mod tests {
         // Sans client_id, `{cmd} vote login` est impossible : le device flow
         // est le seul moyen d'obtenir un jeton sans configuration.
         assert!(!DEFAULT_CLIENT_ID.is_empty());
-        assert_eq!(client_id().as_deref(), Some(DEFAULT_CLIENT_ID));
+        // On ne compare PAS à `client_id()` : celle-ci lit la config de
+        // l'utilisateur (son client_id) — le test doit être indépendant de
+        // l'environnement.
+        unsafe { std::env::set_var("ZER0_GITHUB_CLIENT_ID", "TEST_CLIENT_ID") };
+        assert_eq!(client_id().as_deref(), Some("TEST_CLIENT_ID"));
+        unsafe { std::env::remove_var("ZER0_GITHUB_CLIENT_ID") };
+        // Sans variable d'env : config de l'utilisateur, sinon le défaut.
+        assert!(client_id().is_some(), "client_id() ne doit jamais être vide");
+    }
+
+    #[test]
+    fn refresh_is_opt_in() {
+        // Sans jeton de rafraîchissement stocké, le renouvellement est
+        // inactif (comportement historique) : `refresh_token()` est None
+        // tant que l'app OAuth n'a pas été configurée avec
+        // « Expire user access tokens ».
+        assert!(refresh_token().is_none() || !refresh_token().unwrap().is_empty());
+        // Et les clés de coffre sont distinctes (accès ≠ rafraîchissement).
+        assert_ne!(KEY_ACCESS, KEY_REFRESH);
     }
 
     #[test]

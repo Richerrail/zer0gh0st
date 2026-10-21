@@ -602,16 +602,27 @@ async fn run_command(cmd: Command) -> Result<()> {
                     // Device flow OAuth : l'utilisateur valide un code dans son
                     // navigateur, une fois. Le jeton est ensuite rangé dans le
                     // coffre → les votes suivants sont automatiques.
-                    let token = crate::vote::device_login(|code, url| {
+                    let creds = crate::vote::device_login(|code, url| {
                         println!("Ouvre {url} et saisis le code : {code}");
                     })
                     .await?;
-                    crate::vault::put("github", &token)?;
-                    println!("✅ Jeton GitHub enregistré dans le coffre.");
+                    crate::vault::put("github", &creds.access)?;
+                    match creds.refresh {
+                        // App à jetons expirables : on garde aussi le refresh
+                        // token (chiffré) → le vote reste automatique après
+                        // expiration (8 h). **Opt-in** : absent = rien à faire.
+                        Some(rt) => {
+                            crate::vault::put("github_refresh", &rt)?;
+                            println!("✅ Jeton GitHub enregistré (chiffré) — avec renouvellement automatique.");
+                        }
+                        None => println!("✅ Jeton GitHub enregistré dans le coffre."),
+                    }
                     println!("   Le vote est désormais automatique (👍 = une star).");
                 }
                 "logout" => {
-                    if crate::vault::remove("github")? {
+                    let had = crate::vault::remove("github").unwrap_or(false);
+                    let had_rt = crate::vault::remove("github_refresh").unwrap_or(false);
+                    if had || had_rt {
                         println!("Jeton GitHub retiré du coffre.");
                     } else {
                         println!("Aucun jeton GitHub dans le coffre.");

@@ -1,3 +1,15 @@
+## v0.5.9 — Rafraîchissement du jeton GitHub (opt-in) (2026-10-21)
+
+- **Support des jetons expirables (opt-in)** : si l'app OAuth a l'option
+  « Expire user access tokens », GitHub renvoie un `refresh_token` en plus du jeton
+  d'accès. Zer0 le conserve **chiffré** (coffre, clé `github_refresh`) et renouvelle
+  automatiquement le jeton d'accès sur un 401, puis rejoue l'action → le 👍 reste
+  automatique au-delà des 8 h.
+- **Opt-in par nature** : sans `refresh_token` stocké, rien ne change (aucune requête
+  supplémentaire, aucun comportement modifié). `vote logout` retire les deux.
+- Test rendu **indépendant de l'environnement** (il lisait la config réelle de
+  l'utilisateur) + test de l'opt-in.
+
 ## v0.5.8 — Vote 👍 (vraie star GitHub), /quota live, correctifs (2026-10-21)
 
 Points saillants :

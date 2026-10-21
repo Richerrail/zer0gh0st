@@ -2782,16 +2782,24 @@ fn cmd_vote_login(ui_tx: &UnboundedSender<UiEvent>) {
         .await;
 
         match res {
-            Ok(token) => match crate::vault::put("github", &token) {
+            Ok(creds) => match crate::vault::put("github", &creds.access) {
                 Ok(()) => {
-                    let _ = ui.send(UiEvent::Info(
-                        "Jeton GitHub enregistre (chiffre dans le coffre) : le vote est desormais automatique (pouce haut = une star)."
-                            .to_string(),
-                    ));
+                    // App à jetons expirables : on conserve aussi le refresh
+                    // token (chiffré) → le vote reste automatique après 8 h.
+                    // **Opt-in** : sans refresh token, rien ne change.
+                    let mut msg = String::from(
+                        "Jeton GitHub enregistre (chiffre dans le coffre) : le vote est desormais automatique (pouce haut = une star).",
+                    );
+                    if let Some(rt) = &creds.refresh {
+                        if crate::vault::put("github_refresh", rt).is_ok() {
+                            msg.push_str("\nRenouvellement automatique activé (jeton expirable).");
+                        }
+                    }
+                    let _ = ui.send(UiEvent::Info(msg));
                 }
                 Err(e) => {
                     // Le jeton est bon mais non stocke : on ne le perd pas.
-                    crate::clipboard::copy(&token);
+                    crate::clipboard::copy(&creds.access);
                     let _ = ui.send(UiEvent::Info(format!(
                         "Jeton obtenu mais non stocke dans le coffre : {e}\n\nIl est copie dans le presse-papier : colle-le dans\n\
 ~/.config/zer0/config.toml  →  [keys]  github = \"…\"\n\
