@@ -210,7 +210,11 @@ pub async fn save(text: &str, trigger: Option<String>, tags: Vec<String>) -> Res
         created_at: now(),
         tags,
     };
-    append(&entry)?;
+    // Écriture du JSONL hors du runtime async.
+    let to_write = entry.clone();
+    tokio::task::spawn_blocking(move || append(&to_write))
+        .await
+        .map_err(|e| anyhow!("écriture mémoire interrompue: {e}"))??;
 
     Ok(SaveOutcome {
         id: entry.id,
@@ -249,7 +253,9 @@ pub struct SearchOutcome {
 }
 
 pub async fn search(query: &str, k: usize) -> SearchOutcome {
-    let entries = load();
+    // `load()` lit un JSONL : hors du worker async (la recherche mémoire peut
+    // être appelée à chaque tour par l'outil `memory_search`).
+    let entries = tokio::task::spawn_blocking(load).await.unwrap_or_default();
     let total = entries.len();
     let probeable = entries.iter().filter(|e| e.trigger.is_some()).count();
 

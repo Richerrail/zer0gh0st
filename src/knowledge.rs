@@ -416,6 +416,39 @@ fn like_search(c: &Connection, query: &str, limit: usize) -> Result<Vec<Hit>> {
 
 /// Recherche hybride FTS5 + vectoriel. `degraded` = pas d'embedder / pas de vecteurs.
 pub async fn search(query: &str, limit: usize) -> (Vec<Hit>, Option<String>) {
+    // L'embedding est une requête réseau (await) ; tout le reste est du SQLite
+    // synchrone (FTS5 + scan des vecteurs). Cette recherche tourne à **chaque
+    // tour** (injection de connaissance) : elle ne doit pas bloquer un worker du
+    // runtime. On isole donc l'embedding, puis la base part en `spawn_blocking`.
+    let embedder = crate::memory::embedder_id();
+    let (qv, embed_err) = match &embedder {
+        Some(_) => match crate::memory::embed(query).await {
+            Ok(v) => (Some(v), None),
+            Err(e) => (None, Some(format!("embedding requête échoué: {e}"))),
+        },
+        None => (None, None),
+    };
+
+    let q = query.to_string();
+    if let Ok((hits, degraded)) =
+        tokio::task::spawn_blocking(move || search_blocking(&q, limit, embedder, qv)).await
+    {
+        return (hits, degraded.or(embed_err));
+    }
+    // La tâche bloquante a paniqué : on dégrade, sans mentir sur la cause.
+    (
+        Vec::new(),
+        Some("recherche interrompue (tâche bloquante)".into()),
+    )
+}
+
+/// Partie 100 % synchrone de la recherche (exécutée hors du runtime async).
+fn search_blocking(
+    query: &str,
+    limit: usize,
+    embedder: Option<String>,
+    qv: Option<Vec<f32>>,
+) -> (Vec<Hit>, Option<String>) {
     let c = match open() {
         Ok(c) => c,
         Err(e) => return (Vec::new(), Some(format!("DB: {e}"))),
@@ -424,52 +457,54 @@ pub async fn search(query: &str, limit: usize) -> (Vec<Hit>, Option<String>) {
     let mut hits = fts_search(&c, query, limit).unwrap_or_default();
     let mut degraded = None;
 
-    // vectoriel si un embedder est configuré
-    if let Some(embedder) = crate::memory::embedder_id() {
-        match crate::memory::embed(query).await {
-            Ok(qv) => {
-                let mut stmt = c
-                    .prepare("SELECT knowledge_id, vector FROM embeddings WHERE embedder = ?1")
-                    .unwrap();
-                let rows = stmt.query_map(params![embedder], |r| {
-                    let id: i64 = r.get(0)?;
-                    let v: Vec<u8> = r.get(1)?;
-                    Ok((id, v))
+    match (embedder, qv) {
+        (Some(embedder), Some(qv)) => {
+            let rows = c
+                .prepare("SELECT knowledge_id, vector FROM embeddings WHERE embedder = ?1")
+                .and_then(|mut stmt| {
+                    let mapped = stmt
+                        .query_map(params![embedder], |r| {
+                            let id: i64 = r.get(0)?;
+                            let v: Vec<u8> = r.get(1)?;
+                            Ok((id, v))
+                        })?
+                        .collect::<std::result::Result<Vec<_>, _>>();
+                    mapped
                 });
-                if let Ok(rows) = rows {
-                    let mut vec_scores: Vec<(i64, f32)> = Vec::new();
-                    for row in rows.flatten() {
-                        let v = blob_to_f32(&row.1);
-                        vec_scores.push((row.0, cosine(&qv, &v)));
-                    }
-                    vec_scores
-                        .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-                    for (id, s) in vec_scores.into_iter().take(limit) {
-                        if let Some(h) = hits.iter_mut().find(|h| h.id == id) {
-                            h.score = (h.score + s).max(h.score);
-                        } else if let Ok(mut stmt) = c.prepare(
-                            "SELECT id, sujet, contenu, source FROM knowledge WHERE id = ?1",
-                        ) {
-                            if let Ok(r) = stmt.query_row(params![id], |r| {
-                                Ok(Hit {
-                                    id: r.get(0)?,
-                                    sujet: r.get(1)?,
-                                    contenu: r.get(2)?,
-                                    source: r.get(3)?,
-                                    score: s,
-                                })
-                            }) {
-                                hits.push(r);
-                            }
+            if let Ok(rows) = rows {
+                let mut vec_scores: Vec<(i64, f32)> = rows
+                    .into_iter()
+                    .map(|(id, v)| (id, cosine(&qv, &blob_to_f32(&v))))
+                    .collect();
+                vec_scores
+                    .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                for (id, s) in vec_scores.into_iter().take(limit) {
+                    if let Some(h) = hits.iter_mut().find(|h| h.id == id) {
+                        h.score = (h.score + s).max(h.score);
+                    } else if let Ok(mut stmt) =
+                        c.prepare("SELECT id, sujet, contenu, source FROM knowledge WHERE id = ?1")
+                    {
+                        if let Ok(r) = stmt.query_row(params![id], |r| {
+                            Ok(Hit {
+                                id: r.get(0)?,
+                                sujet: r.get(1)?,
+                                contenu: r.get(2)?,
+                                source: r.get(3)?,
+                                score: s,
+                            })
+                        }) {
+                            hits.push(r);
                         }
                     }
                 }
             }
-            Err(e) => degraded = Some(format!("embedding requête échoué: {e}")),
         }
-    } else if hits.is_empty() {
-        hits = like_search(&c, query, limit).unwrap_or_default();
-        degraded = Some("aucun embedder configuré → recherche FTS5/LIKE".into());
+        _ => {
+            if hits.is_empty() {
+                hits = like_search(&c, query, limit).unwrap_or_default();
+                degraded = Some("aucun embedder configuré → recherche FTS5/LIKE".into());
+            }
+        }
     }
 
     hits.sort_by(|a, b| {
