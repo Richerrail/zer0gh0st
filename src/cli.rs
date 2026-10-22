@@ -1,6 +1,6 @@
 use crate::{
-    agent, commands, config, enrich_system, fun, gwclient, http_client, jimmy, models, pdf,
-    personas, providers, route, telegram, tools, tui, update, vault, zerochan, DEFAULT_SYSTEM,
+    agent, commands, config, enrich_system, fun, http_client, jimmy, models, pdf, personas,
+    providers, route, telegram, tools, tui, update, vault, zerochan, DEFAULT_SYSTEM,
 };
 use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand};
@@ -988,197 +988,25 @@ fn task_cmd(action: TaskAction) -> Result<()> {
     Ok(())
 }
 fn provider_cmd(action: ProviderAction) -> Result<()> {
-    match action {
-        ProviderAction::List => {
-            let g = config::load_global();
-            println!(
-                "{:<3}{:<13}{:<28}{:<13}{:<8}{:<24}base_url",
-                "", "id", "nom", "gratuit", "clé", "variable d'env"
-            );
-            for p in providers::all() {
-                let active = if g.provider.as_deref() == Some(p.id.as_str()) {
-                    "*"
-                } else {
-                    " "
-                };
-                let key = if p.free == providers::FreeKind::Local {
-                    "local".to_string()
-                } else if config::key_for(&p).is_some() {
-                    "oui".to_string()
-                } else {
-                    "—".to_string()
-                };
-                let tag = if p.custom { " (custom)" } else { "" };
-                println!(
-                    "{:<3}{:<13}{:<28}{:<13}{:<8}{:<24}{}  {}{}",
-                    active,
-                    p.id,
-                    p.name,
-                    p.free.label(),
-                    key,
-                    p.env_key,
-                    p.base_url,
-                    p.signup,
-                    tag
-                );
-            }
-            println!("\nAjouter une clé : zer0 provider add <id> [clé]   (ou exporter $VAR)");
-            println!("Provider maison : zer0 provider add-custom <id> <base_url>");
-            println!("Passerelle (clés hors de l'agent) : zer0 provider keys");
-        }
-        ProviderAction::Keys => {
-            if !gwclient::probe() {
-                println!("zer0-gw injoignable — lance-le : sudo systemctl start zer0-gw");
-            } else {
-                match gwclient::list_keys() {
-                    Ok(keys) => {
-                        println!("Clés détenues par zer0-gw (l'agent n'en a aucune) :");
-                        for (id, has) in keys {
-                            println!(" {:<14} {}", id, if has { "clé ✓" } else { "—" });
-                        }
-                    }
-                    Err(e) => println!("zer0-gw : {e}"),
-                }
-            }
-        }
-        ProviderAction::Add { id, key } => {
-            // Helper: zer0 provider add cline [url] — l'URL doit être http(s)://, jamais une clé.
-            if id.eq_ignore_ascii_case("cline") {
-                let url = key.unwrap_or_else(|| "http://localhost:11434/v1".to_string());
-                if !(url.starts_with("http://") || url.starts_with("https://")) {
-                    return Err(anyhow!(
-                        "« zer0 provider add cline » attend une URL (http://…), pas une clé.\n\
-                         usage: zer0 provider add cline [http://hôte:port/v1]\n\
-                         Sans argument → Ollama local (http://localhost:11434/v1)."
-                    ));
-                }
-                let mut g = config::load_global();
-                g.custom.insert(
-                    "cline".to_string(),
-                    config::CustomProvider {
-                        name: "cline".to_string(),
-                        base_url: url.clone(),
-                        env_key: None,
-                    },
-                );
-                config::save_global(&g)?;
-                println!(
-                    "Provider 'cline' ajouté → {url}.
-Utilise: zer0 provider use cline
-Puis: zer0 models"
-                );
-                return Ok(());
-            }
-            let p = providers::find(&id).ok_or_else(|| anyhow!("provider inconnu: {id}"))?;
-            let resolved = match key {
-                Some(k) => k,
-                None => {
-                    let from_env = if p.env_key.is_empty() {
-                        None
-                    } else {
-                        std::env::var(&p.env_key).ok().filter(|s| !s.is_empty())
-                    };
-                    match (from_env, p.env_key.is_empty()) {
-                        (Some(k), _) => k,
-                        (None, false) => {
-                            return Err(anyhow!(
-                                "clé manquante. Passe-la en argument, ou `export {}` puis relance.",
-                                p.env_key
-                            ))
-                        }
-                        (None, true) => {
-                            return Err(anyhow!(
-                                "clé manquante. usage: zer0 provider add {id} <clé>"
-                            ))
-                        }
-                    }
-                }
-            };
-            match gwclient::add_key_flow(&p.id, &resolved) {
-                Ok(gwclient::AddRoute::ViaGateway { provider_id }) => {
-                    let mut g = config::load_global();
-                    let (name, _) = gwclient::activate_provider(&mut g, &provider_id);
-                    println!(
-                        "🔑 Clé déposée sur zer0-gw (écriture seule) — aucune clé stockée ici."
-                    );
-                    println!(
-                        "   Provider actif : {name}  →  {}",
-                        config::global_path().display()
-                    );
-                }
-                Ok(gwclient::AddRoute::Local) => {
-                    let mut g = config::load_global();
-                    g.keys.insert(p.id.clone(), resolved);
-                    config::save_global(&g)?;
-                    println!(
-                        "⚠ zer0-gw injoignable — clé enregistrée localement pour {} → {}",
-                        p.name,
-                        config::global_path().display()
-                    );
-                    println!(
-                        "   Pour le durcissement : lance zer0-gw puis relance cette commande."
-                    );
-                }
-                Err(e) => return Err(anyhow!("zer0-gw : {e}")),
-            }
-        }
+    // Une seule implémentation : la même que `/provider` dans la TUI.
+    let lines = match action {
+        ProviderAction::List => commands::provider_list(),
+        ProviderAction::Keys => commands::provider_keys(),
+        ProviderAction::Add { id, key } => commands::provider_add(&id, key.as_deref())?,
         ProviderAction::AddCustom {
             id,
             base_url,
             name,
             env,
-        } => {
-            let id = id.to_ascii_lowercase();
-            if !(base_url.starts_with("http://") || base_url.starts_with("https://")) {
-                return Err(anyhow!(
-                    "base_url invalide : « {base_url} » — elle doit commencer par http:// ou https:// \
-                     (une clé API ne peut PAS servir de base_url)"
-                ));
-            }
-            if providers::builtins().iter().any(|p| p.id == id) {
-                return Err(anyhow!(
-                    "'{id}' est déjà un provider intégré — pas besoin de add-custom."
-                ));
-            }
-            let mut g = config::load_global();
-            g.custom.insert(
-                id.clone(),
-                config::CustomProvider {
-                    name: name.unwrap_or_else(|| id.clone()),
-                    base_url,
-                    env_key: env,
-                },
-            );
-            config::save_global(&g)?;
-            println!("Provider personnalisé '{id}' enregistré. Ensuite : zer0 provider use {id}");
-        }
-        ProviderAction::Use { id } => {
-            let p = providers::find(&id).ok_or_else(|| anyhow!("provider inconnu: {id}"))?;
-            let mut g = config::load_global();
-            g.provider = Some(p.id.to_string());
-            if let Some(d) = providers::default_model(&p.id) {
-                g.model = Some(d.to_string());
-            }
-            config::save_global(&g)?;
-            println!("Provider actif: {}", p.name);
-        }
-        ProviderAction::Remove { id } => {
-            let p = providers::find(&id).ok_or_else(|| anyhow!("provider inconnu: {id}"))?;
-            let _ = gwclient::delete_key(&p.id); // oublie aussi côté passerelle (si présente)
-            let mut g = config::load_global();
-            g.keys.remove(&p.id);
-            let removed_custom = g.custom.remove(&p.id).is_some();
-            config::save_global(&g)?;
-            if removed_custom {
-                println!("Provider personnalisé '{}' supprimé.", p.id);
-            } else {
-                println!("Clé supprimée pour {}", p.name);
-            }
-        }
+        } => commands::provider_add_custom(&id, &base_url, name.as_deref(), env.as_deref())?,
+        ProviderAction::Use { id } => commands::provider_use(&id)?,
+        ProviderAction::Remove { id } => commands::provider_remove(&id)?,
+    };
+    for line in lines {
+        println!("{line}");
     }
     Ok(())
 }
-
 async fn list_models_cmd(free: bool, provider_id: Option<String>) -> Result<()> {
     let id = provider_id.unwrap_or_else(|| config::resolve().provider_id);
     let p = providers::find(&id).ok_or_else(|| anyhow!("provider inconnu: {id}"))?;

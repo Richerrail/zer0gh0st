@@ -242,6 +242,228 @@ pub async fn route_auto(provider: &str, n: usize) -> Result<Vec<String>> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Providers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Tableau des providers connus. `gateway` est fourni par l'appelant pour que
+/// l'affichage reste cohérent avec ce que l'agent utilise réellement.
+pub fn provider_list() -> Vec<String> {
+    let g = crate::config::load_global();
+    let gw = crate::config::gateway_enabled();
+    let mut out = vec![format!(
+        "{:<3}{:<14}{:<26}{:<12}{:<10}base_url",
+        "", "id", "nom", "gratuit", "clé"
+    )];
+    for p in crate::providers::all() {
+        let active = if g.provider.as_deref() == Some(p.id.as_str()) {
+            "*"
+        } else {
+            " "
+        };
+        let key = if p.free == crate::providers::FreeKind::Local {
+            "local".to_string()
+        } else if gw && !p.custom {
+            "zer0-gw".to_string()
+        } else if crate::config::key_for(&p).is_some() {
+            "oui".to_string()
+        } else {
+            "—".to_string()
+        };
+        out.push(format!(
+            "{:<3}{:<14}{:<26}{:<12}{:<10}{}{}",
+            active,
+            p.id,
+            p.name,
+            p.free.label(),
+            key,
+            p.base_url,
+            if p.custom { "  (custom)" } else { "" }
+        ));
+    }
+    out.push(String::new());
+    out.push(
+        "Ajouter une clé : provider add <id> [clé]  ·  Provider actif : provider use <id>".into(),
+    );
+    out.push("Passerelle (clés hors de l'agent) : provider keys".into());
+    out
+}
+
+pub fn provider_keys() -> Vec<String> {
+    if !crate::gwclient::probe() {
+        return vec![
+            "zer0-gw injoignable — lance-le (sudo systemctl start zer0-gw) pour gérer les clés hors de l'agent."
+                .to_string(),
+        ];
+    }
+    match crate::gwclient::list_keys() {
+        Ok(keys) => {
+            let mut out = vec!["Clés détenues par zer0-gw (l'agent n'en a aucune) :".to_string()];
+            for (id, has) in keys {
+                out.push(format!(" {:<14} {}", id, if has { "clé ✓" } else { "—" }));
+            }
+            out.push(String::new());
+            out.push(
+                "Déposer : provider add <id> <clé>   ·   Oublier : provider remove <id>".into(),
+            );
+            out
+        }
+        Err(e) => vec![format!("zer0-gw : {e}")],
+    }
+}
+
+/// Cas particulier `cline` : c'est un endpoint OpenAI-compatible, pas une clé.
+/// `url` absent → Ollama local. La clé est optionnelle (stockée localement, ou
+/// déposée sur la passerelle comme les autres providers).
+pub fn provider_add_cline(url: Option<&str>, key: Option<&str>) -> Result<Vec<String>> {
+    let url = url
+        .map(str::trim)
+        .filter(|u| !u.is_empty())
+        .unwrap_or("http://localhost:11434/v1");
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return Err(anyhow!(
+            "« provider add cline » attend une URL (http://…), pas une clé.\n\
+             usage: provider add cline [http://hôte:port/v1] [clé]\n\
+             Sans argument → Ollama local (http://localhost:11434/v1)."
+        ));
+    }
+    let mut g = crate::config::load_global();
+    g.custom.insert(
+        "cline".to_string(),
+        crate::config::CustomProvider {
+            name: "cline".to_string(),
+            base_url: url.to_string(),
+            env_key: None,
+        },
+    );
+    if let Some(k) = key.map(str::trim).filter(|k| !k.is_empty()) {
+        g.keys.insert("cline".to_string(), k.to_string());
+    }
+    crate::config::save_global(&g)?;
+    Ok(vec![format!(
+        "Provider 'cline' ajouté → {url}. Ensuite : provider use cline, puis models."
+    )])
+}
+
+/// Ajoute la clé d'un provider intégré : dépôt sur zer0-gw si elle répond,
+/// sinon repli local **avec avertissement**.
+pub fn provider_add(id: &str, key: Option<&str>) -> Result<Vec<String>> {
+    if id.eq_ignore_ascii_case("cline") {
+        return provider_add_cline(key, None);
+    }
+    let p = crate::providers::find(id).ok_or_else(|| anyhow!("provider inconnu: {id}"))?;
+    let resolved = match key.map(str::trim).filter(|k| !k.is_empty()) {
+        Some(k) => k.to_string(),
+        None => {
+            let from_env = if p.env_key.is_empty() {
+                None
+            } else {
+                std::env::var(&p.env_key).ok().filter(|s| !s.is_empty())
+            };
+            match (from_env, p.env_key.is_empty()) {
+                (Some(k), _) => k,
+                (None, false) => {
+                    return Err(anyhow!(
+                        "clé manquante. Passe-la en argument, ou `export {}` puis relance.",
+                        p.env_key
+                    ))
+                }
+                (None, true) => {
+                    return Err(anyhow!("clé manquante. usage: provider add {id} <clé>"))
+                }
+            }
+        }
+    };
+
+    match crate::gwclient::add_key_flow(&p.id, &resolved) {
+        Ok(crate::gwclient::AddRoute::ViaGateway { provider_id }) => {
+            let mut g = crate::config::load_global();
+            let (name, _) = crate::gwclient::activate_provider(&mut g, &provider_id);
+            Ok(vec![
+                "🔑 Clé déposée sur zer0-gw (écriture seule) — aucune clé stockée ici.".to_string(),
+                format!("Provider actif : {name}"),
+            ])
+        }
+        Ok(crate::gwclient::AddRoute::Local) => {
+            let mut g = crate::config::load_global();
+            g.keys.insert(p.id.clone(), resolved);
+            crate::config::save_global(&g)?;
+            Ok(vec![
+                format!(
+                    "⚠ zer0-gw injoignable — clé enregistrée localement pour {} → {}",
+                    p.name,
+                    crate::config::global_path().display()
+                ),
+                "Pour le durcissement : lance zer0-gw puis relance cette commande.".to_string(),
+            ])
+        }
+        Err(e) => Err(anyhow!("zer0-gw : {e}")),
+    }
+}
+
+pub fn provider_add_custom(
+    id: &str,
+    base_url: &str,
+    name: Option<&str>,
+    env: Option<&str>,
+) -> Result<Vec<String>> {
+    let id = id.trim().to_ascii_lowercase();
+    let base_url = base_url.trim();
+    if id.is_empty() {
+        return Err(anyhow!("usage: provider add-custom <id> <base_url>"));
+    }
+    if !(base_url.starts_with("http://") || base_url.starts_with("https://")) {
+        return Err(anyhow!(
+            "base_url invalide : « {base_url} » — elle doit commencer par http:// ou https:// \
+             (une clé API ne peut PAS servir de base_url)"
+        ));
+    }
+    if crate::providers::builtins().iter().any(|p| p.id == id) {
+        return Err(anyhow!(
+            "'{id}' est déjà un provider intégré — pas besoin de add-custom."
+        ));
+    }
+    let mut g = crate::config::load_global();
+    g.custom.insert(
+        id.clone(),
+        crate::config::CustomProvider {
+            name: name.map(str::to_string).unwrap_or_else(|| id.clone()),
+            base_url: base_url.to_string(),
+            env_key: env.map(str::to_string),
+        },
+    );
+    crate::config::save_global(&g)?;
+    Ok(vec![format!(
+        "Provider personnalisé '{id}' enregistré. Ensuite : provider use {id}"
+    )])
+}
+
+pub fn provider_use(id: &str) -> Result<Vec<String>> {
+    let p = crate::providers::find(id).ok_or_else(|| anyhow!("provider inconnu: {id}"))?;
+    let mut g = crate::config::load_global();
+    g.provider = Some(p.id.to_string());
+    if let Some(d) = crate::providers::default_model(&p.id) {
+        g.model = Some(d.to_string());
+    }
+    crate::config::save_global(&g)?;
+    Ok(vec![format!("Provider actif: {}", p.name)])
+}
+
+pub fn provider_remove(id: &str) -> Result<Vec<String>> {
+    let p = crate::providers::find(id).ok_or_else(|| anyhow!("provider inconnu: {id}"))?;
+    // Oublie aussi côté passerelle (si elle tourne) : sinon la clé survit là-bas.
+    let _ = crate::gwclient::delete_key(&p.id);
+    let mut g = crate::config::load_global();
+    g.keys.remove(&p.id);
+    let removed_custom = g.custom.remove(&p.id).is_some();
+    crate::config::save_global(&g)?;
+    Ok(vec![if removed_custom {
+        format!("Provider personnalisé '{}' supprimé.", p.id)
+    } else {
+        format!("Clé supprimée pour {}", p.name)
+    }])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Base de connaissance (SQLite + FTS5)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -632,6 +854,28 @@ mod tests {
     fn unknown_subcommand_is_an_error_with_usage() {
         let e = parse_task(&["frobnicate"]).unwrap_err().to_string();
         assert!(e.contains("usage: task"), "{e}");
+    }
+
+    #[test]
+    fn provider_commands_validate_before_writing_config() {
+        assert!(provider_add("provider-qui-nexiste-pas", Some("k")).is_err());
+        assert!(provider_use("inconnu").is_err());
+        assert!(provider_remove("inconnu").is_err());
+        // base_url qui est en réalité une clé API
+        assert!(provider_add_custom("monapi", "sk-abc123", None, None).is_err());
+        assert!(provider_add_custom("openrouter", "https://x/v1", None, None).is_err());
+        assert!(provider_add_custom("", "https://x/v1", None, None).is_err());
+        assert!(provider_add_cline(Some("pas-une-url"), None).is_err());
+    }
+
+    #[test]
+    fn provider_list_marks_the_active_provider() {
+        let lines = provider_list();
+        assert!(
+            lines.iter().any(|l| l.starts_with("*")),
+            "aucun provider actif marqué"
+        );
+        assert!(lines.iter().any(|l| l.contains("openrouter")));
     }
 
     #[test]

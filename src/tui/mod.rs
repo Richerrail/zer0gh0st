@@ -175,6 +175,21 @@ impl App {
         });
     }
 
+    /// Recharge provider / modèle / clé depuis la config.
+    ///
+    /// Nécessaire après `/provider add|use|remove` : la TUI gardait sinon des
+    /// valeurs périmées (ancien base_url, ancienne clé, ancien modèle) alors que
+    /// la config avait changé — divergence classique avec le CLI.
+    pub fn reload_settings(&mut self) {
+        let s = config::resolve();
+        self.provider_id = s.provider_id;
+        self.provider_name = s.provider_name;
+        self.base_url = s.base_url;
+        self.api_key = s.api_key;
+        self.model = s.model;
+        self.roles_enabled = config::roles_enabled();
+    }
+
     /// Recompute the effective system prompt from base + active persona.
     fn refresh_system(&mut self) {
         self.system = match &self.persona {
@@ -924,6 +939,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
 
 fn handle_provider(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
     match args.first().copied() {
+        // Sélecteur (spécifique TUI : nécessite un état d'interface).
         None => {
             let gw = config::gateway_enabled();
             let items: Vec<picker::Item> = providers::all()
@@ -951,259 +967,53 @@ fn handle_provider(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent
                 picker::Kind::Provider,
             ));
         }
-        Some("list") => {
-            let mut s = String::from("Providers (clé = variable d'env ou config):\n");
-            for p in providers::all() {
-                let active = if p.id == app.provider_id { "*" } else { " " };
-                let key = if p.free == providers::FreeKind::Local {
-                    "local".to_string()
-                } else if config::gateway_enabled() && !p.custom {
-                    "gw".to_string() // clé détenue par la passerelle
-                } else if config::key_for(&p).is_some() {
-                    "clé ✓".to_string()
-                } else {
-                    "—".to_string()
-                };
-                let tag = if p.custom { " (custom)" } else { "" };
-                s.push_str(&format!(
-                    " {} {:<12} {:<24} {:<12} {}{}\n",
-                    active,
-                    p.id,
-                    p.name,
-                    p.free.label(),
-                    key,
-                    tag
-                ));
-            }
-            s.push_str("\n/provider add <id> [clé]  ·  /provider use <id>  ·  /provider keys  ·  /provider remove <id>");
-            app.messages.push(ChatMessage::notice(s));
-        }
-        Some("add") => {
-            // Helper: /provider add cline [url] [clé]
-            // Un argument qui n'est PAS une URL (ex. une clé « sk_… ») est refusé :
-            // sinon il finit en base_url et /models crashe en « builder error ».
-            let first = args.get(1).copied().unwrap_or("");
-            if first == "cline" {
-                let arg2 = args.get(2).copied().unwrap_or("");
-                let arg3 = args.get(3).copied().unwrap_or("");
-                let (url, key) = if arg2.is_empty() {
-                    ("http://localhost:11434/v1".to_string(), None)
-                } else if arg2.starts_with("http://") || arg2.starts_with("https://") {
-                    (
-                        arg2.to_string(),
-                        if arg3.is_empty() {
-                            None
-                        } else {
-                            Some(arg3.to_string())
-                        },
-                    )
-                } else {
-                    app.messages.push(ChatMessage::notice(
-                        "⚠ Cet argument n'est pas une URL (une clé API ne peut PAS servir de base_url).\n\
-                         usage: /provider add cline [http://hôte:port/v1] [clé]\n\
-                         Sans argument → Ollama local (http://localhost:11434/v1).\n\
-                         Pour utiliser ta clé cline, donne l'URL du service en 1er, la clé en 2e.",
-                    ));
-                    return;
-                };
-                let mut g = config::load_global();
-                g.custom.insert(
-                    "cline".to_string(),
-                    config::CustomProvider {
-                        name: "cline".to_string(),
-                        base_url: url.clone(),
-                        env_key: None,
-                    },
-                );
-                if let Some(k) = key {
-                    g.keys.insert("cline".to_string(), k);
-                }
-                let _ = config::save_global(&g);
-                app.messages.push(ChatMessage::notice(format!(
-                    "Provider 'cline' ajouté → {url}.\nUtilise: /provider use cline\nPuis: /models"
-                )));
-                return;
-            }
-            let id = first.to_ascii_lowercase();
-            let key = args.get(2).copied().unwrap_or("");
-            match providers::find(&id) {
-                Some(p) if !key.is_empty() => match crate::gwclient::add_key_flow(&p.id, key) {
-                    Ok(crate::gwclient::AddRoute::ViaGateway { provider_id }) => {
-                        let mut g = config::load_global();
-                        let (name, base_url) =
-                            crate::gwclient::activate_provider(&mut g, &provider_id);
-                        app.provider_id = provider_id;
-                        app.provider_name = name.clone();
-                        app.base_url = base_url;
-                        app.api_key = None; // ← la clé n'est pas ici, et c'est voulu
-                        app.messages.push(ChatMessage::notice(format!(
-                            "🔑 Clé déposée sur zer0-gw (écriture seule). Provider actif : {name} — aucune clé stockée localement."
-                        )));
-                        probe_context(app, ui_tx);
-                    }
-                    Ok(crate::gwclient::AddRoute::Local) => {
-                        let mut g = config::load_global();
-                        g.keys.insert(p.id.clone(), key.to_string());
-                        match config::save_global(&g) {
-                            Ok(()) => app.messages.push(ChatMessage::notice(format!(
-                "⚠ zer0-gw injoignable — clé stockée localement pour {} (durcissement ignoré)",
-                                p.name
-                            ))),
-                            Err(e) => app
-                                .messages
-                                .push(ChatMessage::notice(format!("Erreur: {e}"))),
-                        }
-                    }
-                    Err(e) => app
-                        .messages
-                        .push(ChatMessage::notice(format!("zer0-gw : {e}"))),
-                },
-                Some(p) => {
-                    // try the provider's environment variable
-                    let from_env = if p.env_key.is_empty() {
-                        None
+        Some(sub) => {
+            // Tout le reste est délégué au noyau : mêmes règles que le CLI.
+            let res = match sub {
+                "list" => Ok(crate::commands::provider_list()),
+                "keys" => Ok(crate::commands::provider_keys()),
+                "add" => {
+                    let first = args.get(1).copied().unwrap_or("");
+                    if first.eq_ignore_ascii_case("cline") {
+                        // /provider add cline [url] [clé]
+                        crate::commands::provider_add_cline(
+                            args.get(2).copied(),
+                            args.get(3).copied(),
+                        )
                     } else {
-                        std::env::var(&p.env_key).ok().filter(|s| !s.is_empty())
-                    };
-                    match from_env {
-                        Some(k) => {
-                            let mut g = config::load_global();
-                            g.keys.insert(p.id.clone(), k);
-                            let _ = config::save_global(&g);
-                            app.messages.push(ChatMessage::notice(format!(
-                                "Clé enregistrée depuis ${} pour {}",
-                                p.env_key, p.name
-                            )));
+                        crate::commands::provider_add(first, args.get(2).copied())
+                    }
+                }
+                "add-custom" => crate::commands::provider_add_custom(
+                    args.get(1).copied().unwrap_or(""),
+                    args.get(2).copied().unwrap_or(""),
+                    args.get(3).copied(),
+                    args.get(4).copied(),
+                ),
+                "use" => crate::commands::provider_use(args.get(1).copied().unwrap_or("")),
+                "remove" => crate::commands::provider_remove(args.get(1).copied().unwrap_or("")),
+                _ => Err(anyhow::anyhow!(
+                    "usage: /provider [list|keys|add|add-custom|use|remove]"
+                )),
+            };
+            match res {
+                Ok(lines) => {
+                    for line in lines {
+                        app.messages.push(ChatMessage::notice(line));
+                    }
+                    // La config a pu changer : on resynchronise l'état de session.
+                    if matches!(sub, "add" | "add-custom" | "use" | "remove") {
+                        app.reload_settings();
+                        if sub == "add" || sub == "use" {
+                            probe_context(app, ui_tx);
                         }
-                        None if p.env_key.is_empty() => app
-                            .messages
-                            .push(ChatMessage::notice("usage: /provider add <id> <clé>")),
-                        None => app.messages.push(ChatMessage::notice(format!(
-                            "usage: /provider add {} <clé>  (ou export {} puis relance)",
-                            p.id, p.env_key
-                        ))),
                     }
                 }
-                None => app
-                    .messages
-                    .push(ChatMessage::notice(format!("Provider inconnu: {id}"))),
+                Err(e) => app.messages.push(ChatMessage::notice(format!("{e}"))),
             }
         }
-        Some("add-custom") => {
-            let id = args.get(1).copied().unwrap_or("").to_ascii_lowercase();
-            let url = args.get(2).copied().unwrap_or("");
-            if id.is_empty() || url.is_empty() {
-                app.messages.push(ChatMessage::notice(
-                    "usage: /provider add-custom <id> <base_url>",
-                ));
-            } else if !(url.starts_with("http://") || url.starts_with("https://")) {
-                app.messages.push(ChatMessage::notice(format!(
-                    "⚠ base_url invalide : « {url} » — elle doit commencer par http:// ou https://.\n\
-                     (une clé API ne peut PAS servir de base_url)"
-                )));
-            } else if providers::builtins().iter().any(|p| p.id == id) {
-                app.messages.push(ChatMessage::notice(format!(
-                    "'{id}' est déjà un provider intégré."
-                )));
-            } else {
-                let mut g = config::load_global();
-                g.custom.insert(
-                    id.clone(),
-                    config::CustomProvider {
-                        name: id.clone(),
-                        base_url: url.to_string(),
-                        env_key: None,
-                    },
-                );
-                let _ = config::save_global(&g);
-                app.messages.push(ChatMessage::notice(format!(
-                    "Provider '{id}' ajouté → {url}. Ensuite: /provider use {id}"
-                )));
-            }
-        }
-        Some("use") => {
-            let id = args.get(1).copied().unwrap_or("");
-            match providers::find(id) {
-                Some(p) => {
-                    let mut g = config::load_global();
-                    g.provider = Some(p.id.to_string());
-                    if let Some(d) = providers::default_model(&p.id) {
-                        g.model = Some(d.to_string());
-                    }
-                    let _ = config::save_global(&g);
-                    app.provider_id = p.id.to_string();
-                    app.provider_name = p.name.to_string();
-                    app.base_url = p.base_url.to_string();
-                    app.api_key = config::key_for(&p);
-                    if let Some(d) = providers::default_model(&p.id) {
-                        app.model = d.to_string();
-                    }
-                    app.messages
-                        .push(ChatMessage::notice(format!("Provider actif: {}", p.name)));
-                    probe_context(app, ui_tx);
-                }
-                None => app
-                    .messages
-                    .push(ChatMessage::notice(format!("Provider inconnu: {id}"))),
-            }
-        }
-        Some("keys") => {
-            if !crate::gwclient::probe() {
-                app.messages.push(ChatMessage::notice(
-                    "zer0-gw injoignable — lance-le (sudo systemctl start zer0-gw) pour gérer les clés hors de l'agent."
-                        .to_string(),
-                ));
-                return;
-            }
-            match crate::gwclient::list_keys() {
-                Ok(keys) => {
-                    let mut s =
-                        String::from("Clés détenues par zer0-gw (l'agent n'en a aucune) :\n");
-                    for (id, has) in keys {
-                        s.push_str(&format!(
-                            " {:<14} {}\n",
-                            id,
-                            if has { "clé ✓" } else { "—" }
-                        ));
-                    }
-                    s.push_str("\nDéposer : /provider add <id> <clé>   ·   Oublier : /provider remove <id>");
-                    app.messages.push(ChatMessage::notice(s));
-                }
-                Err(e) => app
-                    .messages
-                    .push(ChatMessage::notice(format!("zer0-gw : {e}"))),
-            }
-        }
-        Some("remove") => {
-            let id = args.get(1).copied().unwrap_or("");
-            if let Some(p) = providers::find(id) {
-                let _ = crate::gwclient::delete_key(&p.id); // oublie aussi côté zer0-gw
-                let mut g = config::load_global();
-                g.keys.remove(&p.id);
-                let removed_custom = g.custom.remove(&p.id).is_some();
-                let _ = config::save_global(&g);
-                if removed_custom {
-                    app.messages.push(ChatMessage::notice(format!(
-                        "Provider personnalisé '{}' supprimé.",
-                        p.id
-                    )));
-                } else {
-                    app.messages.push(ChatMessage::notice(format!(
-                        "Clé supprimée pour {}",
-                        p.name
-                    )));
-                }
-            } else {
-                app.messages
-                    .push(ChatMessage::notice(format!("Provider inconnu: {id}")));
-            }
-        }
-        _ => app.messages.push(ChatMessage::notice(
-            "usage: /provider [list|keys|add|use|remove]",
-        )),
     }
 }
-
 /// Touches quand un sélecteur est ouvert.
 fn handle_picker_key(
     key: crossterm::event::KeyEvent,
