@@ -203,6 +203,34 @@ pub fn data_dir() -> PathBuf {
     .clone()
 }
 
+/// Copie si la cible manque, **ou** si la source est plus récente.
+///
+/// Règle nécessaire pour les journaux JSONL : une base XDG créée par un ancien
+/// lancement bloquait la copie d'un `memory.jsonl` plus récent resté dans le
+/// checkout (21 entrées invisibles). On ne recopie jamais une source plus
+/// ancienne que la cible.
+fn copy_if_missing_or_newer(from: &Path, to: &Path) {
+    let Ok(src_meta) = fs::metadata(from) else {
+        return;
+    };
+    if !src_meta.is_file() {
+        return;
+    }
+    let newer = match fs::metadata(to).and_then(|m| m.modified()) {
+        Ok(dst_time) => src_meta
+            .modified()
+            .map(|src_time| src_time > dst_time)
+            .unwrap_or(false),
+        Err(_) => true, // cible absente
+    };
+    if newer {
+        if let Some(parent) = to.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let _ = fs::copy(from, to);
+    }
+}
+
 fn copy_if_missing(from: &Path, to: &Path) {
     if from.is_file() && !to.exists() {
         if let Some(parent) = to.parent() {
@@ -233,13 +261,14 @@ pub(crate) fn migrate_checkout_data(root: &Path, target: &Path) {
         return;
     }
     let old = root.join("data");
+    // Journaux append-only : on prend la version la plus récente des deux.
     for name in [
         "conversation.jsonl",
         "memory.jsonl",
         "audit.jsonl",
         "knowledge.log",
     ] {
-        copy_if_missing(&old.join(name), &target.join(name));
+        copy_if_missing_or_newer(&old.join(name), &target.join(name));
     }
     copy_if_missing(&root.join("knowledge.db"), &target.join("knowledge.db"));
     copy_if_missing(&root.join("knowledge.log"), &target.join("knowledge.log"));
@@ -721,10 +750,17 @@ mod tests {
 
         // Une seconde passe ne doit jamais écraser une donnée plus récente.
         std::fs::write(target.join("conversation.jsonl"), "plus récent").unwrap();
+        // ... et une source plus récente doit au contraire remplacer la cible.
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        std::fs::write(root.join("data/memory.jsonl"), "{\"plus\":\"récent\"}").unwrap();
         migrate_checkout_data(&root, &target);
         assert_eq!(
             std::fs::read_to_string(target.join("conversation.jsonl")).unwrap(),
             "plus récent"
+        );
+        assert_eq!(
+            std::fs::read_to_string(target.join("memory.jsonl")).unwrap(),
+            "{\"plus\":\"récent\"}"
         );
         let _ = std::fs::remove_dir_all(&base);
     }
