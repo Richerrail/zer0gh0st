@@ -21,25 +21,19 @@ Les modules de l'écosystème sont **autonomes** : tous les programmes sont **co
 
 ---
 
-## 2. Modules (`mods/`)
+## 2. Modules (noyau)
 
 | Commande | Source | Techno | Mode |
 |---|---|---|---|
 | `/radio` | Rust (`src/fun/radio.rs`) | `ffplay`/`mpv`/`paplay` | panneau latéral |
 | `/bintime` | Rust (`src/fun/bintime.rs`) | `date` (horloge) | panneau latéral |
 | `/pong` | Rust (`src/fun/pong.rs`) | — | plein écran |
-| `/kristal` | `mods/zer0-kristal/` | C++ / Qt6 | fenêtre séparée |
-| `/streaming` | `mods/streaming/zero_video.py` | Python / libtorrent / mpv / pygame | fenêtre séparée |
-| `/retro` | `mods/Zer0-Retr0/` | HTML / JS (navigateur) | fenêtre séparée |
 | `/bintime` (référence) | `mods/bintime/zero_bintime.py` | Python / pygame | non lancé |
 
 Détails et historique : [`ROADMAP_FUN.md`](./ROADMAP_FUN.md).
 
 ### `mods.rs` — lanceurs
 Résout la racine projet depuis l'exécutable (`target/release/zer0` → `ZER0v1`) puis lance :
-- `/kristal` → `mods/zer0-kristal/zer0-kristal`
-- `/streaming` → `python3 mods/streaming/zero_video.py`
-- `/retro` → ouvre `mods/Zer0-Retr0/index.html` (via le navigateur par défaut, multiplateforme)
 
 ---
 
@@ -49,10 +43,6 @@ Résout la racine projet depuis l'exécutable (`target/release/zer0` → `ZER0v1
 |---|---|
 | `llama-server` (llama.cpp) | inférence locale |
 | `ffplay` / `mpv` / `paplay` | `/radio` |
-| `ffmpeg` / `yt-dlp` | `/kristal`, `/streaming` |
-| `python3` | `/streaming` (+ libtorrent, pygame) |
-| `xdg-open` (+ navigateur) | `/retro` |
-| Qt6 (`Qt6Widgets`, `Qt6Multimedia`) | compilation de `mods/zer0-kristal` |
 | `taskset` (Linux) | limite 2 cœurs du serveur local |
 | `sox` | enregistrement micro (macOS/Windows, et Linux sans PipeWire/Pulse) |
 | `pbcopy` / `clip` | presse-papier macOS / Windows |
@@ -82,9 +72,6 @@ Formats : `mp3 wav ogg flac m4a opus aac wma`. Lecture en **playlist** (enchaîn
 | Horodatage (`/bintime`, logs) | `date` | `date` | **PowerShell** |
 | Micro (zero-chan) | pw-record / parecord / arecord | **sox** | **sox** |
 | `/radio` | ✅ | ✅ (ffplay/mpv) | ✅ (ffplay/mpv) |
-| `/kristal` | ✅ (Qt6) | ⚠️ recompiler Qt6 | ⚠️ recompiler Qt6 |
-| `/streaming` | ✅ | ⚠️ libtorrent/pygame | ⚠️ libtorrent/pygame |
-| `/retro` | ✅ | ✅ (`open`) | ✅ (`start`) |
 | `scripts/serve.sh` (`taskset`) | ✅ | ❌ (llama-server direct) | ❌ |
 
 ### Prérequis par OS
@@ -113,5 +100,5 @@ openSUSE) et installe les dépendances ; `--minimal` ne prend que le nécessaire
 ## 6. Modules retirés (historique)
 
 Tentés puis **rejetés** (hors périmètre, rendu insuffisant ou redondant) : premières versions
-de bintime (BCD), Snake, analyseur FFT `kristal`, assembleur Zer0-asm, enregistreur d'écran,
+de bintime (BCD), Snake, assembleur Zer0-asm, enregistreur d'écran,
 streaming minimal. Voir [`ROADMAP_FUN.md`](./ROADMAP_FUN.md) pour le détail et les raisons.

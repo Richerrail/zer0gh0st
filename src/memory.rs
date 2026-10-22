@@ -36,7 +36,9 @@ pub fn load() -> Vec<MemoryEntry> {
     let Ok(s) = std::fs::read_to_string(store_path()) else {
         return Vec::new();
     };
-    s.lines().filter_map(|l| serde_json::from_str(l).ok()).collect()
+    s.lines()
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect()
 }
 
 fn rewrite(entries: &[MemoryEntry]) -> Result<()> {
@@ -120,9 +122,11 @@ pub async fn embed(text: &str) -> Result<Vec<f32>> {
     let provider_id = e
         .provider
         .ok_or_else(|| anyhow!("provider d'embedding manquant"))?;
-    let model = e.model.ok_or_else(|| anyhow!("modèle d'embedding manquant"))?;
-    let provider = providers::find(&provider_id)
-        .ok_or_else(|| anyhow!("provider inconnu: {provider_id}"))?;
+    let model = e
+        .model
+        .ok_or_else(|| anyhow!("modèle d'embedding manquant"))?;
+    let provider =
+        providers::find(&provider_id).ok_or_else(|| anyhow!("provider inconnu: {provider_id}"))?;
     // Même transport que le chat : passerelle si elle tourne (clé jamais dans
     // l'agent), sinon direct. Sinon l'embedding partait en direct → 401.
     let (base_url, key) = config::endpoint_for(&provider);
@@ -137,13 +141,19 @@ pub async fn embed(text: &str) -> Result<Vec<f32>> {
     if !resp.status().is_success() {
         let st = resp.status();
         let t = resp.text().await.unwrap_or_default();
-        return Err(anyhow!("embeddings {st}: {}", t.chars().take(160).collect::<String>()));
+        return Err(anyhow!(
+            "embeddings {st}: {}",
+            t.chars().take(160).collect::<String>()
+        ));
     }
     let v: serde_json::Value = resp.json().await?;
     let arr = v["data"][0]["embedding"]
         .as_array()
         .ok_or_else(|| anyhow!("réponse d'embedding invalide"))?;
-    Ok(arr.iter().filter_map(|x| x.as_f64().map(|f| f as f32)).collect())
+    Ok(arr
+        .iter()
+        .filter_map(|x| x.as_f64().map(|f| f as f32))
+        .collect())
 }
 
 // --------------------------------------------------------------------- save
@@ -159,11 +169,7 @@ pub struct SaveOutcome {
     pub degraded_reason: Option<String>,
 }
 
-pub async fn save(
-    text: &str,
-    trigger: Option<String>,
-    tags: Vec<String>,
-) -> Result<SaveOutcome> {
+pub async fn save(text: &str, trigger: Option<String>, tags: Vec<String>) -> Result<SaveOutcome> {
     let text = text.trim().to_string();
     if text.is_empty() {
         return Err(anyhow!("texte vide"));
@@ -265,9 +271,7 @@ pub async fn search(query: &str, k: usize) -> SearchOutcome {
                 used_vectors = true;
                 let mut scored: Vec<(f32, &MemoryEntry)> = entries
                     .iter()
-                    .filter(|e| {
-                        e.embedder.as_deref() == Some(qe.as_str()) && e.vector.is_some()
-                    })
+                    .filter(|e| e.embedder.as_deref() == Some(qe.as_str()) && e.vector.is_some())
                     .map(|e| (cosine(&qv, e.vector.as_ref().unwrap()), e))
                     .collect();
                 scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
@@ -396,10 +400,17 @@ pub fn format_outcome(o: &SearchOutcome) -> String {
         s.push_str("  (aucun résultat)");
     }
     for h in &o.hits {
-        let trig = if h.trigger.is_some() { " · testable" } else { "" };
+        let trig = if h.trigger.is_some() {
+            " · testable"
+        } else {
+            ""
+        };
         s.push_str(&format!(
             "\n  [{:.2}] {}{}  · {}\n      {}\n",
-            h.score, h.id, trig, h.trust,
+            h.score,
+            h.id,
+            trig,
+            h.trust,
             h.text.replace('\n', " ")
         ));
     }

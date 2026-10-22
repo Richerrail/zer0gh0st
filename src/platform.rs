@@ -62,9 +62,9 @@ pub fn shell_command(script: &str) -> Command {
 /// shell, qui peuvent ré-exporter des variables — ne mettez pas de clés dans
 /// `~/.bashrc`. Le découpage fort reste `zer0-gw` (voir SAFETY.md §7).
 pub fn scrub_secrets(cmd: &mut Command) {
-    for name in secret_names(std::env::vars_os().filter_map(|(k, _)| {
-        k.to_str().map(str::to_string)
-    })) {
+    for name in
+        secret_names(std::env::vars_os().filter_map(|(k, _)| k.to_str().map(str::to_string)))
+    {
         cmd.env_remove(name);
     }
 }
@@ -159,7 +159,7 @@ pub fn open_url(url: &str) -> std::io::Result<std::process::Child> {
     }
 }
 
-/// Ouvre un **fichier local** dans l'application par défaut (ex. `/retro`).
+/// Ouvre un **fichier local** dans l'application par défaut.
 ///
 /// Même principe que [`open_url`], mais le lanceur doit gérer un chemin de
 /// fichier : sous Windows, `cmd /C start "" <chemin>` est le lanceur fiable.
@@ -303,9 +303,10 @@ mod tests {
     fn scrub_removes_secrets_keeps_rest() {
         // Test sur la fonction **pure** : pas de mutation d'environnement
         // (les tests tournent en parallèle → la CI devenait instable).
-        let names = secret_names(
-            ["TEST_SECRET_TOKEN".to_string(), "TEST_PLAIN_VAR".to_string()],
-        );
+        let names = secret_names([
+            "TEST_SECRET_TOKEN".to_string(),
+            "TEST_PLAIN_VAR".to_string(),
+        ]);
         assert_eq!(names, vec!["TEST_SECRET_TOKEN".to_string()]);
         assert!(!names.contains(&"TEST_PLAIN_VAR".to_string()));
     }

@@ -20,7 +20,11 @@ pub struct Endpoint {
 
 impl Endpoint {
     pub fn client(&self) -> ApiClient {
-        ApiClient::new(self.base_url.clone(), self.model.clone(), self.api_key.clone())
+        ApiClient::new(
+            self.base_url.clone(),
+            self.model.clone(),
+            self.api_key.clone(),
+        )
     }
 }
 
@@ -35,15 +39,21 @@ pub fn from_settings(s: &Settings) -> Endpoint {
     }
 }
 
-/// Users often paste OpenRouter-style slugs (`nvidia/...`) into another provider's
-/// `model`. Native APIs expect the bare id. Strip a leading `{provider}/` unless the
-/// provider is OpenRouter (whose namespace is meaningful).
+/// Retire **un** préfixe `{provider}/` du modèle, quel que soit le provider.
+///
+/// Un identifiant de modèle est soit nu (`minimax/minimax-m3.1-flash:free`), soit
+/// écrit « façon route » (`openrouter/minimax/…`). Le second cas est une pollution
+/// de la config (ex. `zer0 model use openrouter/…`) : envoyé tel quel à l'API, il
+/// ne correspond à aucun modèle, et le label affiché doublait le préfixe
+/// (`openrouter/openrouter/…`).
+///
+/// L'ancienne version excluait OpenRouter au motif que « son namespace est
+/// `vendor/model` » — vrai pour le *reste* de l'identifiant, faux pour son propre
+/// préfixe `openrouter/`, qui n'est jamais légitime.
 fn normalize_model(provider_id: &str, model: &str) -> String {
-    if provider_id != "openrouter" {
-        if let Some(rest) = model.strip_prefix(&format!("{provider_id}/")) {
-            if !rest.is_empty() {
-                return rest.to_string();
-            }
+    if let Some(rest) = model.strip_prefix(&format!("{provider_id}/")) {
+        if !rest.is_empty() {
+            return rest.to_string();
         }
     }
     model.to_string()
@@ -72,7 +82,14 @@ pub fn parse_route(route: &str) -> Option<Endpoint> {
 
 /// Roles Zer0 knows about.
 pub const KNOWN_ROLES: &[&str] = &[
-    "main", "code", "reasoning", "writing", "vision", "fast", "utility", "review",
+    "main",
+    "code",
+    "reasoning",
+    "writing",
+    "vision",
+    "fast",
+    "utility",
+    "review",
 ];
 
 /// Default role for a detected task category.
@@ -109,10 +126,7 @@ fn chain_for_role_with(settings: &Settings, role: &str, roles_on: bool) -> Vec<E
         return vec![from_settings(settings)];
     }
     let roles = config::effective_roles();
-    let route = roles
-        .get(role)
-        .or_else(|| roles.get("main"))
-        .cloned();
+    let route = roles.get(role).or_else(|| roles.get("main")).cloned();
 
     let mut chain: Vec<Endpoint> = Vec::new();
     if let Some(r) = route {
@@ -189,19 +203,16 @@ pub fn chain_for_0box_role(settings: &Settings, role: &str) -> Vec<Endpoint> {
     // Then add the full failover chain (role endpoint + global routes)
     // This ensures proper fallback when models return empty responses
     let mut role_chain = Vec::new();
-    
+
     // First: the role-specific endpoint (if configured)
     let roles = config::effective_roles();
-    let route = roles
-        .get(role)
-        .or_else(|| roles.get("main"))
-        .cloned();
+    let route = roles.get(role).or_else(|| roles.get("main")).cloned();
     if let Some(r) = route {
         if let Some(ep) = parse_route(&r) {
             role_chain.push(ep);
         }
     }
-    
+
     // Then: the global failover chain (build_chain includes active + routes)
     for ep in build_chain(settings) {
         let dup = role_chain
@@ -211,7 +222,7 @@ pub fn chain_for_0box_role(settings: &Settings, role: &str) -> Vec<Endpoint> {
             role_chain.push(ep);
         }
     }
-    
+
     // Add to main chain
     for ep in role_chain {
         let dup = chain
@@ -364,6 +375,34 @@ mod tests {
         assert!(parse_route("openrouter/").is_none());
     }
 
+    /// Régression : `model = "openrouter/minimax/…"` envoyait
+    /// `model: "openrouter/minimax/…"` à l'API et affichait un label doublé.
+    #[test]
+    fn provider_prefix_is_not_doubled() {
+        let s = Settings {
+            provider_id: "openrouter".to_string(),
+            provider_name: "OpenRouter".to_string(),
+            base_url: "https://openrouter.ai/api/v1".to_string(),
+            model: "openrouter/minimax/minimax-m3.1-flash:free".to_string(),
+            api_key: None,
+        };
+        let ep = from_settings(&s);
+        assert_eq!(ep.model, "minimax/minimax-m3.1-flash:free");
+        assert_eq!(ep.label, "openrouter/minimax/minimax-m3.1-flash:free");
+    }
+
+    #[test]
+    fn a_bare_model_id_is_untouched() {
+        let s = Settings {
+            provider_id: "nvidia".to_string(),
+            provider_name: "NVIDIA".to_string(),
+            base_url: "https://integrate.api.nvidia.com/v1".to_string(),
+            model: "mistralai/mixtral-8x22b-v0.1".to_string(),
+            api_key: None,
+        };
+        assert_eq!(from_settings(&s).model, "mistralai/mixtral-8x22b-v0.1");
+    }
+
     #[test]
     fn roles_off_gives_single_endpoint_without_failover() {
         let s = Settings {
@@ -374,7 +413,11 @@ mod tests {
             api_key: None,
         };
         let chain = chain_for_role_with(&s, "main", false);
-        assert_eq!(chain.len(), 1, "rôles off ⇒ un seul endpoint (pas de bascule)");
+        assert_eq!(
+            chain.len(),
+            1,
+            "rôles off ⇒ un seul endpoint (pas de bascule)"
+        );
         assert_eq!(chain[0].model, "mistralai/mixtral-8x22b-v0.1");
         assert_eq!(chain[0].base_url, s.base_url);
     }

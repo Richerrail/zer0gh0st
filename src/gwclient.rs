@@ -125,7 +125,9 @@ pub fn list_keys() -> Result<Vec<(String, bool)>, String> {
                 .map(|(id, info)| {
                     (
                         id.clone(),
-                        info.get("has_key").and_then(serde_json::Value::as_bool).unwrap_or(false),
+                        info.get("has_key")
+                            .and_then(serde_json::Value::as_bool)
+                            .unwrap_or(false),
                     )
                 })
                 .collect()

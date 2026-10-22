@@ -19,12 +19,9 @@ use crate::mods;
 /// dans le dossier de données de l'utilisateur, sinon la base part à la
 /// racine du système et échoue en « unable to open database file ».
 pub fn db_path() -> PathBuf {
-    let root = mods::project_root();
-    if root.join("Cargo.toml").is_file() {
-        root.join("knowledge.db")
-    } else {
-        crate::config::data_dir().join("knowledge.db")
-    }
+    // Toujours dans le dossier de données utilisateur (XDG), comme `data/`.
+    // La migration depuis `<projet>/knowledge.db` est faite par `config::data_dir`.
+    crate::config::data_dir().join("knowledge.db")
 }
 
 /// Dossier source par défaut (`<ZER0v1>/base_connaissance`).
@@ -52,10 +49,83 @@ pub struct Hit {
     pub score: f32,
 }
 
+/// Version du schéma SQLite (`PRAGMA user_version`).
+const KB_SCHEMA_VERSION: i64 = 1;
+
 pub(crate) fn open() -> Result<Connection> {
-    let c = Connection::open(db_path())?;
+    let path = db_path();
+    let c = Connection::open(&path)?;
     init(&c)?;
+    check_schema(&c, &path)?;
+    import_legacy_if_empty(&c, &path);
     Ok(c)
+}
+
+/// Récupère une base historique restée dans le checkout quand la base courante
+/// est vide.
+///
+/// Cas réel : le binaire a été lancé une fois **avant** la migration XDG, ce qui
+/// a créé une base vide dans `~/.local/share/zer0gh0st/` ; la migration ne copie
+/// jamais par-dessus un fichier existant, donc les 1 283 chunks du checkout
+/// devenaient invisibles. On rattache l'ancienne base, on copie les lignes et on
+/// reconstruit l'index FTS.
+///
+/// Les **vecteurs** ne sont pas importés (leurs identifiants référencent
+/// l'ancienne base) : il faut relancer `kb ingest --embed` pour les recalculer.
+fn import_legacy_if_empty(c: &Connection, current: &Path) {
+    let local: i64 = c
+        .query_row("SELECT COUNT(*) FROM knowledge", [], |r| r.get(0))
+        .unwrap_or(0);
+    if local > 0 {
+        return;
+    }
+    let legacy = crate::mods::project_root().join("knowledge.db");
+    if !legacy.is_file() || legacy == current {
+        return;
+    }
+    let attach = c.execute(
+        "ATTACH DATABASE ?1 AS legacy",
+        params![legacy.to_string_lossy().to_string()],
+    );
+    if attach.is_err() {
+        return;
+    }
+    let imported: i64 = c
+        .query_row("SELECT COUNT(*) FROM legacy.knowledge", [], |r| r.get(0))
+        .unwrap_or(0);
+    if imported > 0 {
+        let _ = c.execute(
+            "INSERT INTO knowledge (sujet, contenu, source)
+             SELECT sujet, contenu, source FROM legacy.knowledge",
+            [],
+        );
+        let _ = c.execute(
+            "INSERT INTO knowledge_fts(knowledge_fts) VALUES('rebuild')",
+            [],
+        );
+        eprintln!(
+            "📚 base de connaissance importée depuis {} ({imported} chunks) — \
+             vecteurs à recalculer : `zer0 kb ingest --embed`",
+            legacy.display()
+        );
+    }
+    let _ = c.execute("DETACH DATABASE legacy", []);
+}
+
+/// Refuse d'écrire dans une base créée par un binaire plus récent.
+fn check_schema(c: &Connection, path: &Path) -> Result<()> {
+    let v: i64 = c.pragma_query_value(None, "user_version", |r| r.get(0))?;
+    if v > KB_SCHEMA_VERSION {
+        return Err(anyhow!(
+            "base de connaissance {} créée par une version plus récente \
+             (schéma {v} > {KB_SCHEMA_VERSION}) — mets à jour ZER0|GH0ST",
+            path.display()
+        ));
+    }
+    if v < KB_SCHEMA_VERSION {
+        c.pragma_update(None, "user_version", KB_SCHEMA_VERSION)?;
+    }
+    Ok(())
 }
 
 fn init(c: &Connection) -> Result<()> {
@@ -143,17 +213,133 @@ fn blob_to_f32(b: &[u8]) -> Vec<f32> {
 
 /// Mots vides ignorés dans la requête FTS (FR + EN).
 const STOPWORDS: &[&str] = &[
-    "le", "la", "les", "un", "une", "des", "de", "du", "au", "aux", "et", "ou", "où", "que",
-    "qui", "quoi", "dont", "pour", "par", "sur", "dans", "avec", "sans", "en", "vers", "chez", "ce",
-    "cet", "cette", "ces", "mon", "ma", "mes", "ton", "ta", "tes", "son", "sa", "ses", "notre",
-    "nos", "votre", "vos", "leur", "leurs", "je", "tu", "il", "elle", "on", "nous", "vous", "ils",
-    "elles", "me", "te", "se", "moi", "toi", "lui", "est", "sont", "etre", "être", "ete", "été",
-    "avoir", "ai", "as", "avons", "avez", "ont", "parle", "parler", "dis", "dire", "explique",
-    "expliquer", "donne", "donner", "fais", "faire", "comment", "pourquoi", "quel", "quelle", "quels",
-    "the", "an", "of", "to", "in", "is", "are", "and", "or", "for", "with", "what", "how", "why",
-    "salut", "bonjour", "hello", "merci", "stp", "svp", "raconte", "raconter", "tout", "tous",
-    "toute", "toutes", "monde", "chose", "choses", "quelque", "beaucoup", "peux", "peut", "veux",
-    "voudrais", "aimerais", "svp", "sais", "voir", "juste",
+    "le",
+    "la",
+    "les",
+    "un",
+    "une",
+    "des",
+    "de",
+    "du",
+    "au",
+    "aux",
+    "et",
+    "ou",
+    "où",
+    "que",
+    "qui",
+    "quoi",
+    "dont",
+    "pour",
+    "par",
+    "sur",
+    "dans",
+    "avec",
+    "sans",
+    "en",
+    "vers",
+    "chez",
+    "ce",
+    "cet",
+    "cette",
+    "ces",
+    "mon",
+    "ma",
+    "mes",
+    "ton",
+    "ta",
+    "tes",
+    "son",
+    "sa",
+    "ses",
+    "notre",
+    "nos",
+    "votre",
+    "vos",
+    "leur",
+    "leurs",
+    "je",
+    "tu",
+    "il",
+    "elle",
+    "on",
+    "nous",
+    "vous",
+    "ils",
+    "elles",
+    "me",
+    "te",
+    "se",
+    "moi",
+    "toi",
+    "lui",
+    "est",
+    "sont",
+    "etre",
+    "être",
+    "ete",
+    "été",
+    "avoir",
+    "ai",
+    "as",
+    "avons",
+    "avez",
+    "ont",
+    "parle",
+    "parler",
+    "dis",
+    "dire",
+    "explique",
+    "expliquer",
+    "donne",
+    "donner",
+    "fais",
+    "faire",
+    "comment",
+    "pourquoi",
+    "quel",
+    "quelle",
+    "quels",
+    "the",
+    "an",
+    "of",
+    "to",
+    "in",
+    "is",
+    "are",
+    "and",
+    "or",
+    "for",
+    "with",
+    "what",
+    "how",
+    "why",
+    "salut",
+    "bonjour",
+    "hello",
+    "merci",
+    "stp",
+    "svp",
+    "raconte",
+    "raconter",
+    "tout",
+    "tous",
+    "toute",
+    "toutes",
+    "monde",
+    "chose",
+    "choses",
+    "quelque",
+    "beaucoup",
+    "peux",
+    "peut",
+    "veux",
+    "voudrais",
+    "aimerais",
+    "svp",
+    "sais",
+    "voir",
+    "juste",
 ];
 
 /// Mots significatifs d'une requête (minuscule, >=3 lettres, sans stopword).
@@ -256,7 +442,8 @@ pub async fn search(query: &str, limit: usize) -> (Vec<Hit>, Option<String>) {
                         let v = blob_to_f32(&row.1);
                         vec_scores.push((row.0, cosine(&qv, &v)));
                     }
-                    vec_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                    vec_scores
+                        .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
                     for (id, s) in vec_scores.into_iter().take(limit) {
                         if let Some(h) = hits.iter_mut().find(|h| h.id == id) {
                             h.score = (h.score + s).max(h.score);
@@ -285,7 +472,11 @@ pub async fn search(query: &str, limit: usize) -> (Vec<Hit>, Option<String>) {
         degraded = Some("aucun embedder configuré → recherche FTS5/LIKE".into());
     }
 
-    hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    hits.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     hits.truncate(limit);
     (hits, degraded)
 }
@@ -373,14 +564,19 @@ pub async fn ingest_dir(dir: &Path, embed: bool) -> Result<(usize, usize)> {
 /// Reconstruit l'index FTS5.
 pub fn rebuild_fts() -> Result<()> {
     let c = open()?;
-    c.execute("INSERT INTO knowledge_fts(knowledge_fts) VALUES('rebuild')", [])?;
+    c.execute(
+        "INSERT INTO knowledge_fts(knowledge_fts) VALUES('rebuild')",
+        [],
+    )?;
     Ok(())
 }
 
 pub fn stats() -> Result<String> {
     let c = open()?;
     let entries: i64 = c.query_row("SELECT COUNT(*) FROM knowledge", [], |r| r.get(0))?;
-    let files: i64 = c.query_row("SELECT COUNT(DISTINCT source) FROM knowledge", [], |r| r.get(0))?;
+    let files: i64 = c.query_row("SELECT COUNT(DISTINCT source) FROM knowledge", [], |r| {
+        r.get(0)
+    })?;
     let vecs: i64 = c.query_row("SELECT COUNT(*) FROM embeddings", [], |r| r.get(0))?;
     Ok(format!(
         "Base de connaissance : {}\n  entrées (chunks) : {entries}\n  fichiers         : {files}\n  vecteurs         : {vecs}\n  embedder         : {}\n  FTS5             : activé",
@@ -393,7 +589,7 @@ pub fn stats() -> Result<String> {
 
 /// Fichier de log des injections (`<ZER0v1>/knowledge.log`).
 pub fn log_path() -> PathBuf {
-    mods::project_root().join("knowledge.log")
+    crate::config::data_dir().join("knowledge.log")
 }
 
 fn now() -> String {
@@ -408,7 +604,10 @@ pub fn log_injection(query: &str, hits: &[Hit]) {
     use std::io::Write;
     let mut line = format!("[{}] query={query:?}", now());
     for h in hits {
-        line.push_str(&format!(" | {} <{}> score={:.3}", h.sujet, h.source, h.score));
+        line.push_str(&format!(
+            " | {} <{}> score={:.3}",
+            h.sujet, h.source, h.score
+        ));
     }
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)
@@ -441,7 +640,11 @@ pub fn format_hits(hits: &[Hit], degraded: &Option<String>) -> String {
             h.score,
             h.sujet,
             h.source,
-            h.contenu.replace('\n', " ").chars().take(300).collect::<String>()
+            h.contenu
+                .replace('\n', " ")
+                .chars()
+                .take(300)
+                .collect::<String>()
         ));
     }
     s
@@ -454,7 +657,10 @@ mod tests {
     #[test]
     fn tokens_filters_short_and_stopwords() {
         // Mots longs non-stopwords conservés.
-        assert_eq!(tokens("algorithmique boussole"), vec!["algorithmique", "boussole"]);
+        assert_eq!(
+            tokens("algorithmique boussole"),
+            vec!["algorithmique", "boussole"]
+        );
         // Tokens < 3 lettres ignorés.
         assert!(tokens("a bb ccc").contains(&"ccc".to_string()));
         assert!(!tokens("a bb").iter().any(|t| t.len() < 3));

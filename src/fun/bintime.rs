@@ -105,7 +105,10 @@ impl BinTime {
         lines.push(led_line(&gs)); // LEDs
         lines.push(join(3, TEXT)); // decimals
         lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(bits_line, Style::default().fg(DIM))));
+        lines.push(Line::from(Span::styled(
+            bits_line,
+            Style::default().fg(DIM),
+        )));
         lines.push(Line::from(Span::styled(
             format!("{:02}:{:02}:{:02}", self.hms.0, self.hms.1, self.hms.2),
             Style::default().fg(ON),

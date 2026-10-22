@@ -50,13 +50,30 @@ Le document n'impose pas C ; il exige que vous le sachiez et le décidiez.
 
 **Protections réelles :**
 - `F3`/`F4` : outils désactivés par défaut → l'agent ne peut pas agir sans activation explicite.
+- **Journal d'audit** (`data/audit.jsonl`, append-only, rotation à 8 Mio) : chaque appel
+  d'outil est enregistré — arguments **complets** (c'est la trace vérifiable), résultat
+  résumé, horodatage, dossier courant, sous-agents `0box` compris. Lecture : `zer0 audit`
+  ou `/audit`. Auditer n'empêche rien : ça rend l'action relisible après coup.
+- **Sauvegarde avant écrasement** : `text_editor` copie le fichier en `<nom>.zer0.bak`
+  avant de le réécrire ou de le supprimer. Une seule génération conservée — ce n'est pas
+  un historique, seulement un filet contre l'erreur immédiate du modèle.
+- **Budget d'appels LLM par tour** (120 par défaut, `ZER0_MAX_LLM_CALLS`), **partagé par
+  les sous-agents** : un `0box` récursif ne peut plus vider un quota en un message.
+- **Telegram** : `code_exec` **et** `text_editor` sont derrière `/exec` ; `/exec on` est
+  refusé sur un chat lié automatiquement (auto-claim), sauf `ZER0_TELEGRAM_ALLOW_EXEC=1`.
+- **Passerelle `zer0-gw`** : endpoints `/admin/*` protégés par un jeton (`admin_token`
+  dans `gw.toml` ou `ZER0_GW_ADMIN_TOKEN`, en-tête `x-zer0-admin`). Sans jeton, tout
+  processus local peut remplacer ou supprimer une clé : l'avertissement est journalisé
+  au démarrage, et l'exemple `deploy/gw.example.toml` documente la génération du jeton.
 - `text_editor create` **refuse** un contenu vide (pas de fichier fantôme).
 - Contrôle du raisonnement (`reasoning.enabled`) et plafonds de flux (1 Mo / 120 s) contre les boucles.
 - Coffre (Argon2 + ChaCha20-Poly1305) : clés API **chiffrées au repos**, `chmod 600`.
 - Mémoire **non auto-injectée** dans le modèle (toutes les entrées `untrusted`).
 
 **Ne protège pas :**
-- Contre une commande `code_exec` destructrice mais valide.
+- Contre une commande `code_exec` destructrice mais valide (le journal d'audit la
+  documentera, il ne l'empêchera pas).
+- Contre un écrasement en cascade : `.zer0.bak` garde **une** version, pas l'historique.
 - Contre l'exfiltration d'un secret lu dans le processus.
 - Contre l'injection de prompt via du texte récupéré.
 - Contre les provider/gateways (rétention, geo, conditions d'utilisation).

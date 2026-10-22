@@ -137,7 +137,8 @@ impl ZeroChan {
         }
         let path = rec_path();
         let Some(mut cmd) = recorder(&path) else {
-            self.last = "aucun enregistreur (installer pipewire / pulseaudio-utils / alsa-utils)".into();
+            self.last =
+                "aucun enregistreur (installer pipewire / pulseaudio-utils / alsa-utils)".into();
             return false;
         };
         let child = cmd
@@ -168,7 +169,10 @@ impl ZeroChan {
             #[cfg(unix)]
             {
                 let pid = c.id();
-                let _ = Command::new("kill").arg("-INT").arg(pid.to_string()).status();
+                let _ = Command::new("kill")
+                    .arg("-INT")
+                    .arg(pid.to_string())
+                    .status();
             }
             #[cfg(not(unix))]
             {
@@ -226,8 +230,16 @@ impl ZeroChan {
             State::Off => "_",
         };
         // clin d'œil / clignement occasionnel
-        let left = if (f / 33).is_multiple_of(11) { "-" } else { "◕" };
-        let right = if (f / 24).is_multiple_of(8) { "¬" } else { "◕" };
+        let left = if (f / 33).is_multiple_of(11) {
+            "-"
+        } else {
+            "◕"
+        };
+        let right = if (f / 24).is_multiple_of(8) {
+            "¬"
+        } else {
+            "◕"
+        };
         format!("({left}{mouth}{right})")
     }
 
@@ -271,8 +283,15 @@ impl ZeroChan {
             Line::from(vis),
         ];
         if !self.last.is_empty() {
-            let t: String = self.last.chars().take(inner.width.saturating_sub(2) as usize).collect();
-            lines.push(Line::from(Span::styled(t, Style::default().fg(Color::Gray))));
+            let t: String = self
+                .last
+                .chars()
+                .take(inner.width.saturating_sub(2) as usize)
+                .collect();
+            lines.push(Line::from(Span::styled(
+                t,
+                Style::default().fg(Color::Gray),
+            )));
         }
         f.render_widget(Paragraph::new(lines), inner);
     }
@@ -292,7 +311,10 @@ pub async fn transcribe(path: &PathBuf) -> anyhow::Result<String> {
         .output()
         .await?;
     if !out.status.success() {
-        let err: String = String::from_utf8_lossy(&out.stderr).chars().take(300).collect();
+        let err: String = String::from_utf8_lossy(&out.stderr)
+            .chars()
+            .take(300)
+            .collect();
         return Err(anyhow::anyhow!(
             "Échec STT (faster-whisper). Interpréteur : `{}`.\n\
              Installe-le : `pip install faster-whisper` (ou dans un venv, puis \
@@ -313,9 +335,17 @@ pub fn draw_buttons(f: &mut Frame, area: Rect, zc: &ZeroChan) -> (Option<Rect>, 
     if area.width < 13 || area.height < 3 {
         return (None, None);
     }
-    let border = if zc.on { Color::Magenta } else { Color::DarkGray };
+    let border = if zc.on {
+        Color::Magenta
+    } else {
+        Color::DarkGray
+    };
     let dim = Style::default().fg(border);
-    let on_color = if zc.on { Color::LightGreen } else { Color::Gray };
+    let on_color = if zc.on {
+        Color::LightGreen
+    } else {
+        Color::Gray
+    };
     let mic_color = if zc.is_recording() {
         Color::LightRed
     } else if zc.on {
@@ -342,7 +372,10 @@ pub fn draw_buttons(f: &mut Frame, area: Rect, zc: &ZeroChan) -> (Option<Rect>, 
             title,
             Style::default().fg(border).add_modifier(Modifier::BOLD),
         ),
-        Span::styled("─".repeat(area.width as usize - 2 - title.chars().count()), dim),
+        Span::styled(
+            "─".repeat(area.width as usize - 2 - title.chars().count()),
+            dim,
+        ),
         Span::styled("┐", dim),
     ]);
     let mid = Line::from(vec![
@@ -366,8 +399,18 @@ pub fn draw_buttons(f: &mut Frame, area: Rect, zc: &ZeroChan) -> (Option<Rect>, 
     f.render_widget(Paragraph::new(vec![top, mid, bottom]), block_area);
 
     // Régions cliquables : « off » (0chan) à gauche, « off » (mic) à droite.
-    let r1 = Rect { x: area.x + 2, y: area.y + 1, width: 3, height: 1 };
-    let r2 = Rect { x: area.x + 8, y: area.y + 1, width: 3, height: 1 };
+    let r1 = Rect {
+        x: area.x + 2,
+        y: area.y + 1,
+        width: 3,
+        height: 1,
+    };
+    let r2 = Rect {
+        x: area.x + 8,
+        y: area.y + 1,
+        width: 3,
+        height: 1,
+    };
     (Some(r1), Some(r2))
 }
 
@@ -380,6 +423,14 @@ pub fn block_layout(banner_area: Rect, on: bool) -> (Rect, Rect) {
             .split(banner_area);
         (cols[0], cols[1])
     } else {
-        (banner_area, Rect { x: 0, y: 0, width: 0, height: 0 })
+        (
+            banner_area,
+            Rect {
+                x: 0,
+                y: 0,
+                width: 0,
+                height: 0,
+            },
+        )
     }
 }

@@ -10,7 +10,11 @@ use tokio::sync::mpsc::UnboundedSender;
 #[derive(Debug, Clone)]
 pub enum SubAgentEvent {
     /// The sub-agent switched to a different endpoint (failover).
-    Fallback { from: String, to: String, reason: String },
+    Fallback {
+        from: String,
+        to: String,
+        reason: String,
+    },
     /// A tool was called.
     ToolCall { name: String, args: String },
     /// A tool returned a result (name = last called tool).
@@ -56,8 +60,17 @@ pub async fn run_subagent_budgeted(
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<UiEvent>();
     let messages = vec![ChatMessage::user(task)];
     tokio::spawn(async move {
-        run_turn_budgeted(endpoints, system, messages, tools, options, tx, max_iterations, max_tool_calls)
-            .await;
+        run_turn_budgeted(
+            endpoints,
+            system,
+            messages,
+            tools,
+            options,
+            tx,
+            max_iterations,
+            max_tool_calls,
+        )
+        .await;
     });
 
     let mut result = String::new();

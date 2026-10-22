@@ -28,9 +28,7 @@ impl CompactOutcome {
     pub fn message(&self) -> String {
         match self {
             CompactOutcome::Compacted => "Historique compacté.".to_string(),
-            CompactOutcome::Skipped => {
-                "Rien à compacter (conversation trop courte).".to_string()
-            }
+            CompactOutcome::Skipped => "Rien à compacter (conversation trop courte).".to_string(),
             CompactOutcome::NoModel => {
                 "Aucun modèle pour le rôle `utility` (essaie `/role auto`).".to_string()
             }
@@ -88,7 +86,11 @@ pub async fn compact_now(
     let mut last_err = String::new();
 
     for ep in utility.iter() {
-        match ep.client().stream_chat(system, &req, &[], &options, &tx).await {
+        match ep
+            .client()
+            .stream_chat(system, &req, &[], &options, &tx)
+            .await
+        {
             Ok((summary, _, _)) if !summary.trim().is_empty() => {
                 let summary = summary.trim().to_string();
                 let mut out = Vec::with_capacity(recent.len() + 1);

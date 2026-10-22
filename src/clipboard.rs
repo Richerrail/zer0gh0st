@@ -51,14 +51,22 @@ pub fn copy(text: &str) {
     }
     // Windows: PowerShell Set-Clipboard (marche meme si clip absent du PATH)
     // Methode 1: Fichier temporaire + [IO.File]::ReadAllText() | Set-Clipboard (robuste, UTF-8 garanti)
-    if let Ok(tmp) = std::env::temp_dir().join(format!("zer0_clip_{}.txt", std::process::id())).into_os_string().into_string() {
+    if let Ok(tmp) = std::env::temp_dir()
+        .join(format!("zer0_clip_{}.txt", std::process::id()))
+        .into_os_string()
+        .into_string()
+    {
         // Ecrire avec BOM UTF-8 pour forcer PowerShell a lire en UTF-8
         let mut bom_text = String::new();
         bom_text.push('\u{FEFF}'); // BOM UTF-8
         bom_text.push_str(text);
         if std::fs::write(&tmp, &bom_text).is_ok() {
             if let Ok(mut c) = Command::new("powershell")
-                .args(["-NoProfile", "-Command", &format!("[IO.File]::ReadAllText('{}') | Set-Clipboard", tmp)])
+                .args([
+                    "-NoProfile",
+                    "-Command",
+                    &format!("[IO.File]::ReadAllText('{}') | Set-Clipboard", tmp),
+                ])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .spawn()
@@ -122,13 +130,19 @@ pub fn paste() -> Option<String> {
         }
     }
     // X11: xclip
-    if let Ok(out) = Command::new("xclip").args(["-selection", "clipboard", "-o"]).output() {
+    if let Ok(out) = Command::new("xclip")
+        .args(["-selection", "clipboard", "-o"])
+        .output()
+    {
         if out.status.success() && !out.stdout.is_empty() {
             return String::from_utf8(out.stdout).ok();
         }
     }
     // X11: xsel
-    if let Ok(out) = Command::new("xsel").args(["--clipboard", "--output"]).output() {
+    if let Ok(out) = Command::new("xsel")
+        .args(["--clipboard", "--output"])
+        .output()
+    {
         if out.status.success() && !out.stdout.is_empty() {
             return String::from_utf8(out.stdout).ok();
         }

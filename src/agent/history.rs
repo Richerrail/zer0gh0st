@@ -64,7 +64,11 @@ impl ChatMessage {
     pub fn assistant(content: String, calls: Vec<ToolCall>) -> Self {
         Self {
             role: "assistant".into(),
-            content: if content.is_empty() { None } else { Some(content) },
+            content: if content.is_empty() {
+                None
+            } else {
+                Some(content)
+            },
             tool_calls: if calls.is_empty() { None } else { Some(calls) },
             tool_call_id: None,
             image: None,
@@ -139,7 +143,9 @@ mod tests {
         let mut m = ChatMessage::user("décris");
         m.image = Some("data:image/png;base64,AAAA".to_string());
         let v = m.to_wire_json();
-        let parts = v["content"].as_array().expect("content doit être un tableau");
+        let parts = v["content"]
+            .as_array()
+            .expect("content doit être un tableau");
         assert_eq!(parts.len(), 2);
         assert_eq!(parts[0]["type"], "text");
         assert_eq!(parts[0]["text"], "décris");

@@ -81,7 +81,11 @@ fn color_at(x: usize, w: usize, animated: bool, phase: u16) -> Color {
         let hue = ((x as u32 * 360 / w.max(1) as u32) + phase as u32) % 360;
         hsv_to_rgb(hue as f32, 1.0, 1.0)
     } else {
-        let t = if w <= 1 { 0.0 } else { x as f32 / (w - 1) as f32 };
+        let t = if w <= 1 {
+            0.0
+        } else {
+            x as f32 / (w - 1) as f32
+        };
         let r = (70.0 * t) as u8;
         let g = (200.0 * (1.0 - t) + 90.0 * t) as u8;
         Color::Rgb(r, g, 255)

@@ -419,9 +419,7 @@ where
     while std::time::Instant::now() < deadline {
         tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
         match poll_device_token(&cid, &dc.device_code).await? {
-            PollOutcome::Token { access, refresh } => {
-                return Ok(Credentials { access, refresh })
-            }
+            PollOutcome::Token { access, refresh } => return Ok(Credentials { access, refresh }),
             PollOutcome::Pending => {}
             PollOutcome::Expired => return Err(anyhow!("code expiré — relance la connexion")),
         }
@@ -556,9 +554,9 @@ async fn vote_down() -> String {
     };
     match unstar(&tok).await {
         Ok(()) => match stars(true).await {
-            Some(n) => format!(
-                "🖐️ Star retirée. ({n} stars — GitHub propage le compteur en ~1 min)"
-            ),
+            Some(n) => {
+                format!("🖐️ Star retirée. ({n} stars — GitHub propage le compteur en ~1 min)")
+            }
             None => "🖐️ Star retirée.".to_string(),
         },
         Err(e) => format!("⚠️ Retrait impossible : {e}"),
@@ -605,7 +603,10 @@ pub async fn act(action: Action) -> String {
                     let ok = is_starred(&new).await.unwrap_or(false);
                     vote_up(ok).await
                 }
-                None => format!("⚠️ {e} — jeton expiré, reconnecte-toi : `{} vote login`", self_cmd()),
+                None => format!(
+                    "⚠️ {e} — jeton expiré, reconnecte-toi : `{} vote login`",
+                    self_cmd()
+                ),
             },
             Err(e) => format!("⚠️ État GitHub inconnu : {e}"),
         },
@@ -616,7 +617,10 @@ pub async fn act(action: Action) -> String {
                     let _ = unstar(&new).await;
                     vote_down().await
                 }
-                None => format!("⚠️ {e} — jeton expiré, reconnecte-toi : `{} vote login`", self_cmd()),
+                None => format!(
+                    "⚠️ {e} — jeton expiré, reconnecte-toi : `{} vote login`",
+                    self_cmd()
+                ),
             },
             Err(e) => format!("⚠️ Retrait impossible : {e}"),
         },
@@ -774,14 +778,20 @@ mod tests {
         // Test sur la version **pure** : on ne touche PAS à l'environnement
         // (les tests tournent en parallèle → muter l'env est une course, et
         // cela rendait la CI instable).
-        assert_eq!(client_id_from(None, None).as_deref(), Some(DEFAULT_CLIENT_ID));
+        assert_eq!(
+            client_id_from(None, None).as_deref(),
+            Some(DEFAULT_CLIENT_ID)
+        );
         // La variable d'env prime sur la config.
         assert_eq!(
             client_id_from(Some("ENV_ID".into()), Some("CFG_ID".into())).as_deref(),
             Some("ENV_ID")
         );
         // Sinon la config, sinon le défaut.
-        assert_eq!(client_id_from(None, Some("CFG_ID".into())).as_deref(), Some("CFG_ID"));
+        assert_eq!(
+            client_id_from(None, Some("CFG_ID".into())).as_deref(),
+            Some("CFG_ID")
+        );
         // Une valeur vide est ignorée.
         assert_eq!(
             client_id_from(Some("  ".into()), Some("CFG_ID".into())).as_deref(),

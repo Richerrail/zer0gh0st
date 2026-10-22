@@ -101,8 +101,38 @@ struct Bot {
     shutdown: bool,
     /// Autorise `code_exec` (shell) — désactivé par défaut.
     exec: bool,
+    /// L'allowlist vient-elle de l'utilisateur (config/CLI) ou d'un auto-claim ?
+    /// Un auto-claim seul n'ouvre pas le shell : sinon, quiconque trouve le bot
+    /// avant son propriétaire obtient un `bash` sur la machine.
+    exec_trusted: bool,
 }
+/// Shell distant explicitement autorisé malgré un auto-claim.
+fn exec_optin() -> bool {
+    matches!(
+        std::env::var("ZER0_TELEGRAM_ALLOW_EXEC").as_deref(),
+        Ok("1") | Ok("true") | Ok("yes")
+    )
+}
+
 impl Bot {
+    /// Outils exposés au bot.
+    ///
+    /// `code_exec` **et** `text_editor` sont derrière `/exec` : un chat lié
+    /// automatiquement (auto-claim) ne doit pas pouvoir écrire ou supprimer un
+    /// fichier avant que l'utilisateur ait autorisé les actions système depuis
+    /// la machine locale. Avant, `text_editor` était toujours actif : un inconnu
+    /// qui trouvait le bot pouvait déjà écraser des fichiers sans `/exec`.
+    fn tools_for(&self) -> Vec<ToolSpec> {
+        self.tools
+            .iter()
+            .filter(|t| match t.name {
+                "code_exec" | "text_editor" => self.exec,
+                _ => true,
+            })
+            .cloned()
+            .collect()
+    }
+
     fn info(&self, s: String) {
         if let Some(n) = &self.notify {
             let _ = n.send(UiEvent::Info(s));
@@ -113,7 +143,14 @@ impl Bot {
 impl Bot {
     async fn api(&self, method: &str, body: serde_json::Value) -> Result<serde_json::Value> {
         let url = format!("{API}/bot{}/{method}", self.token);
-        let v: serde_json::Value = self.http.post(&url).json(&body).send().await?.json().await?;
+        let v: serde_json::Value = self
+            .http
+            .post(&url)
+            .json(&body)
+            .send()
+            .await?
+            .json()
+            .await?;
         if v.get("ok").and_then(|b| b.as_bool()) == Some(true) {
             Ok(v.get("result").cloned().unwrap_or(serde_json::Value::Null))
         } else {
@@ -201,6 +238,7 @@ impl Bot {
         // Allowlist + auto-claim du premier chat.
         if self.allow.is_empty() {
             self.allow = vec![from_id];
+            self.exec_trusted = false; // provenance inconnue → shell verrouillé
             let mut g = config::load_global();
             g.telegram_allow = self.allow.clone();
             let _ = config::save_global(&g);
@@ -243,10 +281,7 @@ impl Bot {
                 Ok(path) => {
                     let name = d.file_name.clone().unwrap_or_default();
                     let _ = self
-                        .send(
-                            chat_id,
-                            &format!("📥 reçu : {name} → {}", path.display()),
-                        )
+                        .send(chat_id, &format!("📥 reçu : {name} → {}", path.display()))
                         .await;
                     text = Some(format!(
                         "J'ai reçu le fichier « {name} » (chemin local : {}). Regarde-le et dis-moi ce que tu en penses.",
@@ -281,7 +316,7 @@ impl Bot {
                          /new — nouvelle conversation\n\
                          /status — état\n\
                          /progress — où en est le projet\n\
-                         /exec on|off — autoriser le shell (code_exec)\n\
+                         /exec on|off — autoriser les actions système (shell + écriture de fichiers)\n\
                          /stop — interrompre\n\
                          /shutdown — éteindre le bot\n\
                          Sinon : écris, envoie un vocal 🎤 ou un fichier 📎.",
@@ -291,18 +326,30 @@ impl Bot {
             }
             "/exec" => {
                 match args.first().copied() {
-                    Some("on") => self.exec = true,
+                    Some("on") if self.exec_trusted || exec_optin() => self.exec = true,
+                    Some("on") => {
+                        let _ = self
+                            .send(
+                                chat_id,
+                                "🚫 /exec refusé : ce chat a été lié automatiquement (premier \
+                                 contact). Active le shell depuis la machine locale \
+                                 (`/codeexec` dans la TUI) ou relance le bot avec \
+                                 `--allow <ton_id>`. Force possible : ZER0_TELEGRAM_ALLOW_EXEC=1.",
+                            )
+                            .await;
+                        return;
+                    }
                     Some("off") => self.exec = false,
                     _ => {}
                 }
                 let msg = if self.exec {
-                    "🐚 shell (code_exec) : ON\n\
+                    "🐚 actions système (shell + écriture) : ON\n\
                      ⚠️  TOUTES les commandes s'exécutent SANS validation.\n\
                      Si l'agent fait un `rm -rf` sur ton disque de photos de famille \
                      par erreur, c'est TOI le responsable.\n\
                      (/exec off pour couper)"
                 } else {
-                    "🐚 shell (code_exec) : OFF\n/exec on | /exec off"
+                    "🐚 actions système : OFF (lecture seule)\n/exec on | /exec off"
                 };
                 let _ = self.send(chat_id, msg).await;
                 return;
@@ -360,17 +407,13 @@ impl Bot {
     }
 
     async fn ask(&mut self, chat_id: i64, prompt: String) {
+        // Calculé AVANT d'emprunter `self.chats` (emprunt mutable plus bas).
+        let tools = self.tools_for();
         let history = self.chats.entry(chat_id).or_default();
         history.push(ChatMessage::user(prompt.clone()));
         let role = route::auto_role(&prompt).to_string();
         let endpoints = route::chain_for_role(&self.settings, &role);
         let utility = route::chain_for_role(&self.settings, "utility");
-        let tools: Vec<ToolSpec> = self
-            .tools
-            .iter()
-            .filter(|t| t.name != "code_exec" || self.exec)
-            .cloned()
-            .collect();
         // Liste explicite des outils dans le prompt (ce modèle ignore le paramètre `tools`).
         let mut system = self.system.clone();
         if !tools.is_empty() {
@@ -405,7 +448,8 @@ impl Bot {
                 UiEvent::Token(t) => {
                     acc.push_str(&t);
                     if last.elapsed() > Duration::from_millis(2000) {
-                        self.edit(chat_id, mid, &progress_body(&prog, &acc, t0)).await;
+                        self.edit(chat_id, mid, &progress_body(&prog, &acc, t0))
+                            .await;
                         let _ = self.typing(chat_id).await;
                         last = Instant::now();
                     }
@@ -413,7 +457,8 @@ impl Bot {
                 UiEvent::ToolCall { name, args } => {
                     let short: String = args.chars().take(80).collect();
                     prog.push_str(&format!("⚙ {name} {short}\n"));
-                    self.edit(chat_id, mid, &progress_body(&prog, &acc, t0)).await;
+                    self.edit(chat_id, mid, &progress_body(&prog, &acc, t0))
+                        .await;
                 }
                 UiEvent::TurnComplete(_) => break,
                 UiEvent::Error(e) => {
@@ -507,16 +552,27 @@ fn progress_report(
     use crate::tasks::Status;
     let tasks = crate::tasks::load();
     let total = tasks.len();
-    let done = tasks.iter().filter(|t| matches!(t.status, Status::Done)).count();
-    let doing = tasks.iter().filter(|t| matches!(t.status, Status::Claimed)).count();
+    let done = tasks
+        .iter()
+        .filter(|t| matches!(t.status, Status::Done))
+        .count();
+    let doing = tasks
+        .iter()
+        .filter(|t| matches!(t.status, Status::Claimed))
+        .count();
     let n = chats.get(&chat_id).map(|c| c.len()).unwrap_or(0);
     let mut s = String::from("📊 Progression\n");
-    s.push_str(&format!("• Modèle : {}/{}\n", settings.provider_id, settings.model));
+    s.push_str(&format!(
+        "• Modèle : {}/{}\n",
+        settings.provider_id, settings.model
+    ));
     s.push_str(&format!("• Chat Telegram : {n} message(s)\n"));
     if total == 0 {
         s.push_str("• Tâches : aucune (.zer0/tasks.md)\n");
     } else {
-        s.push_str(&format!("• Tâches : {done}/{total} faites, {doing} en cours\n"));
+        s.push_str(&format!(
+            "• Tâches : {done}/{total} faites, {doing} en cours\n"
+        ));
         if let Some(t) = tasks.iter().find(|t| matches!(t.status, Status::Pending)) {
             s.push_str(&format!("• Suivante : {} — {}\n", t.id, t.text));
         } else if doing == 0 {
@@ -541,7 +597,10 @@ fn now_secs() -> u64 {
 fn token_from_env_file() -> Option<String> {
     let s = std::fs::read_to_string(config::config_dir().join("telegram.env")).ok()?;
     s.lines()
-        .find_map(|l| l.strip_prefix("ZER0_TELEGRAM_TOKEN=").map(|v| v.trim().to_string()))
+        .find_map(|l| {
+            l.strip_prefix("ZER0_TELEGRAM_TOKEN=")
+                .map(|v| v.trim().to_string())
+        })
         .filter(|t| !t.is_empty())
 }
 
@@ -589,7 +648,10 @@ pub fn spawn(
             eprintln!("telegram: {e}");
         }
     });
-    Ok(Handle { stop: stop_tx, join })
+    Ok(Handle {
+        stop: stop_tx,
+        join,
+    })
 }
 
 /// Mode CLI : lance et bloque jusqu'à Ctrl+C.
@@ -606,9 +668,11 @@ async fn run_loop(
     notify: Option<tokio::sync::mpsc::UnboundedSender<UiEvent>>,
 ) -> Result<()> {
     let quiet = notify.is_some();
-    let system = config::system_prompt_override().unwrap_or_else(|| crate::DEFAULT_SYSTEM.to_string());
+    let system =
+        config::system_prompt_override().unwrap_or_else(|| crate::DEFAULT_SYSTEM.to_string());
     let system = crate::enrich_system(system);
 
+    let allow_is_empty = allow.is_empty();
     let mut bot = Bot {
         http: reqwest::Client::new(),
         token,
@@ -625,10 +689,17 @@ async fn run_loop(
         notify,
         shutdown: false,
         exec: false,
+        // Une allowlist fournie par l'utilisateur (--allow ou config) est de
+        // confiance ; une liste vide = auto-claim au premier contact.
+        exec_trusted: !allow_is_empty,
     };
 
     let me = bot.api("getMe", serde_json::json!({})).await?;
-    let username = me.get("username").and_then(|u| u.as_str()).unwrap_or("(bot)").to_string();
+    let username = me
+        .get("username")
+        .and_then(|u| u.as_str())
+        .unwrap_or("(bot)")
+        .to_string();
     if quiet {
         bot.info(format!("🤖 Telegram: ON — @{username}"));
     } else {

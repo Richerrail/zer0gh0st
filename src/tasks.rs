@@ -169,7 +169,10 @@ pub fn extract_paths(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     for tok in text.split_whitespace() {
         let tok = tok.trim_matches(|c: char| {
-            matches!(c, '`' | '"' | '\'' | '(' | ')' | ',' | ';' | ']' | '[' | '{' | '}' | '«' | '»')
+            matches!(
+                c,
+                '`' | '"' | '\'' | '(' | ')' | ',' | ';' | ']' | '[' | '{' | '}' | '«' | '»'
+            )
         });
         if tok.is_empty() {
             continue;
@@ -200,7 +203,11 @@ pub fn extract_paths(text: &str) -> Vec<String> {
 /// `~/x` → dossier personnel. Autres chemins inchangés.
 fn expand_home(p: &str) -> String {
     if let Some(rest) = p.strip_prefix("~/").or_else(|| p.strip_prefix("~\\")) {
-        format!("{}{}", crate::platform::home().trim_end_matches(['/', '\\']), rest)
+        format!(
+            "{}{}",
+            crate::platform::home().trim_end_matches(['/', '\\']),
+            rest
+        )
     } else {
         p.to_string()
     }
@@ -256,7 +263,11 @@ pub fn format_list() -> String {
     }
     let mut s = format!("Tâches ({}):\n", tasks.len());
     for t in &tasks {
-        let role = t.role.as_deref().map(|r| format!(" [{r}]")).unwrap_or_default();
+        let role = t
+            .role
+            .as_deref()
+            .map(|r| format!(" [{r}]"))
+            .unwrap_or_default();
         s.push_str(&format!(
             "  {} {} {}{}\n",
             t.status.mark(),

@@ -19,6 +19,16 @@ listen = "127.0.0.1:8787"
 # `keys.env` reste réservé aux clés « style variable d'env » injectées par systemd.
 # keys_file = "/etc/zer0-gw/keys.managed"
 
+# ── Authentification des endpoints /admin/* ───────────────────────────────
+# Sans jeton, N'IMPORTE QUEL processus local peut déposer ou supprimer une clé
+# (remplacement = tes prompts partent sur le compte d'un autre ; suppression =
+# déni de service). Loopback ne protège pas de ça.
+# L'agent envoie l'en-tête `x-zer0-admin` s'il connaît le jeton :
+#   - variable d'environnement `ZER0_GW_ADMIN_TOKEN` (prioritaire), ou
+#   - clé `gw_admin_token` dans ~/.config/zer0/config.toml.
+# Laisser vide = mode historique (déconseillé) ; un avertissement est journalisé.
+# admin_token = "colle-ici-le-resultat-de: openssl rand -hex 32"
+
 [limits]
 requests_per_minute = 120        # par provider (partagé par tous les agents locaux)
 max_body_bytes = 4194304         # 4 MiO
