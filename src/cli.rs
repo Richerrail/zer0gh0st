@@ -1280,11 +1280,12 @@ mod tests {
     /// Si ce test casse, régénère : `zer0 commands > docs/COMMANDS.md`.
     #[test]
     fn docs_commands_is_up_to_date() {
-        let generated = commands_markdown();
-        let committed = include_str!("../docs/COMMANDS.md");
+        // Comparaison insensible aux fins de ligne : un checkout Windows peut
+        // convertir le fichier en CRLF, ce qui n'est pas une désynchronisation.
+        let norm = |s: &str| s.replace("\r\n", "\n").trim_end().to_string();
         assert_eq!(
-            generated.trim_end(),
-            committed.trim_end(),
+            norm(&commands_markdown()),
+            norm(include_str!("../docs/COMMANDS.md")),
             "docs/COMMANDS.md est désynchronisé — régénère : `zer0 commands > docs/COMMANDS.md`"
         );
     }
