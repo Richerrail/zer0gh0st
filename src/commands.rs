@@ -117,6 +117,33 @@ pub fn task(cmd: TaskCmd) -> Result<Vec<String>> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Modèle actif
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Définit le modèle actif (persisté dans la config globale).
+///
+/// Refuse les modèles d'embedding/rerank : ils ne répondent que sur
+/// `/embeddings`, donc les sélectionner casse le chat avec un 400 opaque.
+/// Le CLI et la TUI partageaient déjà ce contrôle, mais avec deux textes
+/// différents et deux façons de propager (ou d'avaler) l'erreur.
+pub fn set_model(id: &str) -> Result<Vec<String>> {
+    let id = id.trim();
+    if id.is_empty() {
+        return Err(anyhow!("usage: model use <id>"));
+    }
+    if crate::select::is_embedding_or_rerank(id) {
+        return Err(anyhow!(
+            "'{id}' est un modèle d'embedding/rerank — inutilisable en chat \
+             (endpoint /embeddings). Modèle inchangé."
+        ));
+    }
+    let mut g = crate::config::load_global();
+    g.model = Some(id.to_string());
+    crate::config::save_global(&g)?;
+    Ok(vec![format!("Modèle actif: {id}")])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Recherche web
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -271,6 +298,15 @@ mod tests {
     fn unknown_subcommand_is_an_error_with_usage() {
         let e = parse_task(&["frobnicate"]).unwrap_err().to_string();
         assert!(e.contains("usage: task"), "{e}");
+    }
+
+    #[test]
+    fn set_model_refuses_embeddings_and_empty_ids() {
+        // Refus avant toute lecture/écriture de config : testable sans disque.
+        let e = set_model("text-embedding-3-large").unwrap_err().to_string();
+        assert!(e.contains("embedding"), "{e}");
+        assert!(set_model("   ").unwrap_err().to_string().contains("usage"));
+        assert!(set_model("bge-reranker-v2").is_err());
     }
 
     #[test]

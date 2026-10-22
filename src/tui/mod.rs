@@ -1432,21 +1432,17 @@ fn handle_model(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) 
     };
     match model {
         Some(m) => {
-            if select::is_embedding_or_rerank(m) {
-                app.messages.push(ChatMessage::notice(format!(
-                    "❌ {m} est un modèle d'embedding/rerank — inutilisable en chat \
-                     (endpoint /embeddings). Modèle inchangé : {}",
-                    app.model
-                )));
-                return;
+            // Même contrôle et même persistance que `zer0 model use <id>`.
+            match crate::commands::set_model(m) {
+                Ok(lines) => {
+                    app.model = m.to_string();
+                    probe_context(app, ui_tx);
+                    for line in lines {
+                        app.messages.push(ChatMessage::notice(line));
+                    }
+                }
+                Err(e) => app.messages.push(ChatMessage::notice(format!("❌ {e}"))),
             }
-            let mut g = config::load_global();
-            g.model = Some(m.to_string());
-            let _ = config::save_global(&g);
-            app.model = m.to_string();
-            probe_context(app, ui_tx);
-            app.messages
-                .push(ChatMessage::notice(format!("Modèle actif: {m}")));
         }
         None => app
             .messages

@@ -1216,15 +1216,9 @@ async fn list_models_cmd(free: bool, provider_id: Option<String>) -> Result<()> 
 fn model_cmd(action: ModelAction) -> Result<()> {
     match action {
         ModelAction::Use { id } => {
-            if crate::select::is_embedding_or_rerank(&id) {
-                return Err(anyhow!(
-                    "'{id}' est un modèle d'embedding/rerank — inutilisable en chat (endpoint /embeddings)."
-                ));
+            for line in commands::set_model(&id)? {
+                println!("{line}");
             }
-            let mut g = config::load_global();
-            g.model = Some(id.clone());
-            config::save_global(&g)?;
-            println!("Modèle actif: {id}");
         }
     }
     Ok(())
