@@ -1,6 +1,6 @@
 use crate::{
-    agent, commands, config, enrich_system, fun, gwclient, http_client, jimmy, knowledge, models,
-    pdf, personas, providers, route, telegram, tools, tui, update, vault, zerochan, DEFAULT_SYSTEM,
+    agent, commands, config, enrich_system, fun, gwclient, http_client, jimmy, models, pdf,
+    personas, providers, route, telegram, tools, tui, update, vault, zerochan, DEFAULT_SYSTEM,
 };
 use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand};
@@ -406,6 +406,11 @@ enum KbAction {
     },
     /// Rebuild the FTS5 index.
     Rebuild,
+    /// Show the knowledge-injection log.
+    Log {
+        #[arg(long, default_value_t = 15)]
+        lines: usize,
+    },
 }
 
 /// Catalogue d'APIs publiques (public-apis/public-apis).
@@ -779,34 +784,22 @@ async fn stt_cmd(file: String) -> Result<()> {
 }
 
 async fn kb_cmd(action: KbAction) -> Result<()> {
-    match action {
-        KbAction::Stats => println!("{}", knowledge::stats()?),
+    let lines = match action {
+        KbAction::Stats => commands::kb_stats()?,
         KbAction::Search { query, k } => {
-            let q = query.join(" ");
-            let (hits, deg) = knowledge::search(&q, k.unwrap_or(5)).await;
-            println!("{}", knowledge::format_hits(&hits, &deg));
+            commands::kb_search(&query.join(" "), k.unwrap_or(5)).await?
         }
         KbAction::Ingest { dir, embed } => {
-            let d = dir
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(knowledge::default_dir);
-            let (files, chunks) = knowledge::ingest_dir(&d, embed).await?;
-            println!(
-                "Indexé : {files} fichier(s), {chunks} chunk(s) depuis {}",
-                d.display()
-            );
-            if embed && crate::memory::embedder_id().is_none() {
-                println!("(aucun embedder configuré → vecteurs non calculés)");
-            }
+            commands::kb_ingest(dir.map(std::path::PathBuf::from), embed).await?
         }
-        KbAction::Rebuild => {
-            knowledge::rebuild_fts()?;
-            println!("Index FTS5 reconstruit.");
-        }
+        KbAction::Rebuild => commands::kb_rebuild()?,
+        KbAction::Log { lines } => commands::kb_log(lines),
+    };
+    for line in lines {
+        println!("{line}");
     }
     Ok(())
 }
-
 fn apis_cmd(action: ApisAction) -> Result<()> {
     match action {
         ApisAction::Import { path } => {

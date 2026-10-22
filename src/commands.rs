@@ -242,6 +242,61 @@ pub async fn route_auto(provider: &str, n: usize) -> Result<Vec<String>> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Base de connaissance (SQLite + FTS5)
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub fn kb_stats() -> Result<Vec<String>> {
+    Ok(crate::knowledge::stats()?
+        .lines()
+        .map(|l| l.to_string())
+        .collect())
+}
+
+pub async fn kb_search(query: &str, k: usize) -> Result<Vec<String>> {
+    let q = query.trim();
+    if q.is_empty() {
+        return Err(anyhow!("usage: kb search <requête>"));
+    }
+    let (hits, degraded) = crate::knowledge::search(q, k.clamp(1, 20)).await;
+    Ok(crate::knowledge::format_hits(&hits, &degraded)
+        .lines()
+        .map(|l| l.to_string())
+        .collect())
+}
+
+/// Indexe un dossier (défaut : `base_connaissance`).
+pub async fn kb_ingest(dir: Option<std::path::PathBuf>, embed: bool) -> Result<Vec<String>> {
+    let d = dir.unwrap_or_else(crate::knowledge::default_dir);
+    // Vérifié avant d'ouvrir la base : « dossier inexistant » ne doit pas créer
+    // une base vide au passage.
+    if !d.exists() {
+        return Err(anyhow!("dossier introuvable: {}", d.display()));
+    }
+    let (files, chunks) = crate::knowledge::ingest_dir(&d, embed).await?;
+    let mut out = vec![format!(
+        "Indexé : {files} fichier(s), {chunks} chunk(s) depuis {}",
+        d.display()
+    )];
+    if embed && crate::memory::embedder_id().is_none() {
+        out.push("(aucun embedder configuré → vecteurs non calculés)".to_string());
+    }
+    out.push(format!("Base : {}", crate::knowledge::db_path().display()));
+    Ok(out)
+}
+
+pub fn kb_rebuild() -> Result<Vec<String>> {
+    crate::knowledge::rebuild_fts()?;
+    Ok(vec!["Index FTS5 reconstruit.".to_string()])
+}
+
+pub fn kb_log(n: usize) -> Vec<String> {
+    crate::knowledge::tail_log(n.clamp(1, 500))
+        .lines()
+        .map(|l| l.to_string())
+        .collect()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Mémoire persistante
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -577,6 +632,19 @@ mod tests {
     fn unknown_subcommand_is_an_error_with_usage() {
         let e = parse_task(&["frobnicate"]).unwrap_err().to_string();
         assert!(e.contains("usage: task"), "{e}");
+    }
+
+    #[test]
+    fn kb_commands_validate_before_touching_the_database() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        assert!(rt.block_on(kb_search("   ", 5)).is_err());
+        // Dossier inexistant : erreur avant ouverture de la base.
+        let missing = std::path::PathBuf::from("/tmp/zer0-kb-inexistant-xyz");
+        let e = rt
+            .block_on(kb_ingest(Some(missing), false))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("introuvable"), "{e}");
     }
 
     #[test]

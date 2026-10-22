@@ -2519,35 +2519,35 @@ fn handle_apis(app: &mut App, args: &[&str]) {
 
 fn handle_kb(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
     match args.first().copied() {
-        None | Some("stats") => match crate::knowledge::stats() {
-            Ok(s) => app.messages.push(ChatMessage::notice(s)),
+        None | Some("stats") => match crate::commands::kb_stats() {
+            Ok(lines) => app.messages.push(ChatMessage::notice(lines.join("\n"))),
             Err(e) => app
                 .messages
                 .push(ChatMessage::notice(format!("Erreur: {e}"))),
         },
         Some("search") => {
             let q = args.get(1..).map(|s| s.join(" ")).unwrap_or_default();
-            if q.trim().is_empty() {
-                app.messages
-                    .push(ChatMessage::notice("usage: /kb search <requête>"));
-            } else {
-                let ui = ui_tx.clone();
-                tokio::spawn(async move {
-                    let (hits, deg) = crate::knowledge::search(&q, 5).await;
-                    let _ = ui.send(UiEvent::Info(crate::knowledge::format_hits(&hits, &deg)));
-                });
-            }
-        }
-        Some("ingest") => {
-            let dir = args.get(1).map(|s| s.to_string());
             let ui = ui_tx.clone();
             tokio::spawn(async move {
-                let d = dir
-                    .map(std::path::PathBuf::from)
-                    .unwrap_or_else(crate::knowledge::default_dir);
-                let msg = match crate::knowledge::ingest_dir(&d, false).await {
-                    Ok((f, c)) => format!("📚 indexé : {f} fichier(s), {c} chunk(s)"),
-                    Err(e) => format!("Erreur ingère : {e}"),
+                let msg = match crate::commands::kb_search(&q, 5).await {
+                    Ok(lines) => lines.join("\n"),
+                    Err(e) => format!("{e}"),
+                };
+                let _ = ui.send(UiEvent::Info(msg));
+            });
+        }
+        Some("ingest") => {
+            // `--embed` est reconnu ici aussi (le CLI l'avait, la TUI l'ignorait).
+            let embed = args.contains(&"--embed");
+            let dir = args
+                .get(1)
+                .filter(|a| **a != "--embed")
+                .map(std::path::PathBuf::from);
+            let ui = ui_tx.clone();
+            tokio::spawn(async move {
+                let msg = match crate::commands::kb_ingest(dir, embed).await {
+                    Ok(lines) => lines.join("\n"),
+                    Err(e) => format!("Erreur ingest : {e}"),
                 };
                 let _ = ui.send(UiEvent::Info(msg));
             });
@@ -2555,8 +2555,9 @@ fn handle_kb(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
         Some("log") => {
             let n = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(15);
             app.messages
-                .push(ChatMessage::notice(crate::knowledge::tail_log(n)));
+                .push(ChatMessage::notice(crate::commands::kb_log(n).join("\n")));
         }
+        // État de session (pas de config) : TUI uniquement.
         Some("auto") => {
             app.kb_auto = !app.kb_auto;
             let state = if app.kb_auto { "ON" } else { "OFF" };
@@ -2564,20 +2565,17 @@ fn handle_kb(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
                 "Injection connaissance : {state}"
             )));
         }
-        Some("rebuild") => match crate::knowledge::rebuild_fts() {
-            Ok(()) => app
-                .messages
-                .push(ChatMessage::notice("Index FTS5 reconstruit.")),
+        Some("rebuild") => match crate::commands::kb_rebuild() {
+            Ok(lines) => app.messages.push(ChatMessage::notice(lines.join("\n"))),
             Err(e) => app
                 .messages
                 .push(ChatMessage::notice(format!("Erreur: {e}"))),
         },
         _ => app.messages.push(ChatMessage::notice(
-            "usage: /kb [stats|search <q>|ingest [dir]|auto|log|rebuild]",
+            "usage: /kb [stats|search <q>|ingest [dir] [--embed]|auto|log [n]|rebuild]",
         )),
     }
 }
-
 /// `/embeddings [show|set <provider> <model>|unset]` — embedder de la mémoire.
 /// Un modèle d'embedding ne sert QUE pour `/embeddings` (pas de chat).
 fn handle_embeddings(app: &mut App, args: &[&str]) {
