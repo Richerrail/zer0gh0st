@@ -1,3 +1,22 @@
+## v0.6.1 — Correctifs issus de la revue (2026-10-22)
+
+- **TUI — cache de rendu** : chaque frame re-découpait et re-parsait toute la conversation
+  (O(conversation) par frame, donc par token). Rendu mémoïsé par message (index, largeur,
+  empreinte du contenu), invalidé au changement du nombre de messages.
+- **I/O hors du runtime async** : `knowledge::search` (appelée à chaque tour) exécute FTS5
+  et le scan des vecteurs en `spawn_blocking` ; idem pour la lecture/écriture de
+  `memory.jsonl`. Un `prepare().unwrap()` du chemin vectoriel devient une erreur gérée.
+- **Migration des données** : les journaux JSONL sont repris s'ils sont **plus récents**
+  que la copie XDG. Corrige une mémoire amputée (21 entrées → 5) après le passage en XDG.
+- **Journal d'audit** : purge d'ancienneté (90 jours par défaut, `ZER0_AUDIT_RETENTION_DAYS`,
+  `0` = désactivée), une fois par processus ; les lignes illisibles sont conservées.
+- **Référence des commandes générée** : `zer0 commands` produit `docs/COMMANDS.md`
+  (559 lignes) depuis clap ; un test échoue si le fichier diverge du binaire.
+- **Usage stable** : `bin_name("zer0")` — l'asset brut n'affiche plus
+  `Usage: zer0-x86_64-unknown-linux-gnu`.
+- `.gitattributes` : fins de ligne normalisées, markdown en LF (le test anti-dérive
+  échouait sur un checkout Windows en CRLF).
+
 ## v0.6.0 — Noyau testable, correctifs critiques et garde-fous (2026-10-22)
 
 ### Corrigé — pertes de données et crashs silencieux
