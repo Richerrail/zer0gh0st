@@ -242,6 +242,284 @@ pub async fn route_auto(provider: &str, n: usize) -> Result<Vec<String>> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Quota
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub async fn quota_report(provider: Option<&str>) -> Result<Vec<String>> {
+    let settings = crate::config::resolve();
+    let (pid, key) = match provider.map(str::trim).filter(|p| !p.is_empty()) {
+        Some(id) => {
+            let p = crate::providers::find(id).ok_or_else(|| anyhow!("provider inconnu: {id}"))?;
+            (p.id.clone(), crate::config::key_for(&p))
+        }
+        None => (settings.provider_id.clone(), settings.api_key.clone()),
+    };
+    let mut out: Vec<String> = crate::quota::report()
+        .lines()
+        .map(|l| l.to_string())
+        .collect();
+    if let Some(live) = crate::quota::fetch_live(&pid, key.as_deref()).await {
+        out.push(String::new());
+        out.extend(live.lines().map(|l| l.to_string()));
+    } else if pid != "openrouter" {
+        out.push(String::new());
+        out.push(format!(
+            "{pid} ne publie aucun solde interrogable — seuls les appels observés et les \
+             limites révélées dans les 429 sont comptés."
+        ));
+    }
+    Ok(out)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PDF
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PdfCmd {
+    Info(String),
+    Text(String),
+    Merge {
+        output: String,
+        inputs: Vec<String>,
+    },
+    Split {
+        path: String,
+        output: String,
+        first: u32,
+        last: u32,
+    },
+}
+
+const PDF_USAGE: &str =
+    "usage: pdf info <f> | text <f> | merge <sortie> <entrée…> | split <entrée> <sortie> <première> <dernière>";
+
+/// Parse les arguments d'une commande `pdf` (mêmes règles pour CLI et TUI).
+pub fn parse_pdf_args(args: &[&str]) -> Result<PdfCmd> {
+    match args.first().copied().unwrap_or("") {
+        "" => Err(anyhow!("{PDF_USAGE}")),
+        "info" => args
+            .get(1)
+            .map(|p| PdfCmd::Info((*p).to_string()))
+            .ok_or_else(|| anyhow!("{PDF_USAGE}")),
+        "text" => args
+            .get(1)
+            .map(|p| PdfCmd::Text((*p).to_string()))
+            .ok_or_else(|| anyhow!("{PDF_USAGE}")),
+        "merge" => {
+            let output = args.get(1).copied().unwrap_or("");
+            let inputs: Vec<String> = args.iter().skip(2).map(|s| (*s).to_string()).collect();
+            if output.is_empty() || inputs.is_empty() {
+                return Err(anyhow!("{PDF_USAGE}"));
+            }
+            Ok(PdfCmd::Merge {
+                output: output.to_string(),
+                inputs,
+            })
+        }
+        "split" => {
+            let path = args.get(1).copied().unwrap_or("");
+            let output = args.get(2).copied().unwrap_or("");
+            let first = args.get(3).and_then(|s| s.parse::<u32>().ok());
+            let last = args.get(4).and_then(|s| s.parse::<u32>().ok());
+            match (path.is_empty(), output.is_empty(), first, last) {
+                (false, false, Some(first), Some(last)) if first >= 1 && last >= first => {
+                    Ok(PdfCmd::Split {
+                        path: path.to_string(),
+                        output: output.to_string(),
+                        first,
+                        last,
+                    })
+                }
+                _ => Err(anyhow!("{PDF_USAGE}")),
+            }
+        }
+        other => Err(anyhow!(
+            "sous-commande pdf inconnue `{other}` — {PDF_USAGE}"
+        )),
+    }
+}
+
+pub fn pdf(cmd: PdfCmd) -> Result<Vec<String>> {
+    let text = match cmd {
+        PdfCmd::Info(p) => crate::pdf::info(&p)?,
+        PdfCmd::Text(p) => crate::pdf::text(&p)?,
+        PdfCmd::Merge { output, inputs } => crate::pdf::merge(&inputs, &output)?,
+        PdfCmd::Split {
+            path,
+            output,
+            first,
+            last,
+        } => crate::pdf::split(&path, &output, first, last)?,
+    };
+    Ok(text.lines().map(|l| l.to_string()).collect())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Catalogue d'API publiques
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Nombre de résultats par défaut (le CLI en affichait 10, la TUI 12).
+pub const APIS_DEFAULT_K: usize = 10;
+
+pub fn apis_stats() -> Result<Vec<String>> {
+    Ok(crate::apis::stats()?
+        .lines()
+        .map(|l| l.to_string())
+        .collect())
+}
+
+pub fn apis_search(query: &str, k: usize, keyless: bool) -> Result<Vec<String>> {
+    let q = query.trim();
+    if q.is_empty() {
+        return Err(anyhow!("usage: apis search <besoin>"));
+    }
+    let entries = crate::apis::search_opts(q, k.clamp(1, 50), keyless)?;
+    let meta = crate::apis::meta()?;
+    Ok(crate::apis::format_entries(&entries, &meta)
+        .lines()
+        .map(|l| l.to_string())
+        .collect())
+}
+
+pub fn apis_categories() -> Result<Vec<String>> {
+    Ok(crate::apis::categories()?
+        .into_iter()
+        .map(|(c, n)| format!("  {c:<30} {n}"))
+        .collect())
+}
+
+pub fn apis_import(path: &str) -> Result<Vec<String>> {
+    let p = std::path::PathBuf::from(path);
+    if !p.exists() {
+        return Err(anyhow!("fichier introuvable: {}", p.display()));
+    }
+    let (n, meta) = crate::apis::import_tsv(&p)?;
+    Ok(vec![format!(
+        "Catalogue importé : {n} API(s) — source : {} — importé le {}",
+        meta.source, meta.imported_at
+    )])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Personas
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub fn persona_list() -> Vec<String> {
+    let list = crate::personas::list();
+    let mut out = vec![format!("Dossier : {}", crate::personas::dir().display())];
+    if list.is_empty() {
+        out.push("  (aucune persona)".to_string());
+    } else {
+        out.push(format!("Personas ({}):", list.len()));
+        for p in list {
+            out.push(format!("  {p}"));
+        }
+    }
+    out
+}
+
+pub fn persona_show(name: &str) -> Result<Vec<String>> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(anyhow!("usage: whoami show <nom>"));
+    }
+    match crate::personas::get(name) {
+        Some(c) => Ok(c.lines().map(|l| l.to_string()).collect()),
+        None => Err(anyhow!("persona '{name}' introuvable")),
+    }
+}
+
+pub fn persona_add(name: &str, content: &str) -> Result<Vec<String>> {
+    let name = name.trim();
+    if name.is_empty() || content.trim().is_empty() {
+        return Err(anyhow!("usage: whoami add <nom> <fichier|->"));
+    }
+    crate::personas::save(name, content)?;
+    Ok(vec![format!(
+        "Persona '{name}' enregistrée → {}",
+        crate::personas::dir().display()
+    )])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Coffre
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub fn vault_status() -> Vec<String> {
+    vec![
+        format!(
+            "Coffre      : {}",
+            if crate::vault::enabled() {
+                "activé"
+            } else {
+                "absent"
+            }
+        ),
+        format!("Déverrouillé : {}", crate::vault::is_unlocked()),
+        format!("Chemin      : {}", crate::vault::path().display()),
+    ]
+}
+
+pub fn vault_lock() -> Vec<String> {
+    crate::vault::lock();
+    vec!["Coffre verrouillé.".to_string()]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Embeddings
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub fn embeddings_show() -> Vec<String> {
+    match crate::config::load_global().embeddings {
+        Some(e) => vec![format!(
+            "Embedder: {}/{} (mémoire sémantique active)",
+            e.provider.unwrap_or_default(),
+            e.model.unwrap_or_default()
+        )],
+        None => vec![
+            "Aucun embedder — recherche par sous-chaîne (degraded=true).".to_string(),
+            "embeddings set <provider> <model>  (ex. openrouter liquid/lfm-2.5-embedding-350m:free)"
+                .to_string(),
+        ],
+    }
+}
+
+pub fn embeddings_set(provider: &str, model: &str) -> Result<Vec<String>> {
+    let provider = provider.trim();
+    let model = model.trim();
+    if provider.is_empty() || model.is_empty() {
+        return Err(anyhow!("usage: embeddings set <provider> <model>"));
+    }
+    let p =
+        crate::providers::find(provider).ok_or_else(|| anyhow!("provider inconnu: {provider}"))?;
+    let mut g = crate::config::load_global();
+    g.embeddings = Some(crate::config::EmbeddingConfig {
+        provider: Some(p.id.clone()),
+        model: Some(model.to_string()),
+    });
+    crate::config::save_global(&g)?;
+    let mut out = vec![format!("Embedder: {}/{model}", p.id)];
+    if !crate::select::is_embedding_or_rerank(model) {
+        out.push(
+            "⚠ ce modèle ne ressemble pas à un embedder (nom sans « embedding ») — \
+             vérifie qu'il accepte /embeddings."
+                .to_string(),
+        );
+    }
+    Ok(out)
+}
+
+pub fn embeddings_unset() -> Result<Vec<String>> {
+    let mut g = crate::config::load_global();
+    g.embeddings = None;
+    crate::config::save_global(&g)?;
+    Ok(vec![
+        "Embedder retiré — recherche par sous-chaîne (degraded=true).".to_string(),
+    ])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Providers
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -854,6 +1132,40 @@ mod tests {
     fn unknown_subcommand_is_an_error_with_usage() {
         let e = parse_task(&["frobnicate"]).unwrap_err().to_string();
         assert!(e.contains("usage: task"), "{e}");
+    }
+
+    #[test]
+    fn pdf_args_are_validated_identically() {
+        assert_eq!(
+            parse_pdf_args(&["info", "a.pdf"]).unwrap(),
+            PdfCmd::Info("a.pdf".into())
+        );
+        assert!(parse_pdf_args(&[]).is_err());
+        assert!(parse_pdf_args(&["info"]).is_err());
+        assert!(parse_pdf_args(&["frob"]).is_err());
+        // merge : sortie + au moins une entrée
+        assert!(parse_pdf_args(&["merge", "out.pdf"]).is_err());
+        assert!(parse_pdf_args(&["merge", "out.pdf", "a.pdf", "b.pdf"]).is_ok());
+        // split : bornes numériques cohérentes
+        assert!(parse_pdf_args(&["split", "a.pdf", "out", "x", "3"]).is_err());
+        assert!(parse_pdf_args(&["split", "a.pdf", "out", "5", "2"]).is_err());
+        assert!(parse_pdf_args(&["split", "a.pdf", "out", "2", "5"]).is_ok());
+    }
+
+    #[test]
+    fn quota_rejects_unknown_provider() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        assert!(rt.block_on(quota_report(Some("inconnu-xyz"))).is_err());
+    }
+
+    #[test]
+    fn embeddings_and_personas_validate_input() {
+        assert!(embeddings_set("", "m").is_err());
+        assert!(embeddings_set("openrouter", "").is_err());
+        assert!(embeddings_set("provider-inexistant", "m").is_err());
+        assert!(persona_add("", "x").is_err());
+        assert!(persona_add("nom", "   ").is_err());
+        assert!(persona_show("  ").is_err());
     }
 
     #[test]

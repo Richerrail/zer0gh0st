@@ -1,6 +1,6 @@
 use crate::{
-    agent, commands, config, enrich_system, fun, http_client, jimmy, models, pdf, personas,
-    providers, route, telegram, tools, tui, update, vault, zerochan, DEFAULT_SYSTEM,
+    agent, commands, config, enrich_system, fun, http_client, jimmy, models, providers, route,
+    telegram, tools, tui, update, vault, zerochan, DEFAULT_SYSTEM,
 };
 use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand};
@@ -581,18 +581,8 @@ async fn run_command(cmd: Command) -> Result<()> {
             perspectives,
         } => zerobox_cmd(topic, perspectives).await,
         Command::Quota { provider } => {
-            let settings = config::resolve();
-            let (pid, key) = match provider {
-                Some(id) => {
-                    let p = providers::find(&id)
-                        .ok_or_else(|| anyhow::anyhow!("provider inconnu: {id}"))?;
-                    (p.id.clone(), config::key_for(&p))
-                }
-                None => (settings.provider_id.clone(), settings.api_key.clone()),
-            };
-            println!("{}", crate::quota::report());
-            if let Some(live) = crate::quota::fetch_live(&pid, key.as_deref()).await {
-                println!("\n{live}");
+            for line in commands::quota_report(provider.as_deref()).await? {
+                println!("{line}");
             }
             Ok(())
         }
@@ -801,46 +791,43 @@ async fn kb_cmd(action: KbAction) -> Result<()> {
     Ok(())
 }
 fn apis_cmd(action: ApisAction) -> Result<()> {
-    match action {
-        ApisAction::Import { path } => {
-            let p = std::path::PathBuf::from(&path);
-            let (n, meta) = crate::apis::import_tsv(&p)?;
-            println!(
-                "Catalogue importé : {n} API(s) — source : {} — importé le {}",
-                meta.source, meta.imported_at
-            );
-        }
-        ApisAction::Search { query, k, keyless } => {
-            let q = query.join(" ");
-            let entries = crate::apis::search_opts(&q, k.unwrap_or(10), keyless)?;
-            let meta = crate::apis::meta()?;
-            println!("{}", crate::apis::format_entries(&entries, &meta));
-        }
-        ApisAction::Categories => {
-            for (c, n) in crate::apis::categories()? {
-                println!("  {c:<30} {n}");
-            }
-        }
-        ApisAction::Stats => println!("{}", crate::apis::stats()?),
+    let lines = match action {
+        ApisAction::Import { path } => commands::apis_import(&path)?,
+        ApisAction::Search { query, k, keyless } => commands::apis_search(
+            &query.join(" "),
+            k.unwrap_or(commands::APIS_DEFAULT_K),
+            keyless,
+        )?,
+        ApisAction::Categories => commands::apis_categories()?,
+        ApisAction::Stats => commands::apis_stats()?,
+    };
+    for line in lines {
+        println!("{line}");
     }
     Ok(())
 }
-
 fn pdf_cmd(action: PdfAction) -> Result<()> {
-    match action {
-        PdfAction::Info { path } => println!("{}", pdf::info(&path)?),
-        PdfAction::Text { path } => println!("{}", pdf::text(&path)?),
-        PdfAction::Merge { output, inputs } => println!("{}", pdf::merge(&inputs, &output)?),
+    let cmd = match action {
+        PdfAction::Info { path } => commands::PdfCmd::Info(path),
+        PdfAction::Text { path } => commands::PdfCmd::Text(path),
+        PdfAction::Merge { output, inputs } => commands::PdfCmd::Merge { output, inputs },
         PdfAction::Split {
             path,
             output,
             first,
             last,
-        } => println!("{}", pdf::split(&path, &output, first, last)?),
+        } => commands::PdfCmd::Split {
+            path,
+            output,
+            first,
+            last,
+        },
+    };
+    for line in commands::pdf(cmd)? {
+        println!("{line}");
     }
     Ok(())
 }
-
 async fn jev_cmd(file: String) -> Result<()> {
     let content = std::fs::read_to_string(&file)?;
     let settings = config::resolve();
@@ -882,19 +869,12 @@ fn ensure_vault() {
 }
 
 fn vault_cmd(action: VaultAction) -> Result<()> {
-    match action {
-        VaultAction::Status => {
-            println!(
-                "Coffre      : {}",
-                if vault::enabled() {
-                    "activé"
-                } else {
-                    "absent"
-                }
-            );
-            println!("Déverrouillé : {}", vault::is_unlocked());
-            println!("Chemin      : {}", vault::path().display());
-        }
+    // `setup`/`unlock`/`reset` exigent une saisie de passphrase : impossible en
+    // TUI, donc ils restent pilotés par le CLI. La logique (vault::*) est
+    // commune ; seul l'affichage de `status`/`lock` est partagé.
+    let lines = match action {
+        VaultAction::Status => commands::vault_status(),
+        VaultAction::Lock => commands::vault_lock(),
         VaultAction::Setup => {
             let p = rpassword::prompt_password("Nouvelle passphrase : ")?;
             let p2 = rpassword::prompt_password("Confirme : ")?;
@@ -902,48 +882,34 @@ fn vault_cmd(action: VaultAction) -> Result<()> {
                 return Err(anyhow!("les passphrases ne correspondent pas"));
             }
             let n = vault::setup(&p)?;
-            println!(
+            vec![format!(
                 "Coffre créé ({n} clé(s) chiffrée(s)). Les clés ont été retirées de config.toml."
-            );
+            )]
         }
         VaultAction::Unlock => {
             let p = rpassword::prompt_password("Passphrase : ")?;
             let n = vault::unlock(&p)?;
-            println!("Coffre déverrouillé ({n} clé(s)) — pour cette session.");
-        }
-        VaultAction::Lock => {
-            vault::lock();
-            println!("Coffre verrouillé.");
+            vec![format!(
+                "Coffre déverrouillé ({n} clé(s)) — pour cette session."
+            )]
         }
         VaultAction::Reset => {
             vault::reset()?;
-            println!("Coffre supprimé. Les clés doivent être re-saisies.");
+            vec!["Coffre supprimé. Les clés doivent être re-saisies.".to_string()]
         }
+    };
+    for line in lines {
+        println!("{line}");
     }
     Ok(())
 }
-
 fn whoami_cmd(action: WhoamiAction) -> Result<()> {
-    match action {
-        WhoamiAction::List => {
-            let list = personas::list();
-            if list.is_empty() {
-                println!(
-                    "Aucune persona. Dépose un fichier dans {}",
-                    personas::dir().display()
-                );
-            } else {
-                println!("Personas ({}):", list.len());
-                for p in list {
-                    println!("  {p}");
-                }
-            }
-        }
-        WhoamiAction::Show { name } => match personas::get(&name) {
-            Some(c) => println!("{c}"),
-            None => println!("Persona '{name}' introuvable."),
-        },
+    let lines = match action {
+        WhoamiAction::List => commands::persona_list(),
+        WhoamiAction::Show { name } => commands::persona_show(&name)?,
         WhoamiAction::Add { name, file } => {
+            // Lecture du contenu (fichier ou stdin) : spécifique au CLI, mais la
+            // validation et l'écriture sont partagées.
             let content = if file == "-" {
                 use std::io::Read;
                 let mut s = String::new();
@@ -952,16 +918,14 @@ fn whoami_cmd(action: WhoamiAction) -> Result<()> {
             } else {
                 std::fs::read_to_string(&file)?
             };
-            personas::save(&name, &content)?;
-            println!(
-                "Persona '{name}' enregistrée → {}",
-                personas::dir().display()
-            );
+            commands::persona_add(&name, &content)?
         }
+    };
+    for line in lines {
+        println!("{line}");
     }
     Ok(())
 }
-
 async fn search_cmd(query: Vec<String>, max: Option<usize>) -> Result<()> {
     let q = query.join(" ");
     for line in commands::search(&q, max.unwrap_or(5)).await? {
@@ -1045,36 +1009,16 @@ fn model_cmd(action: ModelAction) -> Result<()> {
 }
 
 fn embeddings_cmd(action: EmbeddingsAction) -> Result<()> {
-    match action {
-        EmbeddingsAction::Set { provider, model } => {
-            let p = providers::find(&provider)
-                .ok_or_else(|| anyhow!("provider inconnu: {provider}"))?;
-            let mut g = config::load_global();
-            g.embeddings = Some(config::EmbeddingConfig {
-                provider: Some(p.id.clone()),
-                model: Some(model.clone()),
-            });
-            config::save_global(&g)?;
-            println!("Embedder: {}/{model}", p.id);
-        }
-        EmbeddingsAction::Unset => {
-            let mut g = config::load_global();
-            g.embeddings = None;
-            config::save_global(&g)?;
-            println!("Embedder retiré (recherche par sous-chaîne).");
-        }
-        EmbeddingsAction::Show => match config::load_global().embeddings {
-            Some(e) => println!(
-                "Embedder: {}/{}",
-                e.provider.unwrap_or_default(),
-                e.model.unwrap_or_default()
-            ),
-            None => println!("Aucun embedder (recherche par sous-chaîne, degraded=true)."),
-        },
+    let lines = match action {
+        EmbeddingsAction::Set { provider, model } => commands::embeddings_set(&provider, &model)?,
+        EmbeddingsAction::Unset => commands::embeddings_unset()?,
+        EmbeddingsAction::Show => commands::embeddings_show(),
+    };
+    for line in lines {
+        println!("{line}");
     }
     Ok(())
 }
-
 async fn memory_cmd(action: MemoryAction) -> Result<()> {
     let lines = match action {
         MemoryAction::List { limit } => commands::memory_list(limit.unwrap_or(20)),

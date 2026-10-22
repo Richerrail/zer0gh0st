@@ -843,7 +843,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
                 });
             }
         }
-        "/quota" => cmd_quota(ui_tx, app.provider_id.clone(), app.api_key.clone()),
+        "/quota" => cmd_quota(ui_tx, Some(app.provider_id.clone())),
         "/vote" => {
             let act = args.first().map(|s| s.to_ascii_lowercase());
             match act.as_deref() {
@@ -1600,24 +1600,16 @@ fn handle_context(app: &mut App) {
 
 fn handle_whoami(app: &mut App, args: &[&str]) {
     match args.first().copied() {
+        // L'activation d'une persona est un état de session : TUI seulement.
         None | Some("list") => {
-            let list = crate::personas::list();
             let cur = app
                 .persona
                 .clone()
                 .unwrap_or_else(|| "(aucune)".to_string());
-            let mut s = format!("Persona actuelle : {cur}\nDisponibles :\n");
-            if list.is_empty() {
-                s.push_str(&format!(
-                    "  (aucune) — dépose un fichier dans {}\n",
-                    crate::personas::dir().display()
-                ));
-            }
-            for p in list {
-                s.push_str(&format!("  {p}\n"));
-            }
-            s.push_str("\n/whoami <nom>  ·  /whoami off");
-            app.messages.push(ChatMessage::notice(s));
+            let mut lines = vec![format!("Persona actuelle : {cur}")];
+            lines.extend(crate::commands::persona_list());
+            lines.push("whoami <nom>  ·  whoami off  ·  whoami add <nom> <fichier>".to_string());
+            app.messages.push(ChatMessage::notice(lines.join("\n")));
         }
         Some("off") | Some("none") => {
             app.persona = None;
@@ -1632,57 +1624,32 @@ fn handle_whoami(app: &mut App, args: &[&str]) {
                     .push(ChatMessage::notice(format!("Persona '{name}' activée.")));
             }
             None => app.messages.push(ChatMessage::notice(format!(
-                "Persona '{name}' introuvable. /whoami list"
+                "Persona '{name}' introuvable — whoami list"
             ))),
         },
     }
 }
-
 fn handle_vault(app: &mut App, args: &[&str]) {
-    match args.first().copied() {
-        None | Some("status") => app.messages.push(ChatMessage::notice(format!(
-            "Coffre : {}\nDéverrouillé : {}\nChemin : {}\n\n/vault lock · setup/unlock via `zer0 vault …` (CLI)",
-            if crate::vault::enabled() { "activé" } else { "absent" },
-            crate::vault::is_unlocked(),
-            crate::vault::path().display()
-        ))),
-        Some("lock") => {
-            crate::vault::lock();
-            app.messages.push(ChatMessage::notice("Coffre verrouillé."));
+    // `setup`/`unlock`/`reset` demandent une passphrase : CLI uniquement.
+    let lines = match args.first().copied() {
+        None | Some("status") => {
+            let mut l = crate::commands::vault_status();
+            l.push(String::new());
+            l.push("vault lock · setup/unlock/reset via `zer0 vault …` (CLI)".to_string());
+            l
         }
-        _ => app
-            .messages
-            .push(ChatMessage::notice("usage: /vault [status|lock]")),
-    }
-}
-
-fn handle_pdf(app: &mut App, args: &[&str]) {
-    let res = match args.first().copied() {
-        Some("info") => args.get(1).map(|p| crate::pdf::info(p)),
-        Some("text") => args.get(1).map(|p| crate::pdf::text(p)),
-        Some("merge") if args.len() >= 3 => {
-            let output = args[1];
-            let inputs: Vec<String> = args[2..].iter().map(|s| s.to_string()).collect();
-            Some(crate::pdf::merge(&inputs, output))
-        }
-        Some("split") if args.len() >= 5 => {
-            let first = args[3].parse().unwrap_or(1);
-            let last = args[4].parse().unwrap_or(1);
-            Some(crate::pdf::split(args[1], args[2], first, last))
-        }
-        _ => None,
+        Some("lock") => crate::commands::vault_lock(),
+        _ => vec!["usage: /vault [status|lock]".to_string()],
     };
-    match res {
-        Some(Ok(msg)) => app.messages.push(ChatMessage::notice(msg)),
-        Some(Err(e)) => app
-            .messages
-            .push(ChatMessage::notice(format!("Erreur PDF: {e}"))),
-        None => app.messages.push(ChatMessage::notice(
-            "usage: /pdf info <f> · /pdf text <f> · /pdf merge <out> <in…> · /pdf split <in> <out> <first> <last>",
-        )),
+    app.messages.push(ChatMessage::notice(lines.join("\n")));
+}
+fn handle_pdf(app: &mut App, args: &[&str]) {
+    // Même parseur que `zer0 pdf …`.
+    match crate::commands::parse_pdf_args(args).and_then(crate::commands::pdf) {
+        Ok(lines) => app.messages.push(ChatMessage::notice(lines.join("\n"))),
+        Err(e) => app.messages.push(ChatMessage::notice(format!("{e}"))),
     }
 }
-
 fn cmd_jev(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
     let path = args.first().copied().unwrap_or("");
     if path.is_empty() {
@@ -2297,36 +2264,21 @@ fn show_0box_help(app: &mut App) {
 
 /// `/apis [besoin]` : catalogue d'APIs publiques (source community, datée).
 fn handle_apis(app: &mut App, args: &[&str]) {
-    // `/apis <besoin> keyless` → uniquement les APIs sans clé.
+    // `/apis <besoin> [keyless]` ou `/apis` (stats).
     let mut words: Vec<&str> = args.to_vec();
     let keyless = words.iter().any(|w| w.eq_ignore_ascii_case("keyless"));
     words.retain(|w| !w.eq_ignore_ascii_case("keyless"));
     let q = words.join(" ");
-    if q.trim().is_empty() {
-        match crate::apis::stats() {
-            Ok(s) => app.messages.push(ChatMessage::notice(s)),
-            Err(e) => app
-                .messages
-                .push(ChatMessage::notice(format!("Erreur: {e}"))),
-        }
-        return;
-    }
-    match (
-        crate::apis::search_opts(q.trim(), 12, keyless),
-        crate::apis::meta(),
-    ) {
-        (Ok(entries), Ok(meta)) => {
-            app.messages
-                .push(ChatMessage::notice(crate::apis::format_entries(
-                    &entries, &meta,
-                )));
-        }
-        (Err(e), _) | (_, Err(e)) => app
-            .messages
-            .push(ChatMessage::notice(format!("Erreur: {e}"))),
+    let res = if q.trim().is_empty() {
+        crate::commands::apis_stats()
+    } else {
+        crate::commands::apis_search(&q, crate::commands::APIS_DEFAULT_K, keyless)
+    };
+    match res {
+        Ok(lines) => app.messages.push(ChatMessage::notice(lines.join("\n"))),
+        Err(e) => app.messages.push(ChatMessage::notice(format!("{e}"))),
     }
 }
-
 fn handle_kb(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
     match args.first().copied() {
         None | Some("stats") => match crate::commands::kb_stats() {
@@ -2389,72 +2341,22 @@ fn handle_kb(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
 /// `/embeddings [show|set <provider> <model>|unset]` — embedder de la mémoire.
 /// Un modèle d'embedding ne sert QUE pour `/embeddings` (pas de chat).
 fn handle_embeddings(app: &mut App, args: &[&str]) {
-    match args.first().copied() {
-        None | Some("show") => match config::load_global().embeddings {
-            Some(e) => app.messages.push(ChatMessage::notice(format!(
-                "Embedder: {}/{} (mémoire sémantique active)",
-                e.provider.unwrap_or_default(),
-                e.model.unwrap_or_default()
-            ))),
-            None => app.messages.push(ChatMessage::notice(
-                "Aucun embedder — recherche par sous-chaîne (degraded=true).\n\
-                 /embeddings set <provider> <model>  ex. /embeddings set openrouter liquid/lfm-2.5-embedding-350m:free"
-                    .to_string(),
-            )),
-        },
-        Some("set") => {
-            let provider = args.get(1).copied().unwrap_or("");
-            let model = args.get(2).copied().unwrap_or("");
-            if provider.is_empty() || model.is_empty() {
-                app.messages
-                    .push(ChatMessage::notice("usage: /embeddings set <provider> <model>"));
-                return;
-            }
-            match providers::find(provider) {
-                Some(p) => {
-                    let mut g = config::load_global();
-                    g.embeddings = Some(config::EmbeddingConfig {
-                        provider: Some(p.id.clone()),
-                        model: Some(model.to_string()),
-                    });
-                    match config::save_global(&g) {
-                        Ok(()) => {
-                            let warn = if select::is_embedding_or_rerank(model) {
-                                String::new()
-                            } else {
-                                "\n⚠ ce modèle ne ressemble pas à un embedder (nom sans « embedding ») — vérifie qu'il accepte /embeddings.".to_string()
-                            };
-                            app.messages.push(ChatMessage::notice(format!(
-                                "Embedder: {}/{model}{warn}",
-                                p.id
-                            )));
-                        }
-                        Err(e) => {
-                            app.messages.push(ChatMessage::notice(format!("Erreur: {e}")))
-                        }
-                    }
-                }
-                None => app.messages.push(ChatMessage::notice(format!(
-                    "Provider inconnu: {provider}"
-                ))),
-            }
-        }
-        Some("unset") | Some("clear") | Some("off") => {
-            let mut g = config::load_global();
-            g.embeddings = None;
-            match config::save_global(&g) {
-                Ok(()) => app.messages.push(ChatMessage::notice(
-                    "Embedder retiré — recherche par sous-chaîne (degraded=true).".to_string(),
-                )),
-                Err(e) => app.messages.push(ChatMessage::notice(format!("Erreur: {e}"))),
-            }
-        }
-        _ => app.messages.push(ChatMessage::notice(
-            "usage: /embeddings [show|set <provider> <model>|unset]",
+    let res = match args.first().copied() {
+        None | Some("show") => Ok(crate::commands::embeddings_show()),
+        Some("set") => crate::commands::embeddings_set(
+            args.get(1).copied().unwrap_or(""),
+            args.get(2).copied().unwrap_or(""),
+        ),
+        Some("unset") | Some("clear") | Some("off") => crate::commands::embeddings_unset(),
+        _ => Err(anyhow::anyhow!(
+            "usage: /embeddings [show|set <provider> <model>|unset]"
         )),
+    };
+    match res {
+        Ok(lines) => app.messages.push(ChatMessage::notice(lines.join("\n"))),
+        Err(e) => app.messages.push(ChatMessage::notice(format!("{e}"))),
     }
 }
-
 fn handle_memory(app: &mut App, args: &[&str]) {
     // Même source que `zer0 memory list|stats`.
     let lines = match args.first().copied() {
@@ -2584,23 +2486,17 @@ fn handle_route(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) 
 }
 /// `/quota` : usage observé + solde de la clé quand le provider le publie
 /// (OpenRouter `/auth/key` ; Cline ne publie rien). Le fetch live est async.
-fn cmd_quota(ui_tx: &UnboundedSender<UiEvent>, provider_id: String, key: Option<String>) {
+fn cmd_quota(ui_tx: &UnboundedSender<UiEvent>, provider: Option<String>) {
     let ui = ui_tx.clone();
     tokio::spawn(async move {
-        let mut s = crate::quota::report();
-        if let Some(live) = crate::quota::fetch_live(&provider_id, key.as_deref()).await {
-            s.push_str("\n\n");
-            s.push_str(&live);
-        } else if provider_id != "openrouter" {
-            s.push_str(&format!(
-                "\n\n{provider_id} ne publie aucun solde interrogable — seuls les \
-                 appels observés et les limites révélées dans les 429 sont comptés."
-            ));
-        }
-        let _ = ui.send(UiEvent::Info(s));
+        // Même rapport que `zer0 quota` (y compris l'absence de solde publié).
+        let msg = match crate::commands::quota_report(provider.as_deref()).await {
+            Ok(lines) => lines.join("\n"),
+            Err(e) => format!("Erreur quota : {e}"),
+        };
+        let _ = ui.send(UiEvent::Info(msg));
     });
 }
-
 /// Clic sur 👍 / 👎 : un upvote = une star GitHub (via l'API si un jeton est
 /// présent, sinon la page du dépôt s'ouvre dans le navigateur).
 fn vote_click(ui_tx: &UnboundedSender<UiEvent>, action: crate::vote::Action) {
