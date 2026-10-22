@@ -1,4 +1,3 @@
-use std::time::Duration;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::agent::history::ChatMessage;
@@ -8,7 +7,6 @@ use crate::route::{self, Endpoint};
 use crate::tools::{self, ToolSpec};
 
 const MAX_ITERATIONS: usize = 8;
-const MAX_429_RETRIES: u32 = 2;
 /// Hard ceiling on tool calls within a single turn.
 const MAX_TOOL_CALLS: usize = 24;
 /// Reprises automatiques après une réponse tronquée (`finish_reason = length`).
@@ -62,10 +60,17 @@ pub async fn run_turn_budgeted(
     }
 
     crate::cancel::clear();
+    // Budget partagé par tous les appels LLM de ce tour, sous-agents `0box`
+    // compris. Le compteur n'est remis à zéro qu'au premier niveau.
+    let _budget = crate::budget::TurnGuard::enter();
 
     // --- first call, with failover across the ordered chain ---
-    let mut chosen: Option<(ApiClient, String, Vec<crate::agent::history::ToolCall>, Option<String>)> =
-        None;
+    let mut chosen: Option<(
+        ApiClient,
+        String,
+        Vec<crate::agent::history::ToolCall>,
+        Option<String>,
+    )> = None;
     let mut last_err = String::new();
 
     'endpoints: for ep in endpoints.iter() {
@@ -78,60 +83,53 @@ pub async fn run_turn_budgeted(
         }
 
         let client = ep.client();
-        let mut attempt: u32 = 0;
 
-        loop {
-            match client.stream_chat(&system, &messages, &tools, &options, &ui).await {
-                Ok((content, calls, _)) if content.trim().is_empty() && calls.is_empty() => {
-                    // Model produced nothing usable (e.g. reasoning-only) → fail over.
-                    route::mark_failed(&ep.label);
-                    let _ = ui.send(UiEvent::Info(format!(
-                        "⚠ {} a renvoyé une réponse vide → endpoint suivant",
-                        ep.label
-                    )));
-                    last_err = format!("réponse vide de {}", ep.label);
-                    continue 'endpoints;
-                }
-                Ok((content, calls, finish)) => {
-                    route::clear_failed(&ep.label);
-                    let _ = ui.send(UiEvent::Active(ep.label.clone()));
-                    chosen = Some((client.clone(), content, calls, finish));
-                    break 'endpoints;
-                }
-                Err(ChatError::Setup { err, status }) => {
-                    // rate limit → back off and retry the same endpoint
-                    if status == Some(429) && attempt < MAX_429_RETRIES {
-                        attempt += 1;
-                        let wait = 2u64.pow(attempt);
-                        let _ = ui.send(UiEvent::Info(format!(
-                            "⏳ {} limité (429), nouvel essai dans {wait}s…",
-                            ep.label
-                        )));
-                        tokio::time::sleep(Duration::from_secs(wait)).await;
-                        continue;
-                    }
-                    route::mark_failed(&ep.label);
-                    let hint = match status {
-                        Some(401) => " — clé API invalide ou absente",
-                        Some(402) => " — crédit épuisé",
-                        Some(403) => " — accès/modèle refusé par le provider",
-                        Some(404) => " — modèle ou endpoint introuvable",
-                        _ => "",
-                    };
-                    let _ = ui.send(UiEvent::Info(format!(
-                        "⚠ {} indisponible{hint} ({err}) → endpoint suivant",
-                        ep.label
-                    )));
-                    last_err = format!("{err}");
-                    continue 'endpoints;
-                }
-                Err(ChatError::Mid(e)) => {
-                    let _ = ui.send(UiEvent::Error(format!(
-                        "erreur en cours de flux ({}): {e}",
-                        ep.label
-                    )));
-                    return;
-                }
+        match client
+            .stream_chat(&system, &messages, &tools, &options, &ui)
+            .await
+        {
+            Ok((content, calls, _)) if content.trim().is_empty() && calls.is_empty() => {
+                // Model produced nothing usable (e.g. reasoning-only) → fail over.
+                route::mark_failed(&ep.label);
+                let _ = ui.send(UiEvent::Info(format!(
+                    "⚠ {} a renvoyé une réponse vide → endpoint suivant",
+                    ep.label
+                )));
+                last_err = format!("réponse vide de {}", ep.label);
+                continue 'endpoints;
+            }
+            Ok((content, calls, finish)) => {
+                route::clear_failed(&ep.label);
+                let _ = ui.send(UiEvent::Active(ep.label.clone()));
+                chosen = Some((client.clone(), content, calls, finish));
+                break 'endpoints;
+            }
+            Err(ChatError::Setup { err, status }) => {
+                // Le backoff 429 est fait **une seule fois**, dans le client
+                // (`llm::llama`, qui honore `Retry-After`). Ici, un 429 signifie
+                // donc « essais épuisés » : on bascule d'endpoint au lieu
+                // d'empiler un second backoff.
+                route::mark_failed(&ep.label);
+                let hint = match status {
+                    Some(401) => " — clé API invalide ou absente",
+                    Some(402) => " — crédit épuisé",
+                    Some(403) => " — accès/modèle refusé par le provider",
+                    Some(404) => " — modèle ou endpoint introuvable",
+                    _ => "",
+                };
+                let _ = ui.send(UiEvent::Info(format!(
+                    "⚠ {} indisponible{hint} ({err}) → endpoint suivant",
+                    ep.label
+                )));
+                last_err = format!("{err}");
+                continue 'endpoints;
+            }
+            Err(ChatError::Mid(e)) => {
+                let _ = ui.send(UiEvent::Error(format!(
+                    "erreur en cours de flux ({}): {e}",
+                    ep.label
+                )));
+                return;
             }
         }
     }
@@ -162,7 +160,10 @@ pub async fn run_turn_budgeted(
                 let _ = ui.send(UiEvent::Info(format!(
                     "↪ réponse tronquée → reprise automatique ({continuations}/{MAX_CONTINUATIONS})"
                 )));
-                match client.stream_chat(&system, &messages, &tools, &options, &ui).await {
+                match client
+                    .stream_chat(&system, &messages, &tools, &options, &ui)
+                    .await
+                {
                     Ok((c, cs, f)) => {
                         content = c;
                         calls = cs;
@@ -215,7 +216,10 @@ pub async fn run_turn_budgeted(
         }
 
         // subsequent calls stay on the chosen endpoint
-        match client.stream_chat(&system, &messages, &tools, &options, &ui).await {
+        match client
+            .stream_chat(&system, &messages, &tools, &options, &ui)
+            .await
+        {
             Ok((c, cs, f)) => {
                 content = c;
                 calls = cs;

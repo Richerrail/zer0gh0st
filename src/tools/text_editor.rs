@@ -36,7 +36,10 @@ pub fn run(args: &str) -> String {
         Ok(v) => v,
         Err(e) => return format!("Erreur: arguments JSON invalides ({e})"),
     };
-    let command = v.get("command").and_then(|x| x.as_str()).unwrap_or_default();
+    let command = v
+        .get("command")
+        .and_then(|x| x.as_str())
+        .unwrap_or_default();
     let path = v.get("path").and_then(|x| x.as_str()).unwrap_or_default();
     if path.is_empty() {
         return "Erreur: `path` manquant".into();
@@ -54,21 +57,55 @@ pub fn run(args: &str) -> String {
         "create" => create(path, content),
         "str_replace" => str_replace(
             path,
-            v.get("old_str").and_then(|x| x.as_str()).unwrap_or_default(),
-            v.get("new_str").and_then(|x| x.as_str()).unwrap_or_default(),
+            v.get("old_str")
+                .and_then(|x| x.as_str())
+                .unwrap_or_default(),
+            v.get("new_str")
+                .and_then(|x| x.as_str())
+                .unwrap_or_default(),
         ),
         "insert" => insert(
             path,
             v.get("insert_line").and_then(|x| x.as_i64()).unwrap_or(1) as usize,
-            v.get("new_str").and_then(|x| x.as_str()).unwrap_or_default(),
+            v.get("new_str")
+                .and_then(|x| x.as_str())
+                .unwrap_or_default(),
         ),
         "delete" | "remove" => delete(path),
         other => format!("Erreur: commande inconnue `{other}`"),
     }
 }
 
+/// Sauvegarde le fichier avant de l'écraser ou de le supprimer.
+///
+/// ZER0|GH0ST agit avec les droits de l'utilisateur, sans bac à sable. Un outil
+/// qui réécrit un fichier sans garder de copie rend toute erreur du modèle
+/// irréversible. La sauvegarde est posée **à côté** du fichier (`<nom>.zer0.bak`),
+/// donc trouvable sans connaître l'état interne de l'agent.
+fn backup(path: &Path) -> Option<String> {
+    let meta = fs::metadata(path).ok()?;
+    if !meta.is_file() || meta.len() == 0 {
+        return None;
+    }
+    let name = path.file_name()?.to_string_lossy().to_string();
+    let dest = path.with_file_name(format!("{name}.zer0.bak"));
+    fs::copy(path, &dest).ok()?;
+    Some(dest.display().to_string())
+}
+
+fn backup_note(path: &Path) -> String {
+    match backup(path) {
+        Some(dest) => format!(" (sauvegarde : {dest})"),
+        None => String::new(),
+    }
+}
+
 fn stats(content: &str) -> String {
-    format!("{} octet(s), {} ligne(s)", content.len(), content.lines().count())
+    format!(
+        "{} octet(s), {} ligne(s)",
+        content.len(),
+        content.lines().count()
+    )
 }
 
 fn view(path: &str) -> String {
@@ -102,6 +139,7 @@ fn create(path: &str, content: &str) -> String {
             }
         }
     }
+    let note = backup_note(Path::new(path));
     match fs::write(path, content) {
         Ok(()) => {
             // Verify the write actually landed.
@@ -109,7 +147,7 @@ fn create(path: &str, content: &str) -> String {
                 Ok(m) if m.len() > 0 => {
                     let first = content.lines().next().unwrap_or("");
                     format!(
-                        "Fichier écrit: {path} ({}). Première ligne: {first}",
+                        "Fichier écrit: {path} ({}). Première ligne: {first}{note}",
                         stats(content)
                     )
                 }
@@ -136,8 +174,12 @@ fn str_replace(path: &str, old: &str, new: &str) -> String {
         return format!("Erreur: `old_str` apparaît {count} fois, rends-le unique");
     }
     let updated = content.replacen(old, new, 1);
+    let note = backup_note(Path::new(path));
     match fs::write(path, &updated) {
-        Ok(()) => format!("Remplacement effectué dans {path} ({})", stats(&updated)),
+        Ok(()) => format!(
+            "Remplacement effectué dans {path} ({}){note}",
+            stats(&updated)
+        ),
         Err(e) => format!("Erreur d'écriture: {e}"),
     }
 }
@@ -147,13 +189,21 @@ fn insert(path: &str, line: usize, text: &str) -> String {
         Ok(c) => c,
         Err(e) => return format!("Erreur de lecture: {e}"),
     };
+    // On préserve la présence (ou l'absence) de newline final : insérer une ligne
+    // ne doit pas réécrire la fin du fichier.
+    let had_trailing_newline = content.ends_with('\n');
     let mut lines: Vec<&str> = content.lines().collect();
     let idx = line.saturating_sub(1).min(lines.len());
     lines.insert(idx, text);
     let mut updated = lines.join("\n");
-    updated.push('\n');
+    if had_trailing_newline {
+        updated.push('\n');
+    }
     match fs::write(path, &updated) {
-        Ok(()) => format!("Insertion effectuée dans {path} à la ligne {line} ({})", stats(&updated)),
+        Ok(()) => format!(
+            "Insertion effectuée dans {path} à la ligne {line} ({})",
+            stats(&updated)
+        ),
         Err(e) => format!("Erreur d'écriture: {e}"),
     }
 }
@@ -166,16 +216,117 @@ fn delete(path: &str) -> String {
     if p.is_dir() {
         return format!("Erreur: {path} est un répertoire, supprime son contenu d'abord");
     }
+    let note = backup_note(p);
     match fs::remove_file(p) {
-        Ok(()) => format!("Fichier supprimé: {path}"),
+        Ok(()) => format!("Fichier supprimé: {path}{note}"),
         Err(e) => format!("Erreur de suppression: {e}"),
     }
 }
 
 fn truncate(mut s: String, max: usize) -> String {
-    if s.len() > max {
-        s.truncate(max);
+    // Troncature sûre : `String::truncate` panique au milieu d'un caractère
+    // multi-octets (fichier français > 16 Ko → crash de la tâche de génération).
+    if crate::util::truncate_utf8(&mut s, max) {
         s.push_str("\n… (tronqué)");
     }
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tmp(name: &str) -> String {
+        let dir = std::env::temp_dir().join(format!("zer0-te-{}-{name}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        dir.join(name).to_string_lossy().to_string()
+    }
+
+    #[test]
+    fn empty_create_is_refused() {
+        let p = tmp("vide.txt");
+        let out = create(&p, "   \n");
+        assert!(out.contains("PAS été écrit"));
+        assert!(!Path::new(&p).exists());
+        let _ = fs::remove_file(&p);
+    }
+
+    #[test]
+    fn create_then_view_roundtrip() {
+        let p = tmp("ok.txt");
+        let out = create(&p, "ligne 1\nligne 2\n");
+        assert!(out.contains("Fichier écrit"));
+        let v = view(&p);
+        assert!(v.contains("ligne 2"));
+        assert!(v.contains("    1  ligne 1"), "got: {v}");
+        let _ = fs::remove_file(&p);
+    }
+
+    #[test]
+    fn str_replace_requires_unique_match() {
+        let p = tmp("dup.txt");
+        create(&p, "a\na\n");
+        assert!(str_replace(&p, "a", "b").contains("2 fois"));
+        let _ = fs::remove_file(&p);
+    }
+
+    #[test]
+    fn insert_preserves_missing_trailing_newline() {
+        let p = tmp("nolf.txt");
+        fs::write(&p, "un\ndeux").unwrap();
+        insert(&p, 2, "milieu");
+        assert_eq!(fs::read_to_string(&p).unwrap(), "un\nmilieu\ndeux");
+        let _ = fs::remove_file(&p);
+    }
+
+    #[test]
+    fn insert_preserves_trailing_newline() {
+        let p = tmp("lf.txt");
+        fs::write(&p, "un\ndeux\n").unwrap();
+        insert(&p, 2, "milieu");
+        assert_eq!(fs::read_to_string(&p).unwrap(), "un\nmilieu\ndeux\n");
+        let _ = fs::remove_file(&p);
+    }
+
+    /// Régression : `view` sur un fichier français > 16 Ko faisait paniquer
+    /// `String::truncate` (frontière UTF-8).
+    #[test]
+    fn view_multibyte_file_does_not_panic() {
+        let p = tmp("fr.txt");
+        let mut content = String::from("a");
+        content.push_str(&"é".repeat(20_000));
+        fs::write(&p, &content).unwrap();
+        let v = view(&p);
+        assert!(v.contains("tronqué"));
+        let _ = fs::remove_file(&p);
+    }
+
+    #[test]
+    fn overwrite_keeps_a_backup() {
+        let p = tmp("garde.txt");
+        fs::write(&p, "version 1").unwrap();
+        let out = create(&p, "version 2");
+        assert!(out.contains("sauvegarde"), "{out}");
+        let bak = format!("{p}.zer0.bak");
+        assert_eq!(fs::read_to_string(&bak).unwrap(), "version 1");
+        let _ = fs::remove_file(&p);
+        let _ = fs::remove_file(&bak);
+    }
+
+    #[test]
+    fn delete_keeps_a_backup() {
+        let p = tmp("supprime.txt");
+        fs::write(&p, "contenu").unwrap();
+        let out = delete(&p);
+        assert!(out.contains("sauvegarde"), "{out}");
+        let bak = format!("{p}.zer0.bak");
+        assert_eq!(fs::read_to_string(&bak).unwrap(), "contenu");
+        assert!(!Path::new(&p).exists());
+        let _ = fs::remove_file(&bak);
+    }
+
+    #[test]
+    fn delete_reports_missing_file() {
+        assert!(delete("/tmp/zer0-inexistant-xyz").contains("n'existe pas"));
+    }
 }

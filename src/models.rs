@@ -88,7 +88,10 @@ pub async fn list(
     // explicites : on affiche l'URL au lieu d'un nu « builder error ».
     let resp = req.send().await.map_err(|e| {
         if e.is_builder() || e.is_request() {
-            anyhow!("URL invalide : {url} — vérifie la base_url du provider « {} » (/provider list)", provider.id)
+            anyhow!(
+                "URL invalide : {url} — vérifie la base_url du provider « {} » (/provider list)",
+                provider.id
+            )
         } else {
             anyhow!("{url} : {e}")
         }
@@ -96,7 +99,11 @@ pub async fn list(
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(anyhow!("{} — {}", status, body.chars().take(200).collect::<String>()));
+        return Err(anyhow!(
+            "{} — {}",
+            status,
+            body.chars().take(200).collect::<String>()
+        ));
     }
     let parsed: ModelsResponse = resp.json().await?;
     Ok(parsed.data)
@@ -123,14 +130,16 @@ fn is_zero(v: &Option<String>) -> bool {
 /// Google Gemini native model list (`/v1beta/models?key=…`).
 async fn list_google(http: &reqwest::Client, key: Option<&str>) -> Result<Vec<ModelEntry>> {
     let key = key.ok_or_else(|| anyhow!("clé Google requise (GEMINI_API_KEY)"))?;
-    let url = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models?key={key}&pageSize=200"
-    );
+    let url =
+        format!("https://generativelanguage.googleapis.com/v1beta/models?key={key}&pageSize=200");
     let resp = http.get(&url).send().await?;
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(anyhow!("{status} — {}", body.chars().take(200).collect::<String>()));
+        return Err(anyhow!(
+            "{status} — {}",
+            body.chars().take(200).collect::<String>()
+        ));
     }
 
     #[derive(Deserialize)]
@@ -152,7 +161,11 @@ async fn list_google(http: &reqwest::Client, key: Option<&str>) -> Result<Vec<Mo
         .models
         .into_iter()
         .map(|g| ModelEntry {
-            id: g.name.strip_prefix("models/").unwrap_or(&g.name).to_string(),
+            id: g
+                .name
+                .strip_prefix("models/")
+                .unwrap_or(&g.name)
+                .to_string(),
             name: g.display_name,
             context_length: g.input_token_limit,
             pricing: None,
@@ -174,7 +187,11 @@ mod tests {
     fn free_detection() {
         assert!(is_free(&m(r#"{"id":"meta/llama:free"}"#)));
         assert!(!is_free(&m(r#"{"id":"openai/gpt-4o"}"#)));
-        assert!(is_free(&m(r#"{"id":"x","pricing":{"prompt":"0","completion":"0"}}"#)));
-        assert!(!is_free(&m(r#"{"id":"y","pricing":{"prompt":"0.1","completion":"0.2"}}"#)));
+        assert!(is_free(&m(
+            r#"{"id":"x","pricing":{"prompt":"0","completion":"0"}}"#
+        )));
+        assert!(!is_free(&m(
+            r#"{"id":"y","pricing":{"prompt":"0.1","completion":"0.2"}}"#
+        )));
     }
 }

@@ -7,6 +7,10 @@ authors = ["richerrail"]
 license = "MIT"
 readme = "README.md"
 
+[lib]
+name = "zer0"
+path = "src/lib.rs"
+
 [[bin]]
 name = "zer0"
 path = "src/main.rs"

@@ -138,8 +138,12 @@ fn parse_429_body(body: &str) -> (Option<u64>, Option<u64>, Option<String>) {
     };
     let err = &v["error"];
     let hdrs = &err["metadata"]["headers"];
-    let limit = hdrs["X-RateLimit-Limit"].as_str().and_then(|s| s.parse().ok());
-    let remain = hdrs["X-RateLimit-Remain"].as_str().and_then(|s| s.parse().ok());
+    let limit = hdrs["X-RateLimit-Limit"]
+        .as_str()
+        .and_then(|s| s.parse().ok());
+    let remain = hdrs["X-RateLimit-Remain"]
+        .as_str()
+        .and_then(|s| s.parse().ok());
     let note = err["message"]
         .as_str()
         .map(|s| s.chars().take(80).collect::<String>());
@@ -193,7 +197,8 @@ pub fn report() -> String {
                 réussis, 429, limites révélées par le fournisseur. Les API ne \
                 publient pas leur quota (Cline : rien ; OpenRouter : seulement \
                 dans le corps des 429) : ce qui n'est pas observé n'est pas \
-                inventé.".into();
+                inventé."
+            .into();
     }
     let mut s = String::from("Usage observé par Zer0 (cette session) :\n");
     for (label, u) in m.iter() {
@@ -203,7 +208,11 @@ pub fn report() -> String {
         match u.last_429 {
             Some(t) => {
                 let mins = t.elapsed().as_secs() / 60;
-                let when = if mins == 0 { "à l'instant".to_string() } else { format!("il y a {mins} min") };
+                let when = if mins == 0 {
+                    "à l'instant".to_string()
+                } else {
+                    format!("il y a {mins} min")
+                };
                 details.push(format!("⚠ 429 {when}"));
                 if let Some(r) = &remain_str {
                     details.push(format!("{r} restant"));
@@ -286,7 +295,9 @@ pub fn parse_auth_key(v: &serde_json::Value) -> String {
         (Some(l), r) if l > 0.0 => {
             let rem = r.unwrap_or(l - usage).max(0.0);
             let pct = (rem * 100.0 / l).round() as u64;
-            s.push_str(&format!("\n  · crédit : {rem:.2}/{l:.2} $ restants ({pct} %)"));
+            s.push_str(&format!(
+                "\n  · crédit : {rem:.2}/{l:.2} $ restants ({pct} %)"
+            ));
         }
         _ => s.push_str("\n  · crédit : illimité (facturation à l'usage)"),
     }
@@ -328,9 +339,18 @@ mod tests {
     #[test]
     fn fmt_remaining_formats_the_user_wanted() {
         assert_eq!(fmt_remaining(Some(50), Some(0)), Some("0/50 (0 %)".into()));
-        assert_eq!(fmt_remaining(Some(100), Some(0)), Some("0/100 (0 %)".into()));
-        assert_eq!(fmt_remaining(Some(50), Some(47)), Some("47/50 (94 %)".into()));
-        assert_eq!(fmt_remaining(Some(50), Some(25)), Some("25/50 (50 %)".into()));
+        assert_eq!(
+            fmt_remaining(Some(100), Some(0)),
+            Some("0/100 (0 %)".into())
+        );
+        assert_eq!(
+            fmt_remaining(Some(50), Some(47)),
+            Some("47/50 (94 %)".into())
+        );
+        assert_eq!(
+            fmt_remaining(Some(50), Some(25)),
+            Some("25/50 (50 %)".into())
+        );
         // Inconnu ⇒ rien (jamais de chiffre inventé)
         assert_eq!(fmt_remaining(None, Some(3)), None);
         assert_eq!(fmt_remaining(Some(50), None), None);

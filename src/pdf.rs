@@ -6,7 +6,10 @@ use std::collections::BTreeMap;
 pub fn info(path: &str) -> Result<String> {
     let doc = Document::load(path)?;
     let pages = doc.get_pages().len();
-    let mut s = format!("PDF : {path}\n  version : {}\n  pages   : {pages}\n", doc.version);
+    let mut s = format!(
+        "PDF : {path}\n  version : {}\n  pages   : {pages}\n",
+        doc.version
+    );
     if let Ok(info) = doc.trailer.get(b"Info").and_then(|o| o.as_reference()) {
         if let Ok(dict) = doc.get_object(info).and_then(|o| o.as_dict()) {
             for (k, label) in [
@@ -106,5 +109,8 @@ pub fn merge(inputs: &[String], output: &str) -> Result<String> {
     document.renumber_objects();
     document.compress();
     document.save(output)?;
-    Ok(format!("{} pages fusionnées → {output}", documents_pages.len()))
+    Ok(format!(
+        "{} pages fusionnées → {output}",
+        documents_pages.len()
+    ))
 }

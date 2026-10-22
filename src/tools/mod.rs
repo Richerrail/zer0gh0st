@@ -12,13 +12,14 @@ pub mod web_search;
 use serde_json::json;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::OnceLock;
+use std::sync::{OnceLock, RwLock};
 
 /// Contexte d'exécution, accessible aux outils.
 ///
 /// Pourquoi : l'outil `0box` doit pouvoir lancer le **vrai** débat multi-agents
 /// (le même que `/0box` et `zer0 0box`), pas en simuler un. Il lui faut donc
 /// les réglages, le prompt système, les options de tour et la liste d'outils.
+#[derive(Clone)]
 pub struct Runtime {
     pub settings: crate::config::Settings,
     pub system: String,
@@ -28,17 +29,27 @@ pub struct Runtime {
     pub code_exec: bool,
 }
 
-static RUNTIME: OnceLock<Runtime> = OnceLock::new();
+static RUNTIME: OnceLock<RwLock<Option<Runtime>>> = OnceLock::new();
 
-/// Initialise le contexte (au démarrage de l'agent). Idempotent : le premier
-/// appel gagne.
-pub fn init_runtime(rt: Runtime) {
-    let _ = RUNTIME.set(rt);
+fn cell() -> &'static RwLock<Option<Runtime>> {
+    RUNTIME.get_or_init(|| RwLock::new(None))
 }
 
-/// Contexte d'exécution, s'il a été initialisé.
-pub fn runtime() -> Option<&'static Runtime> {
-    RUNTIME.get()
+/// Installe **ou remplace** le contexte d'exécution.
+///
+/// Avant : `OnceLock::set` (« premier appel gagne »). Conséquence : activer
+/// puis désactiver `code_exec` (F4) laissait l'outil `0box` avec les privilèges
+/// du démarrage — une politique d'outils qui ne correspond plus à l'UI.
+pub fn set_runtime(rt: Runtime) {
+    if let Ok(mut slot) = cell().write() {
+        *slot = Some(rt);
+    }
+}
+
+/// Contexte d'exécution, s'il a été installé (clone : chaque appel d'outil
+/// garde le sien, sans verrou tenu pendant l'exécution).
+pub fn runtime() -> Option<Runtime> {
+    cell().read().ok().and_then(|g| g.clone())
 }
 
 /// A tool definition advertised to the model in OpenAI function format.
@@ -83,10 +94,7 @@ pub fn all() -> Vec<ToolSpec> {
 /// Nécessaire parce que l'outil `0box` relance un débat → sous-agent → appel
 /// d'outils → … : sans `dyn Future`, le compilateur doit calculer le type
 /// concret de la future et tourne en rond (E0391 « cycle detected »).
-pub fn execute_boxed(
-    name: &str,
-    args: &str,
-) -> Pin<Box<dyn Future<Output = String> + Send>> {
+pub fn execute_boxed(name: &str, args: &str) -> Pin<Box<dyn Future<Output = String> + Send>> {
     // On possède les données (la future doit être 'static).
     let name = name.to_string();
     let args = args.to_string();
@@ -95,9 +103,17 @@ pub fn execute_boxed(
 
 /// Execute a tool by name. Errors are returned as text so the model can react.
 pub async fn execute(name: &str, args: &str) -> String {
+    // Un seul point de passage : toute action d'outil est journalisée, y compris
+    // celles lancées par un sous-agent 0box. `audit` ne bloque jamais le tour.
+    let result = dispatch(name, args).await;
+    crate::audit::record(name, args, &result);
+    result
+}
+
+async fn dispatch(name: &str, args: &str) -> String {
     match name {
         "0box" => box0::run(args).await,
-        "code_exec" => code_exec::run(args),
+        "code_exec" => code_exec::run(args).await,
         "text_editor" => text_editor::run(args),
         "memory_save" => memory_save::run(args).await,
         "memory_search" => memory_search::run(args).await,

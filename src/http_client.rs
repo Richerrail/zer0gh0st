@@ -23,13 +23,14 @@ pub async fn send_with_retry(
     loop {
         let req = req_builder();
         let resp = req.send().await?;
-        
+
         if resp.status() == 429 {
             if retries == 0 {
                 return Ok(resp);
             }
             // Honor Retry-After header if present, else exponential backoff
-            let wait = resp.headers()
+            let wait = resp
+                .headers()
                 .get(RETRY_AFTER)
                 .and_then(|h| h.to_str().ok())
                 .and_then(|s| s.parse::<u64>().ok())
@@ -38,7 +39,7 @@ pub async fn send_with_retry(
             retries -= 1;
             continue;
         }
-        
+
         return Ok(resp);
     }
 }
@@ -46,7 +47,7 @@ pub async fn send_with_retry(
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn client_is_shared() {
         // Just verify the lazy static compiles and can be accessed

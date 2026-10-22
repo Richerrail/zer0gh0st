@@ -75,8 +75,8 @@ fn conn() -> Result<Connection> {
 /// Importe un catalogue TSV (en-tête `name\tdescription\turl\tauth\thttps\tcors\tcategory`).
 /// Les lignes commençant par `#` sont des commentaires (source, date).
 pub fn import_tsv(path: &Path) -> Result<(usize, Meta)> {
-    let raw = std::fs::read_to_string(path)
-        .with_context(|| format!("lecture de {}", path.display()))?;
+    let raw =
+        std::fs::read_to_string(path).with_context(|| format!("lecture de {}", path.display()))?;
     let mut meta = Meta::default();
     let mut rows: Vec<ApiEntry> = Vec::new();
 
@@ -205,7 +205,12 @@ pub fn search_opts(query: &str, limit: usize, keyless: bool) -> Result<Vec<ApiEn
              length(name), name
          LIMIT ?3",
     )?;
-    let mut rows = st.query(params![like, q.to_lowercase(), limit as i64, if keyless {1i64} else {0i64}])?;
+    let mut rows = st.query(params![
+        like,
+        q.to_lowercase(),
+        limit as i64,
+        if keyless { 1i64 } else { 0i64 }
+    ])?;
     let mut out = Vec::new();
     while let Some(r) = rows.next()? {
         out.push(ApiEntry {
@@ -230,8 +235,9 @@ pub fn search(query: &str, limit: usize) -> Result<Vec<ApiEntry>> {
 /// Catégories et nombre d'APIs par catégorie.
 pub fn categories() -> Result<Vec<(String, usize)>> {
     let c = conn()?;
-    let mut st =
-        c.prepare("SELECT category, COUNT(*) FROM public_apis GROUP BY category ORDER BY category")?;
+    let mut st = c.prepare(
+        "SELECT category, COUNT(*) FROM public_apis GROUP BY category ORDER BY category",
+    )?;
     let mut rows = st.query([])?;
     let mut out = Vec::new();
     while let Some(r) = rows.next()? {
@@ -277,13 +283,7 @@ pub fn format_entries(entries: &[ApiEntry], meta: &Meta) -> String {
         };
         s.push_str(&format!(
             "• {} — {}\n   {}\n   [{} · https:{} · cors:{} · {}]\n",
-            e.name,
-            e.description,
-            e.url,
-            key,
-            e.https,
-            e.cors,
-            e.category
+            e.name, e.description, e.url, key, e.https, e.cors, e.category
         ));
     }
     s.push_str(&format!(
@@ -356,7 +356,10 @@ mod tests {
         assert!(s.contains("clé: non"));
         assert!(s.contains("public-apis@abc"));
         assert!(s.contains("2026-10-20"));
-        assert!(s.contains("à vérifier"), "l'avertissement d'honnêteté doit être là");
+        assert!(
+            s.contains("à vérifier"),
+            "l'avertissement d'honnêteté doit être là"
+        );
     }
 
     #[test]
@@ -376,6 +379,9 @@ mod tests {
         let s = format_entries(&[], &m);
         assert!(s.contains("Aucune API ne correspond"));
         assert!(s.contains("ANGLAIS"), "l'astuce doit être donnée");
-        assert!(!s.contains("kb-import-public-apis.sh"), "le catalogue est là : pas de rappel d'import");
+        assert!(
+            !s.contains("kb-import-public-apis.sh"),
+            "le catalogue est là : pas de rappel d'import"
+        );
     }
 }

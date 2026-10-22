@@ -1,3 +1,40 @@
+## Unreleased — consolidation du noyau (0.6.0 à venir)
+
+### Corrigé — pertes de données et crashs silencieux
+- **Troncature UTF-8** : `String::truncate` paniquait au milieu d'un caractère (toute
+  sortie d'outil accentuée > 16 Ko) et tuait la tâche de génération sans message ; la TUI
+  restait bloquée en « streaming ». Nouveau module `util` + tests de régression.
+- **Markdown aplati** : `sanitize_content` écrasait tous les blancs (retours à la ligne,
+  indentation) de **chaque** réponse assistant, contenu ensuite persisté et renvoyé au
+  modèle. Ne touche plus qu'aux tokens `<|…|>` et aux lignes vides excédentaires.
+- **`code_exec` non borné** : `output()` bloquant, sans timeout ni plafond, insensible à
+  `/stop`. Désormais `tokio::process` + timeout (120 s, max 3600) + kill + capture bornée.
+- **`--resume`** : la coupe du JSONL pouvait produire un historique refusé par les
+  providers (400 partout). `convo::repair` + `load_repaired`.
+- **Compaction non persistée** : le résumé ne survivait pas au redémarrage.
+- **Fin de flux** sans `[DONE]`/`finish_reason` : signalée (`eof`), plus acceptée en silence.
+- **Double backoff 429** : un seul endroit décide, dans le client.
+- **Outils `0box` figés** : `Runtime` en `RwLock`, `F3`/`F4` s'appliquent réellement.
+- **Config illisible** : sauvegarde `.corrupt-*.bak` et écritures refusées (le
+  `save_global` suivant écrasait les clés API).
+
+### Sécurité (droits utilisateur assumés, sans sandbox)
+- `zer0-gw` : jeton admin (`x-zer0-admin`, gw.toml ou `ZER0_GW_ADMIN_TOKEN`), comparaison
+  à temps constant, avertissement au démarrage si absent.
+- Telegram : `code_exec` **et** `text_editor` derrière `/exec` ; `/exec on` refusé sur un
+  chat lié automatiquement (`ZER0_TELEGRAM_ALLOW_EXEC=1` pour forcer).
+- Journal d'audit append-only (`data/audit.jsonl`) : `zer0 audit`, `/audit`.
+- Sauvegardes `<fichier>.zer0.bak` avant écrasement ou suppression.
+- Budget d'appels LLM par tour (120, `ZER0_MAX_LLM_CALLS`), sous-agents inclus.
+
+### Architecture et tests
+- Noyau extrait dans `src/lib.rs` + `src/cli.rs` ; `src/main.rs` n'est plus qu'un lanceur.
+- `src/commands.rs` : source unique CLI/TUI pour `select`, `search`, `task` (les deux
+  implémentations avaient divergé : 8 vs 5 modèles, `--role` ignoré en TUI).
+- `tests/streaming.rs` : faux serveur SSE local, 7 tests (tool_calls fragmentés, flux
+  tronqué, 429, bascule d'endpoint, outils transmis).
+- 152 tests (127 lib + 14 gateway + 11 intégration) ; `cargo fmt --check` bloquant en CI.
+
 ## v0.5.9 — Rafraîchissement du jeton GitHub (opt-in) (2026-10-21)
 
 - **Support des jetons expirables (opt-in)** : si l'app OAuth a l'option

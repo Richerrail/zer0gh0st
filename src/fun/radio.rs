@@ -27,7 +27,11 @@ pub fn default_music_dir() -> PathBuf {
     }
     if let Ok(exe) = std::env::current_exe() {
         // target/release/zer0 → target/release → target → <projet>
-        if let Some(root) = exe.parent().and_then(|p| p.parent()).and_then(|p| p.parent()) {
+        if let Some(root) = exe
+            .parent()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.parent())
+        {
             return root.join("music");
         }
     }
@@ -225,7 +229,9 @@ impl Radio {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Magenta))
-            .title(" ZER0 RADIO — ↑↓ choisir · Entrée jouer · n/p suiv./préc. · s stop · q quitter ");
+            .title(
+                " ZER0 RADIO — ↑↓ choisir · Entrée jouer · n/p suiv./préc. · s stop · q quitter ",
+            );
 
         let inner = block.inner(area);
         f.render_widget(block, area);
@@ -257,8 +263,8 @@ impl Radio {
                 ListItem::new(format!("{marker}{name}"))
             })
             .collect();
-        let list = List::new(items)
-            .highlight_style(Style::default().fg(Color::Black).bg(Color::Magenta));
+        let list =
+            List::new(items).highlight_style(Style::default().fg(Color::Black).bg(Color::Magenta));
         let mut state = ListState::default();
         state.select(Some(self.selected));
         f.render_stateful_widget(list, chunks[0], &mut state);
@@ -282,7 +288,10 @@ impl Radio {
             (None, Some(e)) => e.clone(),
             _ => "(arrêté)".to_string(),
         };
-        rows.push(Line::from(Span::styled(status, Style::default().fg(Color::Cyan))));
+        rows.push(Line::from(Span::styled(
+            status,
+            Style::default().fg(Color::Cyan),
+        )));
         f.render_widget(Paragraph::new(rows).alignment(Alignment::Left), chunks[1]);
     }
 }

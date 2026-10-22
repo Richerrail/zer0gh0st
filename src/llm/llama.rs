@@ -27,7 +27,11 @@ pub struct ChatOptions {
 
 impl Default for ChatOptions {
     fn default() -> Self {
-        Self { max_tokens: 2048, thinking: false, temperature: 0.3 }
+        Self {
+            max_tokens: 2048,
+            thinking: false,
+            temperature: 0.3,
+        }
     }
 }
 
@@ -35,7 +39,10 @@ impl Default for ChatOptions {
 #[derive(Debug)]
 pub enum ChatError {
     /// Failed before any token was emitted (connect / status / request build).
-    Setup { err: anyhow::Error, status: Option<u16> },
+    Setup {
+        err: anyhow::Error,
+        status: Option<u16>,
+    },
     /// Failed after streaming started; tokens may already be visible.
     Mid(anyhow::Error),
 }
@@ -120,33 +127,42 @@ impl ApiClient {
         let url = format!("{}/chat/completions", self.base_url);
         // Étiquette d'usage (suivi 200/429, voir `quota`) — identique aux labels de `route`.
         let quota_label = crate::quota::label_for(&self.base_url, &self.model);
-        
+
         // Build request with proper headers
         let req_builder = || {
             let mut req = self.http.post(&url).json(&body);
             if self.base_url.contains("openrouter.ai") {
-                req = req
-                    .header("HTTP-Referer", "https://github.com/richerrail/zer0gh0st")
-                    .header("X-Title", "zer0gh0st/0.5.5");
+                req = attribution(req);
             }
             if let Some(k) = &self.api_key {
                 req = req.bearer_auth(k);
             }
             req
         };
-        
+
         // Retry loop for 429 (rate limit) with exponential backoff + Retry-After header
         let mut retries = 3;
         let resp = loop {
+            if !crate::budget::try_consume() {
+                return Err(ChatError::Setup {
+                    err: anyhow!(
+                        "budget d'appels LLM épuisé ({}) pour ce tour — réduis le périmètre \
+                         (sous-agents 0box) ou augmente ZER0_MAX_LLM_CALLS",
+                        crate::budget::max_calls()
+                    ),
+                    status: None,
+                });
+            }
             let req = req_builder();
-            let resp = req
-                .send()
-                .await
-                .map_err(|e| ChatError::Setup { err: e.into(), status: None })?;
-            
+            let resp = req.send().await.map_err(|e| ChatError::Setup {
+                err: e.into(),
+                status: None,
+            })?;
+
             if resp.status() == 429 {
                 // Retry-After doit être lu avant `text()` (qui consomme la réponse).
-                let wait = resp.headers()
+                let wait = resp
+                    .headers()
                     .get(RETRY_AFTER)
                     .and_then(|h| h.to_str().ok())
                     .and_then(|s| s.parse::<u64>().ok())
@@ -159,14 +175,15 @@ impl ApiClient {
                         status: Some(429),
                     });
                 }
-                let _ = ui.send(UiEvent::Info(
-                    format!("⏳ Rate limited (429), retrying in {}s...", wait)
-                ));
+                let _ = ui.send(UiEvent::Info(format!(
+                    "⏳ Rate limited (429), retrying in {}s...",
+                    wait
+                )));
                 tokio::time::sleep(Duration::from_secs(wait)).await;
                 retries -= 1;
                 continue;
             }
-            
+
             if !resp.status().is_success() {
                 let status = resp.status();
                 let text = resp.text().await.unwrap_or_default();
@@ -185,16 +202,20 @@ impl ApiClient {
         let mut partial: Vec<PartialCall> = Vec::new();
         let mut finish_reason: Option<String> = None;
         let mut emitted: usize = 0;
+        // Un flux n'est valide que s'il annonce sa fin (`[DONE]` ou `finish_reason`).
+        // Sinon on a peut-être perdu la fin d'un `tool_call` (JSON tronqué) :
+        // c'était jusqu'ici retourné comme un succès, en silence.
+        let mut terminal = false;
 
         loop {
             let ev = match tokio::time::timeout(STREAM_IDLE_TIMEOUT, stream.next()).await {
                 Ok(Some(ev)) => ev.map_err(|e| ChatError::Mid(e.into()))?,
                 Ok(None) => break,
                 Err(_) => {
-                    let _ = ui.send(UiEvent::Info(
-                        "⚠ flux interrompu (aucune donnée pendant 120 s)".into(),
-                    ));
-                    break;
+                    return Err(ChatError::Mid(anyhow!(
+                        "flux inactif pendant {} s : connexion coupée en cours de réponse",
+                        STREAM_IDLE_TIMEOUT.as_secs()
+                    )));
                 }
             };
             let data = ev.data.trim();
@@ -202,6 +223,7 @@ impl ApiClient {
                 continue;
             }
             if data == "[DONE]" {
+                terminal = true;
                 break;
             }
             let chunk: StreamChunk = match serde_json::from_str(data) {
@@ -210,6 +232,7 @@ impl ApiClient {
             };
             for choice in chunk.choices {
                 if choice.finish_reason.is_some() {
+                    terminal = true;
                     finish_reason = choice.finish_reason.clone();
                 }
                 if let Some(text) = choice.delta.content {
@@ -244,6 +267,17 @@ impl ApiClient {
             }
         }
 
+        if !terminal && (!content.trim().is_empty() || !partial.is_empty()) {
+            let _ = ui.send(UiEvent::Info(
+                "⚠ flux clos sans marqueur de fin ([DONE]/finish_reason) — réponse \
+                 possiblement incomplète"
+                    .into(),
+            ));
+            if finish_reason.is_none() {
+                finish_reason = Some("eof".into());
+            }
+        }
+
         if finish_reason.as_deref() == Some("length") {
             let _ = ui.send(UiEvent::Info(
                 "⚠ réponse tronquée : limite de tokens atteinte (augmente --max-tokens)".into(),
@@ -256,21 +290,26 @@ impl ApiClient {
         if content.trim().is_empty() && partial.is_empty() {
             let mut body2 = body.clone();
             body2["stream"] = json!(false);
-            
+
             let mut retries2 = 3;
             loop {
+                if !crate::budget::try_consume() {
+                    return Err(ChatError::Setup {
+                        err: anyhow!("budget d'appels LLM épuisé pour ce tour"),
+                        status: None,
+                    });
+                }
                 let mut req2 = self.http.post(&url).json(&body2);
                 if self.base_url.contains("openrouter.ai") {
-                    req2 = req2
-                        .header("HTTP-Referer", "https://github.com/richerrail/zer0gh0st")
-                        .header("X-Title", "zer0gh0st/0.5.5");
+                    req2 = attribution(req2);
                 }
                 if let Some(k) = &self.api_key {
                     req2 = req2.bearer_auth(k);
                 }
                 match req2.send().await {
                     Ok(resp2) if resp2.status() == 429 => {
-                        let wait = resp2.headers()
+                        let wait = resp2
+                            .headers()
                             .get(RETRY_AFTER)
                             .and_then(|h| h.to_str().ok())
                             .and_then(|s| s.parse::<u64>().ok())
@@ -283,15 +322,31 @@ impl ApiClient {
                         );
                         let text = resp2.text().await.unwrap_or_default();
                         crate::quota::record_rate_limited(&quota_label, &text);
-                        if retries2 == 0 { break; }
-                        let _ = ui.send(UiEvent::Info(
-                            format!("⏳ Rate limited (429), retrying in {}s...", wait)
-                        ));
+                        if retries2 == 0 {
+                            break;
+                        }
+                        let _ = ui.send(UiEvent::Info(format!(
+                            "⏳ Rate limited (429), retrying in {}s...",
+                            wait
+                        )));
                         tokio::time::sleep(Duration::from_secs(wait)).await;
                         retries2 -= 1;
                         continue;
                     }
-                    Ok(resp2) if resp2.status().is_success() => {
+                    Ok(resp2) if !resp2.status().is_success() => {
+                        // Ne pas masquer la cause : un 401/404 ici doit remonter
+                        // (turn.rs peut alors basculer d'endpoint).
+                        let status = resp2.status();
+                        let body = resp2.text().await.unwrap_or_default();
+                        return Err(ChatError::Setup {
+                            err: anyhow!(
+                                "{status} (repli non-streaming) : {}",
+                                body.chars().take(200).collect::<String>()
+                            ),
+                            status: Some(status.as_u16()),
+                        });
+                    }
+                    Ok(resp2) => {
                         crate::quota::record_success(&quota_label);
                         crate::quota::record_limits(
                             &quota_label,
@@ -299,15 +354,15 @@ impl ApiClient {
                             crate::quota::header_u64(resp2.headers(), crate::quota::REMAIN_HEADERS),
                         );
                         if let Ok(v) = resp2.json::<serde_json::Value>().await {
-                            if let Some(msg) = v["choices"].get(0).and_then(|ch| ch.get("message")) {
-                                let c = msg
-                                    .get("content")
-                                    .and_then(|x| x.as_str())
-                                    .unwrap_or("");
+                            if let Some(msg) = v["choices"].get(0).and_then(|ch| ch.get("message"))
+                            {
+                                let c = msg.get("content").and_then(|x| x.as_str()).unwrap_or("");
                                 if !c.is_empty() {
                                     content = c.to_string();
                                     let _ = ui.send(UiEvent::Token(c.to_string()));
-                                } else if let Some(r) = msg.get("reasoning_content").and_then(|x| x.as_str()) {
+                                } else if let Some(r) =
+                                    msg.get("reasoning_content").and_then(|x| x.as_str())
+                                {
                                     if !r.is_empty() {
                                         reasoning = r.to_string();
                                     }
@@ -316,7 +371,12 @@ impl ApiClient {
                         }
                         break;
                     }
-                    _ => break,
+                    Err(e) => {
+                        return Err(ChatError::Setup {
+                            err: e.into(),
+                            status: None,
+                        });
+                    }
                 }
             }
         }
@@ -336,11 +396,19 @@ impl ApiClient {
             .into_iter()
             .filter(|c| !c.name.is_empty())
             .map(|c| ToolCall {
-                id: if c.id.is_empty() { format!("call_{}", c.index) } else { c.id },
+                id: if c.id.is_empty() {
+                    format!("call_{}", c.index)
+                } else {
+                    c.id
+                },
                 kind: "function".into(),
                 function: FunctionCall {
                     name: c.name,
-                    arguments: if c.arguments.is_empty() { "{}".into() } else { c.arguments },
+                    arguments: if c.arguments.is_empty() {
+                        "{}".into()
+                    } else {
+                        c.arguments
+                    },
                 },
             })
             .collect();
@@ -349,26 +417,73 @@ impl ApiClient {
     }
 }
 
-/// Retire les tokens spéciaux qui fuient (`<|open|>`, `<|close|>`, `<|sep|>`…).
+/// En-têtes d'attribution envoyés à OpenRouter (tableau de bord + `HTTP-Referer`).
+///
+/// La version précédente avait `zer0gh0st/0.5.5` et `github.com/richerrail/...`
+/// écrits en dur à deux endroits : version fausse dès la 0.5.6, et mauvaise
+/// casse de l'organisation. Une seule source : `CARGO_PKG_VERSION` + `update::REPO`.
+fn attribution(req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    req.header(
+        "HTTP-Referer",
+        format!("https://github.com/{}", crate::update::REPO),
+    )
+    .header("X-Title", concat!("ZER0|GH0ST/", env!("CARGO_PKG_VERSION")))
+}
+
+/// Retire les tokens spéciaux qui fuient (`<|im_end|>`, `<|eot_id|>`…).
+///
+/// **Ne touche pas aux blancs.** La version précédente terminait par
+/// `out.split_whitespace().collect::<Vec<_>>().join(" ")`, ce qui écrasait les
+/// retours à la ligne et l'indentation de *chaque* réponse assistant : le code
+/// relu (et renvoyé au modèle au tour suivant) arrivait aplati sur une ligne.
+/// On se contente désormais de supprimer les lignes vides excédentaires.
 fn sanitize_content(s: &str) -> String {
-    let mut out = String::new();
-    let mut it = s.chars().peekable();
-    while let Some(c) = it.next() {
-        if c == '<' && it.peek() == Some(&'|') {
-            it.next(); // consomme '|'
-            while let Some(c2) = it.next() {
-                if c2 == '|' && it.peek() == Some(&'>') {
-                    it.next();
-                    break;
+    collapse_blank_lines(&strip_special_tokens(s))
+}
+
+/// Supprime les séquences `<|…|>` dont le contenu est un identifiant de token
+/// (`alnum` + `_`). Tout le reste est laissé intact : on ne mange pas de texte
+/// arbitraire au motif qu'il commence par `<|`.
+fn strip_special_tokens(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0usize;
+    while i < s.len() {
+        if s[i..].starts_with("<|") {
+            if let Some(rel) = s[i + 2..].find("|>") {
+                let inner = &s[i + 2..i + 2 + rel];
+                let is_token = !inner.is_empty()
+                    && inner.len() <= 40
+                    && inner.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+                if is_token {
+                    i += 2 + rel + 2;
+                    continue;
                 }
             }
-            out.push(' ');
+        }
+        let ch = s[i..].chars().next().expect("frontière UTF-8");
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
+
+/// Réduit les suites de lignes vides (`\n\n\n…` → `\n\n`), sans toucher à
+/// l'indentation ni aux espaces significatifs.
+fn collapse_blank_lines(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut newlines = 0usize;
+    for c in s.chars() {
+        if c == '\n' {
+            newlines += 1;
+            if newlines <= 2 {
+                out.push(c);
+            }
         } else {
+            newlines = 0;
             out.push(c);
         }
     }
-    // retire les espaces multiples créés par le nettoyage
-    out.split_whitespace().collect::<Vec<_>>().join(" ")
+    out
 }
 
 #[derive(Default)]
@@ -382,7 +497,10 @@ struct PartialCall {
 fn merge_call(partial: &mut Vec<PartialCall>, delta: ToolCallDelta) {
     let idx = delta.index;
     while partial.len() <= idx {
-        partial.push(PartialCall { index: partial.len(), ..Default::default() });
+        partial.push(PartialCall {
+            index: partial.len(),
+            ..Default::default()
+        });
     }
     let slot = &mut partial[idx];
     if let Some(id) = delta.id {
@@ -395,6 +513,57 @@ fn merge_call(partial: &mut Vec<PartialCall>, delta: ToolCallDelta) {
         if let Some(args) = f.arguments {
             slot.arguments.push_str(&args);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn markdown_and_indentation_are_preserved() {
+        let md = "Voici le code:\n\n```rust\nfn main() {\n    println!(\"hi\");\n}\n```\n\n- item 1\n- item 2\n";
+        assert_eq!(sanitize_content(md), md);
+    }
+
+    #[test]
+    fn table_alignment_is_preserved() {
+        let t = "| a | b |\n|---|---|\n| 1 | 2 |\n";
+        assert_eq!(sanitize_content(t), t);
+    }
+
+    #[test]
+    fn leaked_special_tokens_are_removed() {
+        assert_eq!(sanitize_content("bonjour<|im_end|>"), "bonjour");
+        assert_eq!(sanitize_content("a<|eot_id|>b<|end_of_text|>c"), "abc");
+    }
+
+    #[test]
+    fn non_token_angle_pipes_are_kept() {
+        // Pas un identifiant de token : on ne détruit rien.
+        let s = "comparaison a <| b et c |> d";
+        assert_eq!(sanitize_content(s), s);
+        let s2 = "code: `<|pas un token|>`";
+        assert_eq!(sanitize_content(s2), s2);
+    }
+
+    #[test]
+    fn excessive_blank_lines_are_collapsed() {
+        assert_eq!(sanitize_content("a\n\n\n\n\nb"), "a\n\nb");
+        assert_eq!(sanitize_content("a\n\nb"), "a\n\nb");
+    }
+
+    #[test]
+    fn attribution_uses_a_single_source_of_truth() {
+        let title = concat!("ZER0|GH0ST/", env!("CARGO_PKG_VERSION"));
+        assert!(title.starts_with("ZER0|GH0ST/"));
+        assert_eq!(crate::update::REPO, "Richerrail/zer0gh0st");
+    }
+
+    #[test]
+    fn tool_call_arguments_are_not_altered() {
+        let args = "{\n  \"path\": \"/tmp/a b\",\n  \"command\": \"create\"\n}";
+        assert_eq!(sanitize_content(args), args);
     }
 }
 

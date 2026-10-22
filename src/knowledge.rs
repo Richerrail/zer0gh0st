@@ -143,17 +143,133 @@ fn blob_to_f32(b: &[u8]) -> Vec<f32> {
 
 /// Mots vides ignorés dans la requête FTS (FR + EN).
 const STOPWORDS: &[&str] = &[
-    "le", "la", "les", "un", "une", "des", "de", "du", "au", "aux", "et", "ou", "où", "que",
-    "qui", "quoi", "dont", "pour", "par", "sur", "dans", "avec", "sans", "en", "vers", "chez", "ce",
-    "cet", "cette", "ces", "mon", "ma", "mes", "ton", "ta", "tes", "son", "sa", "ses", "notre",
-    "nos", "votre", "vos", "leur", "leurs", "je", "tu", "il", "elle", "on", "nous", "vous", "ils",
-    "elles", "me", "te", "se", "moi", "toi", "lui", "est", "sont", "etre", "être", "ete", "été",
-    "avoir", "ai", "as", "avons", "avez", "ont", "parle", "parler", "dis", "dire", "explique",
-    "expliquer", "donne", "donner", "fais", "faire", "comment", "pourquoi", "quel", "quelle", "quels",
-    "the", "an", "of", "to", "in", "is", "are", "and", "or", "for", "with", "what", "how", "why",
-    "salut", "bonjour", "hello", "merci", "stp", "svp", "raconte", "raconter", "tout", "tous",
-    "toute", "toutes", "monde", "chose", "choses", "quelque", "beaucoup", "peux", "peut", "veux",
-    "voudrais", "aimerais", "svp", "sais", "voir", "juste",
+    "le",
+    "la",
+    "les",
+    "un",
+    "une",
+    "des",
+    "de",
+    "du",
+    "au",
+    "aux",
+    "et",
+    "ou",
+    "où",
+    "que",
+    "qui",
+    "quoi",
+    "dont",
+    "pour",
+    "par",
+    "sur",
+    "dans",
+    "avec",
+    "sans",
+    "en",
+    "vers",
+    "chez",
+    "ce",
+    "cet",
+    "cette",
+    "ces",
+    "mon",
+    "ma",
+    "mes",
+    "ton",
+    "ta",
+    "tes",
+    "son",
+    "sa",
+    "ses",
+    "notre",
+    "nos",
+    "votre",
+    "vos",
+    "leur",
+    "leurs",
+    "je",
+    "tu",
+    "il",
+    "elle",
+    "on",
+    "nous",
+    "vous",
+    "ils",
+    "elles",
+    "me",
+    "te",
+    "se",
+    "moi",
+    "toi",
+    "lui",
+    "est",
+    "sont",
+    "etre",
+    "être",
+    "ete",
+    "été",
+    "avoir",
+    "ai",
+    "as",
+    "avons",
+    "avez",
+    "ont",
+    "parle",
+    "parler",
+    "dis",
+    "dire",
+    "explique",
+    "expliquer",
+    "donne",
+    "donner",
+    "fais",
+    "faire",
+    "comment",
+    "pourquoi",
+    "quel",
+    "quelle",
+    "quels",
+    "the",
+    "an",
+    "of",
+    "to",
+    "in",
+    "is",
+    "are",
+    "and",
+    "or",
+    "for",
+    "with",
+    "what",
+    "how",
+    "why",
+    "salut",
+    "bonjour",
+    "hello",
+    "merci",
+    "stp",
+    "svp",
+    "raconte",
+    "raconter",
+    "tout",
+    "tous",
+    "toute",
+    "toutes",
+    "monde",
+    "chose",
+    "choses",
+    "quelque",
+    "beaucoup",
+    "peux",
+    "peut",
+    "veux",
+    "voudrais",
+    "aimerais",
+    "svp",
+    "sais",
+    "voir",
+    "juste",
 ];
 
 /// Mots significatifs d'une requête (minuscule, >=3 lettres, sans stopword).
@@ -256,7 +372,8 @@ pub async fn search(query: &str, limit: usize) -> (Vec<Hit>, Option<String>) {
                         let v = blob_to_f32(&row.1);
                         vec_scores.push((row.0, cosine(&qv, &v)));
                     }
-                    vec_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                    vec_scores
+                        .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
                     for (id, s) in vec_scores.into_iter().take(limit) {
                         if let Some(h) = hits.iter_mut().find(|h| h.id == id) {
                             h.score = (h.score + s).max(h.score);
@@ -285,7 +402,11 @@ pub async fn search(query: &str, limit: usize) -> (Vec<Hit>, Option<String>) {
         degraded = Some("aucun embedder configuré → recherche FTS5/LIKE".into());
     }
 
-    hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    hits.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     hits.truncate(limit);
     (hits, degraded)
 }
@@ -373,14 +494,19 @@ pub async fn ingest_dir(dir: &Path, embed: bool) -> Result<(usize, usize)> {
 /// Reconstruit l'index FTS5.
 pub fn rebuild_fts() -> Result<()> {
     let c = open()?;
-    c.execute("INSERT INTO knowledge_fts(knowledge_fts) VALUES('rebuild')", [])?;
+    c.execute(
+        "INSERT INTO knowledge_fts(knowledge_fts) VALUES('rebuild')",
+        [],
+    )?;
     Ok(())
 }
 
 pub fn stats() -> Result<String> {
     let c = open()?;
     let entries: i64 = c.query_row("SELECT COUNT(*) FROM knowledge", [], |r| r.get(0))?;
-    let files: i64 = c.query_row("SELECT COUNT(DISTINCT source) FROM knowledge", [], |r| r.get(0))?;
+    let files: i64 = c.query_row("SELECT COUNT(DISTINCT source) FROM knowledge", [], |r| {
+        r.get(0)
+    })?;
     let vecs: i64 = c.query_row("SELECT COUNT(*) FROM embeddings", [], |r| r.get(0))?;
     Ok(format!(
         "Base de connaissance : {}\n  entrées (chunks) : {entries}\n  fichiers         : {files}\n  vecteurs         : {vecs}\n  embedder         : {}\n  FTS5             : activé",
@@ -408,7 +534,10 @@ pub fn log_injection(query: &str, hits: &[Hit]) {
     use std::io::Write;
     let mut line = format!("[{}] query={query:?}", now());
     for h in hits {
-        line.push_str(&format!(" | {} <{}> score={:.3}", h.sujet, h.source, h.score));
+        line.push_str(&format!(
+            " | {} <{}> score={:.3}",
+            h.sujet, h.source, h.score
+        ));
     }
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)
@@ -441,7 +570,11 @@ pub fn format_hits(hits: &[Hit], degraded: &Option<String>) -> String {
             h.score,
             h.sujet,
             h.source,
-            h.contenu.replace('\n', " ").chars().take(300).collect::<String>()
+            h.contenu
+                .replace('\n', " ")
+                .chars()
+                .take(300)
+                .collect::<String>()
         ));
     }
     s
@@ -454,7 +587,10 @@ mod tests {
     #[test]
     fn tokens_filters_short_and_stopwords() {
         // Mots longs non-stopwords conservés.
-        assert_eq!(tokens("algorithmique boussole"), vec!["algorithmique", "boussole"]);
+        assert_eq!(
+            tokens("algorithmique boussole"),
+            vec!["algorithmique", "boussole"]
+        );
         // Tokens < 3 lettres ignorés.
         assert!(tokens("a bb ccc").contains(&"ccc".to_string()));
         assert!(!tokens("a bb").iter().any(|t| t.len() < 3));

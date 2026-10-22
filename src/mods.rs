@@ -5,7 +5,11 @@ use std::process::Command;
 /// Project root, resolved from the running binary (`target/release/zer0`).
 pub fn project_root() -> PathBuf {
     if let Ok(exe) = std::env::current_exe() {
-        if let Some(root) = exe.parent().and_then(|p| p.parent()).and_then(|p| p.parent()) {
+        if let Some(root) = exe
+            .parent()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.parent())
+        {
             return root.to_path_buf();
         }
     }
@@ -36,7 +40,9 @@ pub fn launch_kristal() -> Result<String> {
 pub fn launch_streaming() -> Result<String> {
     let script = mod_path("streaming/zero_video.py");
     require(&script)?;
-    Command::new(crate::platform::python()).arg(&script).spawn()?;
+    Command::new(crate::platform::python())
+        .arg(&script)
+        .spawn()?;
     Ok(format!("🎬 streaming lancé — {}", script.display()))
 }
 

@@ -95,11 +95,8 @@ pub fn setup(passphrase: &str) -> Result<usize> {
         return Err(anyhow!("passphrase vide"));
     }
     let mut g = config::load_global();
-    let keys: HashMap<String, String> = g
-        .keys
-        .iter()
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
+    let keys: HashMap<String, String> =
+        g.keys.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
     // Une config sans clé n'est pas une erreur : le coffre peut ne contenir
     // que le jeton GitHub (cf. `vote login`). On crée donc un coffre vide
     // plutôt que de refuser.
@@ -272,7 +269,10 @@ mod tests {
             !raw.contains(secret),
             "le secret apparaît en clair dans le fichier du coffre !"
         );
-        assert!(!raw.contains("ghp_"), "le secret apparaît en clair dans le coffre !");
+        assert!(
+            !raw.contains("ghp_"),
+            "le secret apparaît en clair dans le coffre !"
+        );
 
         // 2) Après déchiffrement : le secret revient intact.
         let v2: VaultFile = serde_json::from_str(&raw).unwrap();

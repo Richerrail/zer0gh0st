@@ -20,7 +20,11 @@ pub struct Endpoint {
 
 impl Endpoint {
     pub fn client(&self) -> ApiClient {
-        ApiClient::new(self.base_url.clone(), self.model.clone(), self.api_key.clone())
+        ApiClient::new(
+            self.base_url.clone(),
+            self.model.clone(),
+            self.api_key.clone(),
+        )
     }
 }
 
@@ -72,7 +76,14 @@ pub fn parse_route(route: &str) -> Option<Endpoint> {
 
 /// Roles Zer0 knows about.
 pub const KNOWN_ROLES: &[&str] = &[
-    "main", "code", "reasoning", "writing", "vision", "fast", "utility", "review",
+    "main",
+    "code",
+    "reasoning",
+    "writing",
+    "vision",
+    "fast",
+    "utility",
+    "review",
 ];
 
 /// Default role for a detected task category.
@@ -109,10 +120,7 @@ fn chain_for_role_with(settings: &Settings, role: &str, roles_on: bool) -> Vec<E
         return vec![from_settings(settings)];
     }
     let roles = config::effective_roles();
-    let route = roles
-        .get(role)
-        .or_else(|| roles.get("main"))
-        .cloned();
+    let route = roles.get(role).or_else(|| roles.get("main")).cloned();
 
     let mut chain: Vec<Endpoint> = Vec::new();
     if let Some(r) = route {
@@ -189,19 +197,16 @@ pub fn chain_for_0box_role(settings: &Settings, role: &str) -> Vec<Endpoint> {
     // Then add the full failover chain (role endpoint + global routes)
     // This ensures proper fallback when models return empty responses
     let mut role_chain = Vec::new();
-    
+
     // First: the role-specific endpoint (if configured)
     let roles = config::effective_roles();
-    let route = roles
-        .get(role)
-        .or_else(|| roles.get("main"))
-        .cloned();
+    let route = roles.get(role).or_else(|| roles.get("main")).cloned();
     if let Some(r) = route {
         if let Some(ep) = parse_route(&r) {
             role_chain.push(ep);
         }
     }
-    
+
     // Then: the global failover chain (build_chain includes active + routes)
     for ep in build_chain(settings) {
         let dup = role_chain
@@ -211,7 +216,7 @@ pub fn chain_for_0box_role(settings: &Settings, role: &str) -> Vec<Endpoint> {
             role_chain.push(ep);
         }
     }
-    
+
     // Add to main chain
     for ep in role_chain {
         let dup = chain
@@ -374,7 +379,11 @@ mod tests {
             api_key: None,
         };
         let chain = chain_for_role_with(&s, "main", false);
-        assert_eq!(chain.len(), 1, "rôles off ⇒ un seul endpoint (pas de bascule)");
+        assert_eq!(
+            chain.len(),
+            1,
+            "rôles off ⇒ un seul endpoint (pas de bascule)"
+        );
         assert_eq!(chain[0].model, "mistralai/mixtral-8x22b-v0.1");
         assert_eq!(chain[0].base_url, s.base_url);
     }

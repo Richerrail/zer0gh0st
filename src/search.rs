@@ -1,5 +1,5 @@
-use anyhow::Result;
 use crate::http_client;
+use anyhow::Result;
 use serde::Deserialize;
 
 /// A single web search result.
@@ -30,7 +30,13 @@ pub fn format_hits(hits: &[SearchHit]) -> String {
     }
     let mut s = String::new();
     for (i, h) in hits.iter().enumerate() {
-        s.push_str(&format!("{}. {} — {}\n   {}\n", i + 1, h.title, h.url, h.text));
+        s.push_str(&format!(
+            "{}. {} — {}\n   {}\n",
+            i + 1,
+            h.title,
+            h.url,
+            h.text
+        ));
     }
     s
 }
@@ -112,8 +118,12 @@ fn parse_ddg(html: &str, max: usize) -> Vec<SearchHit> {
         };
         let start = from + rel;
         let block = &html[start..];
-        let title = between(block, '>', "</a>").map(|t| clean(&t)).unwrap_or_default();
-        let url = attr(block, "href").map(|h| real_url(&h)).unwrap_or_default();
+        let title = between(block, '>', "</a>")
+            .map(|t| clean(&t))
+            .unwrap_or_default();
+        let url = attr(block, "href")
+            .map(|h| real_url(&h))
+            .unwrap_or_default();
 
         // snippet = first result__snippet before the next result__a
         let next = block[12..]
