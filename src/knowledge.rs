@@ -19,12 +19,9 @@ use crate::mods;
 /// dans le dossier de données de l'utilisateur, sinon la base part à la
 /// racine du système et échoue en « unable to open database file ».
 pub fn db_path() -> PathBuf {
-    let root = mods::project_root();
-    if root.join("Cargo.toml").is_file() {
-        root.join("knowledge.db")
-    } else {
-        crate::config::data_dir().join("knowledge.db")
-    }
+    // Toujours dans le dossier de données utilisateur (XDG), comme `data/`.
+    // La migration depuis `<projet>/knowledge.db` est faite par `config::data_dir`.
+    crate::config::data_dir().join("knowledge.db")
 }
 
 /// Dossier source par défaut (`<ZER0v1>/base_connaissance`).
@@ -52,10 +49,83 @@ pub struct Hit {
     pub score: f32,
 }
 
+/// Version du schéma SQLite (`PRAGMA user_version`).
+const KB_SCHEMA_VERSION: i64 = 1;
+
 pub(crate) fn open() -> Result<Connection> {
-    let c = Connection::open(db_path())?;
+    let path = db_path();
+    let c = Connection::open(&path)?;
     init(&c)?;
+    check_schema(&c, &path)?;
+    import_legacy_if_empty(&c, &path);
     Ok(c)
+}
+
+/// Récupère une base historique restée dans le checkout quand la base courante
+/// est vide.
+///
+/// Cas réel : le binaire a été lancé une fois **avant** la migration XDG, ce qui
+/// a créé une base vide dans `~/.local/share/zer0gh0st/` ; la migration ne copie
+/// jamais par-dessus un fichier existant, donc les 1 283 chunks du checkout
+/// devenaient invisibles. On rattache l'ancienne base, on copie les lignes et on
+/// reconstruit l'index FTS.
+///
+/// Les **vecteurs** ne sont pas importés (leurs identifiants référencent
+/// l'ancienne base) : il faut relancer `kb ingest --embed` pour les recalculer.
+fn import_legacy_if_empty(c: &Connection, current: &Path) {
+    let local: i64 = c
+        .query_row("SELECT COUNT(*) FROM knowledge", [], |r| r.get(0))
+        .unwrap_or(0);
+    if local > 0 {
+        return;
+    }
+    let legacy = crate::mods::project_root().join("knowledge.db");
+    if !legacy.is_file() || legacy == current {
+        return;
+    }
+    let attach = c.execute(
+        "ATTACH DATABASE ?1 AS legacy",
+        params![legacy.to_string_lossy().to_string()],
+    );
+    if attach.is_err() {
+        return;
+    }
+    let imported: i64 = c
+        .query_row("SELECT COUNT(*) FROM legacy.knowledge", [], |r| r.get(0))
+        .unwrap_or(0);
+    if imported > 0 {
+        let _ = c.execute(
+            "INSERT INTO knowledge (sujet, contenu, source)
+             SELECT sujet, contenu, source FROM legacy.knowledge",
+            [],
+        );
+        let _ = c.execute(
+            "INSERT INTO knowledge_fts(knowledge_fts) VALUES('rebuild')",
+            [],
+        );
+        eprintln!(
+            "📚 base de connaissance importée depuis {} ({imported} chunks) — \
+             vecteurs à recalculer : `zer0 kb ingest --embed`",
+            legacy.display()
+        );
+    }
+    let _ = c.execute("DETACH DATABASE legacy", []);
+}
+
+/// Refuse d'écrire dans une base créée par un binaire plus récent.
+fn check_schema(c: &Connection, path: &Path) -> Result<()> {
+    let v: i64 = c.pragma_query_value(None, "user_version", |r| r.get(0))?;
+    if v > KB_SCHEMA_VERSION {
+        return Err(anyhow!(
+            "base de connaissance {} créée par une version plus récente \
+             (schéma {v} > {KB_SCHEMA_VERSION}) — mets à jour ZER0|GH0ST",
+            path.display()
+        ));
+    }
+    if v < KB_SCHEMA_VERSION {
+        c.pragma_update(None, "user_version", KB_SCHEMA_VERSION)?;
+    }
+    Ok(())
 }
 
 fn init(c: &Connection) -> Result<()> {
@@ -519,7 +589,7 @@ pub fn stats() -> Result<String> {
 
 /// Fichier de log des injections (`<ZER0v1>/knowledge.log`).
 pub fn log_path() -> PathBuf {
-    mods::project_root().join("knowledge.log")
+    crate::config::data_dir().join("knowledge.log")
 }
 
 fn now() -> String {
