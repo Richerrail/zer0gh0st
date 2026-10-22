@@ -1,3 +1,18 @@
+## v0.6.2 — Liste de tâches globale (2026-10-22)
+
+- **`tasks::path()` ne dépend plus du dossier courant.** Il renvoyait
+  `.zer0/tasks.md` **relatif au cwd** : lancé depuis `~`, l'agent écrivait dans
+  `~/.zer0/tasks.md` ; depuis le dépôt, ailleurs — listes différentes selon
+  l'endroit de lancement, et des `.zer0/` dispersés.
+  Désormais `~/.local/share/zer0gh0st/tasks.md`, surchargeable par
+  `ZERO_TASKS_FILE` pour une liste propre à un projet.
+- **Migration unique** : reprend la liste la plus récente parmi `.zer0/tasks.md`
+  (cwd), `<racine du projet>/.zer0/tasks.md` et `~/.zer0/tasks.md`, sans jamais
+  écraser une liste existante.
+- **Prompt système** : le bloc « Environnement » annonçait encore
+  `<projet>/data`, `<projet>/knowledge.db` et `<projet>/.zer0` ; il donne
+  maintenant les chemins XDG réels (données, base, tâches).
+
 ## v0.6.1 — Correctifs issus de la revue (2026-10-22)
 
 - **TUI — cache de rendu** : chaque frame re-découpait et re-parsait toute la conversation
