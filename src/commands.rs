@@ -523,14 +523,18 @@ pub fn embeddings_unset() -> Result<Vec<String>> {
 // Providers
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Tableau des providers connus. `gateway` est fourni par l'appelant pour que
-/// l'affichage reste cohérent avec ce que l'agent utilise réellement.
+/// Tableau des providers connus.
+///
+/// Deux colonnes distinctes : `transport` (direct ou via `zer0-gw`) et `clé`
+/// (présence d'une clé **dans l'agent**). Avant, la colonne unique affichait
+/// « zer0-gw » à la place de la clé, ce qui laissait croire qu'une clé était
+/// déposée alors que `provider keys` répondait « — ».
 pub fn provider_list() -> Vec<String> {
     let g = crate::config::load_global();
     let gw = crate::config::gateway_enabled();
     let mut out = vec![format!(
-        "{:<3}{:<14}{:<26}{:<12}{:<10}base_url",
-        "", "id", "nom", "gratuit", "clé"
+        "{:<3}{:<14}{:<26}{:<13}{:<11}{}",
+        "", "id", "nom", "gratuit", "transport", "clé"
     )];
     for p in crate::providers::all() {
         let active = if g.provider.as_deref() == Some(p.id.as_str()) {
@@ -538,31 +542,29 @@ pub fn provider_list() -> Vec<String> {
         } else {
             " "
         };
+        let via_gw = gw && !p.custom && p.free != crate::providers::FreeKind::Local;
+        let transport = if via_gw { "zer0-gw" } else { "direct" };
         let key = if p.free == crate::providers::FreeKind::Local {
-            "local".to_string()
-        } else if gw && !p.custom {
-            "zer0-gw".to_string()
+            "local"
         } else if crate::config::key_for(&p).is_some() {
-            "oui".to_string()
+            "oui"
         } else {
-            "—".to_string()
+            "—"
         };
         out.push(format!(
-            "{:<3}{:<14}{:<26}{:<12}{:<10}{}{}",
+            "{:<3}{:<14}{:<26}{:<13}{:<11}{}{}",
             active,
             p.id,
             p.name,
             p.free.label(),
+            transport,
             key,
-            p.base_url,
             if p.custom { "  (custom)" } else { "" }
         ));
     }
     out.push(String::new());
-    out.push(
-        "Ajouter une clé : provider add <id> [clé]  ·  Provider actif : provider use <id>".into(),
-    );
-    out.push("Passerelle (clés hors de l'agent) : provider keys".into());
+    out.push("« — » = aucune clé dans l'agent (une clé déposée reste chez zer0-gw).".into());
+    out.push("Ajouter une clé : provider add <id> [clé]  ·  Activer : provider use <id>".into());
     out
 }
 
