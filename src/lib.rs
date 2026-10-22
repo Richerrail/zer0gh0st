@@ -72,6 +72,8 @@ pub fn enrich_system(system: String) -> String {
 /// Réduit les hallucinations de chemins/date (l'agent « sait où il est »).
 pub fn environment_block() -> String {
     let now = crate::platform::now();
+    let data = crate::config::data_dir();
+    let tasks = crate::tasks::path();
     let cwd = std::env::current_dir()
         .map(|p| p.display().to_string())
         .unwrap_or_default();
@@ -87,9 +89,13 @@ pub fn environment_block() -> String {
          - Date : {now}\n\
          - OS : {os}\n\
          - Dossier courant (pwd) : {cwd}\n\
-         - Racine du projet : {root} — données `{root}/data`, base `{root}/knowledge.db`, tâches `{root}/.zer0`\n\
+         - Racine du projet : {root}\n\
+         - Données : `{}` (base `{}`, mémoire, conversations, tâches `{}`)\n\
          - Dépôt git dans le dossier courant : {git}\n\
-         - Pour connaître autre chose (fichiers, processus…), utilise `code_exec` (`ls`, `ps`, `uname`…)."
+         - Pour connaître autre chose (fichiers, processus…), utilise `code_exec` (`ls`, `ps`, `uname`…).",
+        data.display(),
+        data.join("knowledge.db").display(),
+        tasks.display(),
     )
 }
 

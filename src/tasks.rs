@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Status {
@@ -34,9 +35,72 @@ pub struct Task {
     pub role: Option<String>,
 }
 
-/// Markdown task list at `.zer0/tasks.md`.
+/// Fichier de la liste de tâches (Markdown), **global à l'utilisateur**.
+///
+/// Avant : `.zer0/tasks.md` **relatif au dossier courant**. Les tâches
+/// changeaient donc selon l'endroit d'où l'agent était lancé (`~`, le dépôt, un
+/// projet quelconque), ce qui rendait `/task` incohérent — et créait des
+/// `.zer0/` un peu partout.
+///
+/// Désormais dans le dossier de données (XDG), comme la mémoire et les
+/// conversations. Surchargeable par `ZERO_TASKS_FILE` (utile pour une liste
+/// propre à un projet).
 pub fn path() -> PathBuf {
-    PathBuf::from(".zer0").join("tasks.md")
+    static P: OnceLock<PathBuf> = OnceLock::new();
+    P.get_or_init(|| {
+        let p = task_file_from(
+            std::env::var("ZERO_TASKS_FILE").ok().as_deref(),
+            &crate::config::data_dir(),
+        );
+        if let Some(legacy) = migrate_legacy(&p) {
+            eprintln!("🗂️  tâches migrées depuis {}", legacy.display());
+        }
+        p
+    })
+    .clone()
+}
+
+/// Résolution pure du chemin (testable sans toucher l'environnement).
+pub fn task_file_from(env: Option<&str>, data_dir: &Path) -> PathBuf {
+    env.map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| data_dir.join("tasks.md"))
+}
+
+/// Anciens emplacements possibles de la liste (ordre d'exploration).
+fn legacy_candidates() -> Vec<PathBuf> {
+    let mut out = vec![PathBuf::from(".zer0/tasks.md")];
+    for p in [
+        crate::mods::project_root().join(".zer0/tasks.md"),
+        PathBuf::from(crate::platform::home()).join(".zer0/tasks.md"),
+    ] {
+        if !out.contains(&p) {
+            out.push(p);
+        }
+    }
+    out
+}
+
+/// Importe l'ancienne liste si la nouvelle n'existe pas encore.
+pub fn migrate_legacy(target: &Path) -> Option<PathBuf> {
+    migrate_legacy_from(target, &legacy_candidates())
+}
+
+/// Variante pure : choisit le candidat **le plus récent** et le copie.
+pub(crate) fn migrate_legacy_from(target: &Path, candidates: &[PathBuf]) -> Option<PathBuf> {
+    if target.exists() {
+        return None;
+    }
+    let newest = candidates
+        .iter()
+        .filter(|p| p.is_file())
+        .max_by_key(|p| fs::metadata(p).and_then(|m| m.modified()).ok())?;
+    if let Some(dir) = target.parent() {
+        let _ = fs::create_dir_all(dir);
+    }
+    fs::copy(newest, target).ok()?;
+    Some(newest.clone())
 }
 
 pub fn load() -> Vec<Task> {
@@ -282,6 +346,46 @@ pub fn format_list() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn task_file_resolution_is_explicit() {
+        let data = Path::new("/data/zer0");
+        assert_eq!(
+            task_file_from(None, data),
+            PathBuf::from("/data/zer0/tasks.md")
+        );
+        assert_eq!(
+            task_file_from(Some("   "), data),
+            PathBuf::from("/data/zer0/tasks.md")
+        );
+        assert_eq!(
+            task_file_from(Some("/tmp/projet-tasks.md"), data),
+            PathBuf::from("/tmp/projet-tasks.md")
+        );
+    }
+
+    #[test]
+    fn newest_legacy_list_is_migrated_once() {
+        let dir = std::env::temp_dir().join(format!("zer0-tasks-mig-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("a")).unwrap();
+        fs::create_dir_all(dir.join("b")).unwrap();
+        let old = dir.join("a/tasks.md");
+        let recent = dir.join("b/tasks.md");
+        fs::write(&old, "- [ ] ancienne").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        fs::write(&recent, "- [ ] récente").unwrap();
+        let target = dir.join("cible/tasks.md");
+
+        let src = migrate_legacy_from(&target, &[old.clone(), recent.clone()]);
+        assert_eq!(src.as_deref(), Some(recent.as_path()));
+        assert_eq!(fs::read_to_string(&target).unwrap(), "- [ ] récente");
+
+        // Deuxième passe : la cible existe, on ne réécrase plus.
+        assert!(migrate_legacy_from(&target, &[old]).is_none());
+        assert_eq!(fs::read_to_string(&target).unwrap(), "- [ ] récente");
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn extract_paths_finds_real_ones() {

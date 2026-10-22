@@ -6,7 +6,7 @@ use crate::tasks;
 pub fn spec() -> ToolSpec {
     ToolSpec {
         name: "task_add",
-        description: "Add a task to the project's markdown task list (`.zer0/tasks.md`). \
+        description: "Add a task to the user's markdown task list. \
                       Optional `role` assigns it to a model role (code, review, reasoning, …).",
         parameters: json!({
             "type": "object",
