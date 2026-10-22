@@ -158,6 +158,8 @@ enum Command {
     },
     /// Calibrated code-quality score (rubric via the review role).
     Jev { file: String },
+    /// Référence Markdown des commandes (générée depuis le CLI).
+    Commands,
     /// Journal d'audit des actions de l'agent (commandes exécutées, fichiers écrits).
     Audit {
         /// Nombre de lignes à afficher (les plus récentes).
@@ -436,6 +438,67 @@ enum ApisAction {
     Stats,
 }
 
+/// Référence Markdown des commandes, **générée depuis clap**.
+///
+/// La doc des commandes était écrite à la main dans le README : elle dérivait à
+/// chaque ajout. Ici, la source est le CLI lui-même ; `docs/COMMANDS.md` est
+/// comparé à cette sortie par un test, donc toute divergence casse la CI.
+pub fn commands_markdown() -> String {
+    use clap::CommandFactory;
+    let mut cmd = Cli::command();
+    let mut out = String::new();
+    out.push_str("# Commandes — ZER0|GH0ST\n\n");
+    out.push_str("> Fichier généré depuis le CLI (`zer0 commands > docs/COMMANDS.md`).\n");
+    out.push_str(
+        "> Ne pas éditer à la main : un test échoue si ce fichier diverge du binaire.\n\n",
+    );
+    render_command(&mut cmd, "zer0", &mut out, 2);
+    out
+}
+
+fn render_command(cmd: &mut clap::Command, path: &str, out: &mut String, level: usize) {
+    out.push_str(&format!("{} `{}`\n\n", "#".repeat(level), path));
+    if let Some(about) = cmd.get_about().map(|a| a.to_string()) {
+        out.push_str(&format!("{about}\n\n"));
+    }
+    let mut rows: Vec<(String, String)> = Vec::new();
+    for a in cmd.get_arguments() {
+        let id = a.get_id().as_str();
+        if id == "help" || id == "version" {
+            continue;
+        }
+        let mut usage = format!("`--{}`", a.get_long().unwrap_or(id));
+        if let Some(v) = a.get_value_names() {
+            let names: Vec<&str> = v.iter().map(|n| n.as_str()).collect();
+            usage = format!(
+                "`{} <{}>`",
+                a.get_long().map(|l| format!("--{l}")).unwrap_or_default(),
+                names.join(" ")
+            );
+        }
+        let help = a.get_help().map(|h| h.to_string()).unwrap_or_default();
+        rows.push((usage, help.replace('\n', " ")));
+    }
+    if !rows.is_empty() {
+        out.push_str("| Option | Description |\n|---|---|\n");
+        for (u, h) in rows {
+            out.push_str(&format!("| {u} | {h} |\n"));
+        }
+        out.push('\n');
+    }
+    let subs: Vec<(String, String)> = cmd
+        .get_subcommands()
+        .map(|s| (s.get_name().to_string(), String::new()))
+        .collect();
+    if !subs.is_empty() {
+        for (name, _) in subs {
+            if let Some(mut sub) = cmd.find_subcommand(&name).cloned() {
+                render_command(&mut sub, &format!("{path} {name}"), out, level + 1);
+            }
+        }
+    }
+}
+
 /// Point d'entrée du binaire `zer0` (CLI + TUI).
 pub async fn entry() -> Result<()> {
     // Ancien schéma `gw-<id>` → identifiant simple (migration silencieuse, une fois).
@@ -564,6 +627,10 @@ async fn run_command(cmd: Command) -> Result<()> {
         Command::Vault { action } => vault_cmd(action),
         Command::Pdf { action } => pdf_cmd(action),
         Command::Jev { file } => jev_cmd(file).await,
+        Command::Commands => {
+            print!("{}", commands_markdown());
+            Ok(())
+        }
         Command::Audit { tail } => {
             for line in commands::audit_tail(tail) {
                 println!("{line}");
@@ -1203,4 +1270,22 @@ async fn run_once(
     }
     println!();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Anti-dérive : la référence commitée doit être exactement la sortie du CLI.
+    /// Si ce test casse, régénère : `zer0 commands > docs/COMMANDS.md`.
+    #[test]
+    fn docs_commands_is_up_to_date() {
+        let generated = commands_markdown();
+        let committed = include_str!("../docs/COMMANDS.md");
+        assert_eq!(
+            generated.trim_end(),
+            committed.trim_end(),
+            "docs/COMMANDS.md est désynchronisé — régénère : `zer0 commands > docs/COMMANDS.md`"
+        );
+    }
 }
