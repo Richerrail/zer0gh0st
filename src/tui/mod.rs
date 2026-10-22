@@ -90,6 +90,14 @@ pub struct App {
     pub chat_rect: Rect,
     /// Défilement réellement appliqué au fil.
     pub chat_scroll: u16,
+    /// Cache de rendu : (index du message, largeur, empreinte) → lignes.
+    ///
+    /// Sans lui, chaque frame re-découpait et re-parsait **toute** la
+    /// conversation (O(conversation) par frame, donc par token). Le cache est
+    /// invalidé quand le nombre de messages change.
+    pub chat_cache: std::collections::HashMap<(usize, u16, u64), Vec<Line<'static>>>,
+    /// Nombre de messages au moment où le cache a été vidé pour la dernière fois.
+    pub chat_cache_len: usize,
     /// Blocs de sortie d'outil rendus : (1ʳᵉ ligne, dernière ligne, index message).
     pub block_ranges: Vec<(u16, u16, usize)>,
     /// Full-screen fun mode (chat by default).
@@ -272,6 +280,8 @@ pub async fn run(
         chat_rect: Rect::default(),
         chat_scroll: 0,
         block_ranges: Vec::new(),
+        chat_cache: std::collections::HashMap::new(),
+        chat_cache_len: 0,
         mode: crate::fun::Mode::Chat,
         radio: crate::fun::radio::Radio::new(),
         bintime: crate::fun::bintime::BinTime::new(),
@@ -3599,41 +3609,76 @@ fn draw_location(f: &mut Frame, area: Rect) {
 
 fn draw_chat(f: &mut Frame, area: Rect, app: &mut App) {
     let w = area.width as usize;
+    let width = area.width;
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(""));
 
+    // Invalidation simple et sûre : tout changement de nombre de messages
+    // (nouveau tour, compaction, chargement de session, /clear) vide le cache.
+    if app.chat_cache_len != app.messages.len() {
+        app.chat_cache.clear();
+        app.chat_cache_len = app.messages.len();
+    }
+    // Garde-fou mémoire : un historique édité peut créer des clés orphelines.
+    if app.chat_cache.len() > 4 * app.messages.len() + 64 {
+        app.chat_cache.clear();
+        app.chat_cache_len = app.messages.len();
+    }
+
     app.block_ranges.clear();
     {
-        let msgs = &app.messages;
-        let ranges = &mut app.block_ranges;
-        for (mi, m) in msgs.iter().enumerate() {
+        // `messages` et `chat_cache` sont deux champs distincts : on les emprunte
+        // séparément (le compilateur ne sait pas le faire via `app`).
+        let App {
+            messages,
+            chat_cache,
+            block_ranges,
+            ..
+        } = app;
+        for (mi, m) in messages.iter().enumerate() {
             let text = m.content.clone().unwrap_or_default();
-            // Sorties d'outils : repliées par défaut, dépliées **bloc par bloc**
-            // (clic droit dessus, ou Ctrl+O pour le dernier).
+            let key = (mi, width, fingerprint(m));
+            let start = lines.len();
+
+            // Sorties d'outils : repliées par défaut, dépliées bloc par bloc.
             if m.role == "tool" {
-                let start = lines.len() as u16;
-                let total = text.lines().count();
-                if m.expanded {
-                    let capped: String = text.lines().take(200).collect::<Vec<_>>().join("\n");
-                    push_message(&mut lines, &m.role, &capped, w);
-                    if total > 200 {
-                        push_message(&mut lines, "notice", "   … (tronqué à 200 lignes)", w);
-                    }
+                if let Some(cached) = chat_cache.get(&key) {
+                    lines.extend(cached.iter().cloned());
                 } else {
-                    let preview: String = text.lines().take(3).collect::<Vec<_>>().join("\n");
-                    push_message(&mut lines, &m.role, &preview, w);
-                    if total > 3 {
-                        push_message(
-                            &mut lines,
-                            "notice",
-                            &format!("   … {} ligne(s) de plus — clic droit ou Ctrl+O", total - 3),
-                            w,
-                        );
+                    let before = lines.len();
+                    let total = text.lines().count();
+                    if m.expanded {
+                        let capped: String = text.lines().take(200).collect::<Vec<_>>().join("\n");
+                        push_message(&mut lines, &m.role, &capped, w);
+                        if total > 200 {
+                            push_message(&mut lines, "notice", "   … (tronqué à 200 lignes)", w);
+                        }
+                    } else {
+                        let preview: String = text.lines().take(3).collect::<Vec<_>>().join("\n");
+                        push_message(&mut lines, &m.role, &preview, w);
+                        if total > 3 {
+                            push_message(
+                                &mut lines,
+                                "notice",
+                                &format!(
+                                    "   … {} ligne(s) de plus — clic droit ou Ctrl+O",
+                                    total - 3
+                                ),
+                                w,
+                            );
+                        }
                     }
+                    let rendered: Vec<Line<'static>> = lines[before..].to_vec();
+                    chat_cache.insert(key, rendered);
                 }
-                ranges.push((start, (lines.len() as u16).saturating_sub(1), mi));
+                block_ranges.push((start as u16, (lines.len() as u16).saturating_sub(1), mi));
+            } else if let Some(cached) = chat_cache.get(&key) {
+                lines.extend(cached.iter().cloned());
             } else {
+                let before = lines.len();
                 push_message(&mut lines, &m.role, &text, w);
+                let rendered: Vec<Line<'static>> = lines[before..].to_vec();
+                chat_cache.insert(key, rendered);
             }
         }
     }
@@ -3672,6 +3717,26 @@ fn draw_chat(f: &mut Frame, area: Rect, app: &mut App) {
 
     let paragraph = Paragraph::new(lines).scroll((scroll, 0));
     f.render_widget(paragraph, area);
+}
+
+/// Empreinte courte d'un message : invalide le cache si le contenu ou l'état
+/// déplié change. FNV-1a, O(n) mais bien moins cher que re-découper le texte.
+fn fingerprint(m: &ChatMessage) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut mix = |b: u8| {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x100_0000_01b3);
+    };
+    for b in m.role.as_bytes() {
+        mix(*b);
+    }
+    mix(m.expanded as u8);
+    if let Some(c) = &m.content {
+        for b in c.as_bytes() {
+            mix(*b);
+        }
+    }
+    h
 }
 
 /// Index du message dépliable dont le bloc occupe `line` dans le fil.
@@ -4393,6 +4458,8 @@ mod tests {
             chat_rect: Rect::default(),
             chat_scroll: 0,
             block_ranges: vec![],
+            chat_cache: std::collections::HashMap::new(),
+            chat_cache_len: 0,
             mode: crate::fun::Mode::Chat,
             radio: crate::fun::radio::Radio::new(),
             bintime: crate::fun::bintime::BinTime::new(),
