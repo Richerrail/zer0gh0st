@@ -12,6 +12,9 @@ use crate::llm::llama::ChatOptions;
 #[derive(Parser, Debug)]
 #[command(
     name = "zer0",
+    // L'usage affiché ne doit pas dépendre du nom du fichier téléchargé
+    // (`zer0-x86_64-unknown-linux-gnu` avant installation).
+    bin_name = "zer0",
     version,
     about = "ZER0|GH0ST - agent IA en terminal (CLI/TUI)"
 )]
