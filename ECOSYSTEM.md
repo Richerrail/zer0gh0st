@@ -14,26 +14,22 @@
 | **Noyau** | boucle d'agent, TUI, providers, mémoire, tâches, sous-agents, config, coffre |
 | **Outils intégrés** | `code_exec`, `text_editor`, `web_search`, `memory_*`, `task_*`, `/pdf`, `/search`, `/vault` |
 | **Passerelle** | binaire `zer0-gw` séparé (3 modes de sécurité) — hors noyau de la TUI |
-| **Écosystème** | modules `mods/` (audio, horloge, jeu, vidéo, jeux rétro) — **hors noyau** |
-
-Les modules de l'écosystème sont **autonomes** : tous les programmes sont **copiés dans
-`ZER0v1/mods/`** (aucun lien vers un dossier externe).
 
 ---
 
 ## 2. Modules (noyau)
+
+Tous les modules restants vivent dans `src/fun/` : aucun programme externe, aucune
+dépendance Python pour le noyau.
 
 | Commande | Source | Techno | Mode |
 |---|---|---|---|
 | `/radio` | Rust (`src/fun/radio.rs`) | `ffplay`/`mpv`/`paplay` | panneau latéral |
 | `/bintime` | Rust (`src/fun/bintime.rs`) | `date` (horloge) | panneau latéral |
 | `/pong` | Rust (`src/fun/pong.rs`) | — | plein écran |
-| `/bintime` (référence) | `mods/bintime/zero_bintime.py` | Python / pygame | non lancé |
 
-Détails et historique : [`ROADMAP_FUN.md`](./ROADMAP_FUN.md).
-
-### `mods.rs` — lanceurs
-Résout la racine projet depuis l'exécutable (`target/release/zer0` → `ZER0v1`) puis lance :
+`src/mods.rs` ne sert plus qu'à résoudre la racine du projet (surchargeable par
+`ZERO_ROOT`) pour localiser `base_connaissance/` et migrer les anciennes données.
 
 ---
 
@@ -101,4 +97,5 @@ openSUSE) et installe les dépendances ; `--minimal` ne prend que le nécessaire
 
 Tentés puis **rejetés** (hors périmètre, rendu insuffisant ou redondant) : premières versions
 de bintime (BCD), Snake, assembleur Zer0-asm, enregistreur d'écran,
-streaming minimal. Voir [`ROADMAP_FUN.md`](./ROADMAP_FUN.md) pour le détail et les raisons.
+streaming minimal, modules `mods/` (kristal, streaming, retro) dont les sources n'étaient pas
+versionnées.

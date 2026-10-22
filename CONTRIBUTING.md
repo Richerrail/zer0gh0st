@@ -65,8 +65,8 @@ docs(README): préciser le garde-fou « gateway »
 
 ## Idées
 
-Les feuilles de route sont dans `ROADMAP.md`, `ROADMAP_FUN.md` et `ROADMAP_PORT_SLASH.md`.
-Une idée non listée est bienvenue : ouvre une *issue* ou une *discussion*.
+Une idée est bienvenue : ouvre une *issue* ou une *discussion*. Les limites connues et
+ce qui n'est pas couvert sont décrits dans [`SAFETY.md`](./SAFETY.md).
 
 ## Sécurité
 

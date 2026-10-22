@@ -240,8 +240,6 @@ zer0 models --free                         # liste les modèles gratuits
 zer0 select "Écris une fonction Rust"      # recommande un modèle :free
 ```
 
-Voir [`SPEC.md`](./SPEC.md) §1 pour le périmètre exact.
-
 ---
 
 ### Catalogue d'APIs publiques
@@ -348,7 +346,7 @@ Zer0 agit : tu décris un but, il appelle les outils nécessaires.
 
 **CLI** : `zer0 provider|models|model|select|route|role|project|memory|embeddings|task|search|whoami|vault|pdf|jev|bintime|pong|kb|update|quota|vote|0box` — alias débat : `zer0box "<sujet>"` (binaire-lien ou `scripts/zer0box.cmd` depuis les sources).
 
-Détails : `zer0 --help`, ou les `ROADMAP*.md`.
+Détails : `zer0 --help`, ou [`docs/COMMANDS.md`](./docs/COMMANDS.md).
 
 ---
 
@@ -475,13 +473,12 @@ Le projet assume ses limites (principe directeur, §12) :
 
 | Fichier | Contenu |
 |---|---|
-| [`SPEC.md`](./SPEC.md) | périmètre, modes de défaillance, critères d'acceptation |
 | [`SAFETY.md`](./SAFETY.md) | modèle de menace, choix assumés, ce qui **n'est pas** protégé |
 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | structure technique, flux, modules |
 | [`ECOSYSTEM.md`](./ECOSYSTEM.md) | modules fun, portabilité Linux/macOS/Windows |
 | [`BRAINSTORM_ZEROCHAN.md`](./BRAINSTORM_ZEROCHAN.md) | analyse & roadmap Zero-chan |
 | [`CHANGELOG.md`](./CHANGELOG.md) | historique des versions |
-| `ROADMAP.md` · `ROADMAP_FUN.md` · `ROADMAP_PORT_SLASH.md` | feuilles de route |
+| [`docs/COMMANDS.md`](./docs/COMMANDS.md) | référence des commandes, générée depuis le CLI |
 | [`LICENSE`](./LICENSE) | MIT |
 
 **Principe directeur :**
@@ -500,8 +497,6 @@ contre l'exfiltration par le processus, et `SAFETY.md` liste ce que le bac à sa
 2. `cargo build` et `cargo clippy` doivent passer sans avertissement.
 3. Commits clairs ; ouvre une *pull request* en décrivant le **pourquoi**.
 4. Par principe : documente les **limites** de ce que tu ajoutes (pas de promesse non tenue).
-
-Idées ouvertes : voir `ROADMAP*.md`.
 
 ---
 
