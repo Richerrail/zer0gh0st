@@ -1,4 +1,4 @@
-## Unreleased — consolidation du noyau (0.6.0 à venir)
+## v0.6.0 — Noyau testable, correctifs critiques et garde-fous (2026-10-22)
 
 ### Corrigé — pertes de données et crashs silencieux
 - **Troncature UTF-8** : `String::truncate` paniquait au milieu d'un caractère (toute
