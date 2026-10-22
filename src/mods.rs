@@ -1,9 +1,24 @@
-use anyhow::{anyhow, Result};
-use std::path::{Path, PathBuf};
-use std::process::Command;
+//! Résolution de la racine du projet.
+//!
+//! Utilisée par la base de connaissance (dossier source `base_connaissance`) et
+//! par la migration des données historiques. Les lanceurs `/kristal`,
+//! `/streaming` et `/retro` ont été retirés : leurs sources n'étaient pas
+//! versionnées, donc les commandes étaient mortes après un clone.
 
-/// Project root, resolved from the running binary (`target/release/zer0`).
+use std::path::PathBuf;
+
+/// Racine du projet, déduite de l'exécutable (`target/release/zer0` → projet).
+///
+/// Repli : `ZER0_ROOT`, puis le dossier courant. Une installation hors checkout
+/// n'a pas de racine de projet — les appelants testent la présence de
+/// `Cargo.toml` avant de s'en servir.
 pub fn project_root() -> PathBuf {
+    if let Ok(root) = std::env::var("ZER0_ROOT") {
+        let root = root.trim();
+        if !root.is_empty() {
+            return PathBuf::from(root);
+        }
+    }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(root) = exe
             .parent()
@@ -14,42 +29,4 @@ pub fn project_root() -> PathBuf {
         }
     }
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-}
-
-fn mod_path(rel: &str) -> PathBuf {
-    project_root().join("mods").join(rel)
-}
-
-fn require(path: &Path) -> Result<()> {
-    if path.exists() {
-        Ok(())
-    } else {
-        Err(anyhow!("introuvable: {}", path.display()))
-    }
-}
-
-/// `/kristal` — Qt6 Winamp-like player (separate window).
-pub fn launch_kristal() -> Result<String> {
-    let bin = mod_path("zer0-kristal/zer0-kristal");
-    require(&bin)?;
-    Command::new(&bin).spawn()?;
-    Ok(format!("🎵 kristal lancé — {}", bin.display()))
-}
-
-/// `/streaming` — retro torrent video player (separate window).
-pub fn launch_streaming() -> Result<String> {
-    let script = mod_path("streaming/zero_video.py");
-    require(&script)?;
-    Command::new(crate::platform::python())
-        .arg(&script)
-        .spawn()?;
-    Ok(format!("🎬 streaming lancé — {}", script.display()))
-}
-
-/// `/retro` — Zer0-Retr0 (5 games) in the browser.
-pub fn launch_retro() -> Result<String> {
-    let html = mod_path("Zer0-Retr0/index.html");
-    require(&html)?;
-    crate::platform::open_file(&html.to_string_lossy())?;
-    Ok(format!("🕹️ retro ouvert — {}", html.display()))
 }

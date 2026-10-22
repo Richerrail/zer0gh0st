@@ -705,27 +705,6 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
             app.pong = crate::fun::pong::Pong::new();
             app.mode = crate::fun::Mode::Pong;
         }
-        "/kristal" => {
-            let m = match crate::mods::launch_kristal() {
-                Ok(m) => m,
-                Err(e) => format!("Erreur: {e}"),
-            };
-            app.messages.push(ChatMessage::notice(m));
-        }
-        "/streaming" => {
-            let m = match crate::mods::launch_streaming() {
-                Ok(m) => m,
-                Err(e) => format!("Erreur: {e}"),
-            };
-            app.messages.push(ChatMessage::notice(m));
-        }
-        "/retro" => {
-            let m = match crate::mods::launch_retro() {
-                Ok(m) => m,
-                Err(e) => format!("Erreur: {e}"),
-            };
-            app.messages.push(ChatMessage::notice(m));
-        }
         "/models" => cmd_list_models(app, ui_tx, false),
         "/ctx" => handle_ctx(app, &args),
         "/telegram" | "/tg" => handle_telegram(app, &args, ui_tx),
@@ -924,9 +903,6 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
              /bintime                    panneau horloge binaire (à droite)\n\
              /panel                      ferme le panneau latéral\n\
              /pong                       Pong contre l'agent (plein écran)\n\
-             /kristal                    lecteur audio Qt6 (fenêtre séparée)\n\
-             /streaming                  lecteur vidéo torrent (fenêtre séparée)\n\
-             /retro                      jeux rétro Zer0-Retr0 (navigateur)\n\
              /select <problème>         recommande un modèle :free\n\
              /clear                     efface le chat (affichage + mémoire vive)\n\
              /new                       efface la conversation (fichier inclus)\n\

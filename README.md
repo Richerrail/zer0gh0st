@@ -1,6 +1,6 @@
 # ZER0│GH0ST
 
-> **Un agent IA qui vit dans ton terminal.** Rust · TUI · local ou cloud · aucune clé requise.
+> **Un agent IA qui vit dans ton terminal.** Rust · TUI · local ou cloud · zéro dépendance Python pour le noyau.
 
 <img src="./logo.png" alt="ZER0│GH0ST" width="520">
 
@@ -344,7 +344,7 @@ Zer0 agit : tu décris un but, il appelle les outils nécessaires.
 **TUI** (extrait) : `/help` `/think` `/provider` `/model` `/models` `/quota` `/vote` `/ctx` `/free` `/select` `/route` `/telegram` `/tg`
 `/role` `/project` `/memory` `/recall` `/compact` `/task` `/work` `/ask` `/review` `/search`
 `/stop` `/context` `/whoami` `/vault` `/pdf` `/jev` `/kb` `/new` `/history` `/radio` `/bintime`
-`/pong` `/kristal` `/streaming` `/retro` `/panel` `/clear` `/quit` `/img` `/update` `/embeddings`.
+`/pong` `/panel` `/clear` `/quit` `/img` `/update` `/embeddings`.
 
 **CLI** : `zer0 provider|models|model|select|route|role|project|memory|embeddings|task|search|whoami|vault|pdf|jev|bintime|pong|kb|update|quota|vote|0box` — alias débat : `zer0box "<sujet>"` (binaire-lien ou `scripts/zer0box.cmd` depuis les sources).
 
@@ -451,7 +451,6 @@ Le jeton est aussi cherché dans l'environnement
 | `/radio [dossier\|fichier\|url]` | panneau audio à droite, playlist auto | natif Rust |
 | `/bintime` | panneau horloge binaire CRT | natif Rust |
 | `/pong` | Pong **contre l'agent** (plein écran) | natif Rust |
-| `/kristal` · `/streaming` · `/retro` | apps lancées en fenêtre séparée | `mods/` (optionnel) |
 
 Les modules `mods/` ne sont **pas fournis** (voir [`mods/README.md`](./mods/README.md)).
 Détails : [`ECOSYSTEM.md`](./ECOSYSTEM.md).

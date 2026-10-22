@@ -159,7 +159,7 @@ pub fn open_url(url: &str) -> std::io::Result<std::process::Child> {
     }
 }
 
-/// Ouvre un **fichier local** dans l'application par défaut (ex. `/retro`).
+/// Ouvre un **fichier local** dans l'application par défaut.
 ///
 /// Même principe que [`open_url`], mais le lanceur doit gérer un chemin de
 /// fichier : sous Windows, `cmd /C start "" <chemin>` est le lanceur fiable.

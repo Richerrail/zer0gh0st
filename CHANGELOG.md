@@ -27,7 +27,22 @@
 - Sauvegardes `<fichier>.zer0.bak` avant écrasement ou suppression.
 - Budget d'appels LLM par tour (120, `ZER0_MAX_LLM_CALLS`), sous-agents inclus.
 
-### Architecture et tests
+### Architecture
+- Noyau des commandes dans `src/commands.rs` : `select`, `search`, `task`, `model`, `route`,
+  `role`, `memory`, `kb`, `provider`, `quota`, `pdf`, `apis`, `whoami`, `vault`, `embeddings`.
+  Le CLI et la TUI n'ont plus qu'un adaptateur chacun — plusieurs commandes avaient déjà
+  divergé (`role auto` avait deux sens opposés, `select` 8 vs 5 modèles, `task add --role`
+  ignoré en TUI).
+- `provider list` distingue le **transport** (direct / zer0-gw) de la **présence d'une clé**.
+- Données hors du dépôt : `~/.local/share/zer0gh0st` (XDG), `ZER0_DATA_DIR` pour surcharger.
+  Migration unique depuis `data/` et `knowledge.db` du checkout, plus reprise d'une base
+  vide laissée par un lancement antérieur.
+- Schémas versionnés : `schema_version` dans `config.toml`, `PRAGMA user_version` en SQLite.
+- Modules `/kristal`, `/streaming` et `/retro` retirés : leurs sources n'étaient pas
+  versionnées, donc les commandes étaient mortes après un clone (`/bintime`, `/radio`,
+  `/pong` restent, dans `src/fun/`).
+
+### Tests
 - Noyau extrait dans `src/lib.rs` + `src/cli.rs` ; `src/main.rs` n'est plus qu'un lanceur.
 - `src/commands.rs` : source unique CLI/TUI pour `select`, `search`, `task` (les deux
   implémentations avaient divergé : 8 vs 5 modèles, `--role` ignoré en TUI).

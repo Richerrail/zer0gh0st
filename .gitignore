@@ -46,8 +46,6 @@ run-zer0-gw.ps1
 !/base_connaissance/.gitkeep
 /music/*
 !/music/.gitkeep
-/mods/*
-!/mods/README.md
 
 # Secrets
 .env

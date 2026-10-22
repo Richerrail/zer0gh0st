@@ -2,7 +2,7 @@
 
 > Complément du README ; décrit la structure technique sans la visite guidée.
 
-**Version** : 1.0 (2026-10-06) · **Projet** : 0.5.9
+**Version** : 1.1 · **Projet** : 0.5.9
 
 ---
 
@@ -15,7 +15,6 @@ src/
 ├── providers.rs       catalogue des providers (intégrés + personnalisés)
 ├── models.rs          découverte /models, détection :free
 ├── quota.rs           usage observé des modèles (200/429 réels, limites révélées par les 429)
-├── vote.rs            vote 👍/👎 : star GitHub (API ou navigateur) + compteur réel
 ├── select.rs          classement de modèles (benchmarks + mots-clés par mot entier)
 ├── route.rs           chaînes d'endpoints, bascule, mémoire d'échecs, rôle → endpoint
 ├── memory.rs          mémoire persistante JSONL + enveloppe d'honnêteté
@@ -26,7 +25,11 @@ src/
 ├── pdf.rs             info/text/merge/split (lopdf + pdf-extract)
 ├── search.rs          DuckDuckGo Instant Answer
 ├── knowledge.rs       base de connaissance SQLite + FTS5 (+ vectoriel optionnel)
-├── mods.rs            lanceurs /kristal /streaming /retro (depuis mods/)
+├── commands.rs        noyau des commandes (source unique CLI/TUI)
+├── audit.rs           journal d'audit append-only
+├── budget.rs          plafond d'appels LLM par tour (sous-agents inclus)
+├── util.rs            troncature UTF-8 sûre
+├── mods.rs            racine du projet (résolution de chemins)
 ├── cancel.rs          drapeau d'annulation global (/stop)
 ├── event.rs           UiEvent (Token, Reasoning, ToolCall, …, Compacted, Active)
 ├── gwclient.rs        client du zer0-gw (3 modes de sécurité, passphrase zero-knowledge)
