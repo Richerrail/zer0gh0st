@@ -39,15 +39,21 @@ pub fn from_settings(s: &Settings) -> Endpoint {
     }
 }
 
-/// Users often paste OpenRouter-style slugs (`nvidia/...`) into another provider's
-/// `model`. Native APIs expect the bare id. Strip a leading `{provider}/` unless the
-/// provider is OpenRouter (whose namespace is meaningful).
+/// Retire **un** préfixe `{provider}/` du modèle, quel que soit le provider.
+///
+/// Un identifiant de modèle est soit nu (`minimax/minimax-m3.1-flash:free`), soit
+/// écrit « façon route » (`openrouter/minimax/…`). Le second cas est une pollution
+/// de la config (ex. `zer0 model use openrouter/…`) : envoyé tel quel à l'API, il
+/// ne correspond à aucun modèle, et le label affiché doublait le préfixe
+/// (`openrouter/openrouter/…`).
+///
+/// L'ancienne version excluait OpenRouter au motif que « son namespace est
+/// `vendor/model` » — vrai pour le *reste* de l'identifiant, faux pour son propre
+/// préfixe `openrouter/`, qui n'est jamais légitime.
 fn normalize_model(provider_id: &str, model: &str) -> String {
-    if provider_id != "openrouter" {
-        if let Some(rest) = model.strip_prefix(&format!("{provider_id}/")) {
-            if !rest.is_empty() {
-                return rest.to_string();
-            }
+    if let Some(rest) = model.strip_prefix(&format!("{provider_id}/")) {
+        if !rest.is_empty() {
+            return rest.to_string();
         }
     }
     model.to_string()
@@ -367,6 +373,34 @@ mod tests {
         assert!(parse_route("no-slash").is_none());
         assert!(parse_route("unknownprovider/foo").is_none());
         assert!(parse_route("openrouter/").is_none());
+    }
+
+    /// Régression : `model = "openrouter/minimax/…"` envoyait
+    /// `model: "openrouter/minimax/…"` à l'API et affichait un label doublé.
+    #[test]
+    fn provider_prefix_is_not_doubled() {
+        let s = Settings {
+            provider_id: "openrouter".to_string(),
+            provider_name: "OpenRouter".to_string(),
+            base_url: "https://openrouter.ai/api/v1".to_string(),
+            model: "openrouter/minimax/minimax-m3.1-flash:free".to_string(),
+            api_key: None,
+        };
+        let ep = from_settings(&s);
+        assert_eq!(ep.model, "minimax/minimax-m3.1-flash:free");
+        assert_eq!(ep.label, "openrouter/minimax/minimax-m3.1-flash:free");
+    }
+
+    #[test]
+    fn a_bare_model_id_is_untouched() {
+        let s = Settings {
+            provider_id: "nvidia".to_string(),
+            provider_name: "NVIDIA".to_string(),
+            base_url: "https://integrate.api.nvidia.com/v1".to_string(),
+            model: "mistralai/mixtral-8x22b-v0.1".to_string(),
+            api_key: None,
+        };
+        assert_eq!(from_settings(&s).model, "mistralai/mixtral-8x22b-v0.1");
     }
 
     #[test]

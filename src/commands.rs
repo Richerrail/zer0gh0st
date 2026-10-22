@@ -126,11 +126,24 @@ pub fn task(cmd: TaskCmd) -> Result<Vec<String>> {
 /// `/embeddings`, donc les sélectionner casse le chat avec un 400 opaque.
 /// Le CLI et la TUI partageaient déjà ce contrôle, mais avec deux textes
 /// différents et deux façons de propager (ou d'avaler) l'erreur.
+/// Retire un préfixe `{provider}/` redondant (voir `route::normalize_model`).
+pub fn strip_route_prefix(provider_id: &str, id: &str) -> String {
+    id.strip_prefix(&format!("{provider_id}/"))
+        .filter(|rest| !rest.is_empty())
+        .unwrap_or(id)
+        .to_string()
+}
+
 pub fn set_model(id: &str) -> Result<Vec<String>> {
     let id = id.trim();
     if id.is_empty() {
         return Err(anyhow!("usage: model use <id>"));
     }
+    // On stocke un identifiant **nu** : `openrouter/minimax/…` deviendrait un
+    // modèle inexistant une fois préfixé par le provider au moment de l'appel.
+    let active = crate::config::resolve().provider_id;
+    let id = strip_route_prefix(&active, id);
+    let id = id.as_str();
     if crate::select::is_embedding_or_rerank(id) {
         return Err(anyhow!(
             "'{id}' est un modèle d'embedding/rerank — inutilisable en chat \
@@ -409,6 +422,27 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("usage"));
+    }
+
+    #[test]
+    fn redundant_provider_prefix_is_stripped() {
+        assert_eq!(
+            strip_route_prefix("openrouter", "openrouter/minimax/x:free"),
+            "minimax/x:free"
+        );
+        assert_eq!(
+            strip_route_prefix("openrouter", "minimax/x:free"),
+            "minimax/x:free"
+        );
+        assert_eq!(
+            strip_route_prefix("nvidia", "nvidia/mistralai/foo"),
+            "mistralai/foo"
+        );
+        // Un préfixe seul ne doit pas produire un identifiant vide.
+        assert_eq!(
+            strip_route_prefix("openrouter", "openrouter/"),
+            "openrouter/"
+        );
     }
 
     #[test]
