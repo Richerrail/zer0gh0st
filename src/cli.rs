@@ -1415,48 +1415,18 @@ async fn role_cmd(action: RoleAction) -> Result<()> {
 }
 
 async fn route_cmd(action: RouteAction) -> Result<()> {
-    match action {
-        RouteAction::List => {
-            let settings = config::resolve();
-            println!("Chaîne de routage (ordre de bascule):");
-            for (i, ep) in route::build_chain(&settings).iter().enumerate() {
-                let key = if ep.api_key.is_some() || ep.provider_id == "local" {
-                    "clé ok"
-                } else {
-                    "sans clé"
-                };
-                println!("  {}. {}  [{}]", i + 1, ep.label, key);
-            }
-        }
-        RouteAction::Add { route: r } => {
-            route::add_global_route(&r)?;
-            println!("Route ajoutée: {r}");
-        }
+    let lines = match action {
+        RouteAction::List => commands::route_lines(&config::resolve()),
+        RouteAction::Add { route: r } => commands::route_add(&r)?,
         RouteAction::Auto { provider, top } => {
-            let provider_id = provider.unwrap_or_else(|| "openrouter".to_string());
-            let n = top.unwrap_or(4);
-            let eps = route::auto_free_routes(&provider_id, "raisonnement code général", n).await?;
-            if eps.is_empty() {
-                println!("Aucun modèle :free trouvé chez {provider_id}.");
-                return Ok(());
-            }
-            let routes: Vec<String> = eps
-                .iter()
-                .map(|e| format!("{}/{}", e.provider_id, e.model))
-                .collect();
-            route::set_global_routes(routes.clone())?;
-            println!(
-                "Chaîne de bascule remplie depuis {provider_id} ({} modèles):",
-                routes.len()
-            );
-            for (i, r) in routes.iter().enumerate() {
-                println!("  {}. {}", i + 1, r);
-            }
+            let provider = provider.unwrap_or_else(|| "openrouter".to_string());
+            let top = top.unwrap_or(4);
+            commands::route_auto(&provider, top).await?
         }
-        RouteAction::Clear => {
-            route::clear_global_routes()?;
-            println!("Routes de bascule effacées.");
-        }
+        RouteAction::Clear => commands::route_clear()?,
+    };
+    for line in lines {
+        println!("{line}");
     }
     Ok(())
 }

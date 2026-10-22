@@ -144,6 +144,91 @@ pub fn set_model(id: &str) -> Result<Vec<String>> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Chaîne de routage (bascule)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Chaîne de bascule effective, une ligne par endpoint.
+pub fn route_lines(settings: &crate::config::Settings) -> Vec<String> {
+    let chain = crate::route::build_chain(settings);
+    let mut out = vec!["Chaîne de routage (ordre de bascule):".to_string()];
+    if chain.is_empty() {
+        out.push("  (vide — aucun endpoint configuré)".to_string());
+    }
+    for (i, ep) in chain.iter().enumerate() {
+        let key = if ep.api_key.is_some() || ep.provider_id == "local" {
+            "clé ok"
+        } else {
+            "sans clé"
+        };
+        out.push(format!("  {}. {}  [{}]", i + 1, ep.label, key));
+    }
+    out
+}
+
+pub fn route_add(r: &str) -> Result<Vec<String>> {
+    let r = r.trim();
+    if r.is_empty() || !r.contains('/') {
+        return Err(anyhow!("usage: route add <provider>/<model>"));
+    }
+    crate::route::add_global_route(r)?;
+    Ok(vec![format!("Route ajoutée: {r}")])
+}
+
+pub fn route_clear() -> Result<Vec<String>> {
+    crate::route::clear_global_routes()?;
+    Ok(vec!["Routes de bascule effacées.".to_string()])
+}
+
+/// Arguments de `route auto` : `[provider] [n]`, `[n]`, ou rien.
+/// (`/route auto 4` et `/route auto openrouter 4` sont équivalents.)
+pub fn parse_auto_args(args: &[&str]) -> (String, usize) {
+    let mut provider = "openrouter".to_string();
+    let mut n = 4usize;
+    let mut it = args.iter();
+    if let Some(first) = it.next() {
+        match first.parse::<usize>() {
+            Ok(v) => n = v,
+            Err(_) => {
+                provider = (*first).to_string();
+                if let Some(second) = it.next() {
+                    if let Ok(v) = second.parse::<usize>() {
+                        n = v;
+                    }
+                }
+            }
+        }
+    }
+    (provider, n.clamp(1, 12))
+}
+
+/// Remplit la chaîne de bascule avec les modèles `:free` du provider.
+pub async fn route_auto(provider: &str, n: usize) -> Result<Vec<String>> {
+    let provider = if provider.trim().is_empty() {
+        "openrouter"
+    } else {
+        provider.trim()
+    };
+    let n = n.clamp(1, 12);
+    let eps = crate::route::auto_free_routes(provider, "raisonnement code général", n).await?;
+    if eps.is_empty() {
+        return Ok(vec![format!("Aucun modèle :free trouvé chez {provider}.")]);
+    }
+    let routes: Vec<String> = eps
+        .iter()
+        .map(|e| format!("{}/{}", e.provider_id, e.model))
+        .collect();
+    crate::route::set_global_routes(routes.clone())?;
+    let mut out = vec![format!(
+        "Chaîne de bascule remplie depuis {provider} ({} modèles):",
+        routes.len()
+    )];
+    for (i, r) in routes.iter().enumerate() {
+        out.push(format!("  {}. {}", i + 1, r));
+    }
+    Ok(out)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Recherche web
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -298,6 +383,32 @@ mod tests {
     fn unknown_subcommand_is_an_error_with_usage() {
         let e = parse_task(&["frobnicate"]).unwrap_err().to_string();
         assert!(e.contains("usage: task"), "{e}");
+    }
+
+    #[test]
+    fn auto_args_accept_both_forms() {
+        assert_eq!(parse_auto_args(&[]), ("openrouter".to_string(), 4));
+        assert_eq!(parse_auto_args(&["6"]), ("openrouter".to_string(), 6));
+        assert_eq!(parse_auto_args(&["moonshot"]), ("moonshot".to_string(), 4));
+        assert_eq!(
+            parse_auto_args(&["moonshot", "3"]),
+            ("moonshot".to_string(), 3)
+        );
+        // bornes
+        assert_eq!(parse_auto_args(&["99"]).1, 12);
+        assert_eq!(parse_auto_args(&["0"]).1, 1);
+    }
+
+    #[test]
+    fn route_add_validates_the_format() {
+        // Validation seule : on ne touche pas à la vraie config dans un test.
+        assert!(route_add("").is_err());
+        assert!(route_add("   ").is_err());
+        assert!(route_add("sans-slash").is_err());
+        assert!(route_add("sans-slash")
+            .unwrap_err()
+            .to_string()
+            .contains("usage"));
     }
 
     #[test]

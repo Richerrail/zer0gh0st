@@ -2754,82 +2754,53 @@ fn handle_project(app: &mut App) {
 fn handle_route(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
     match args.first().copied() {
         None | Some("list") => {
-            let chain = route::build_chain(&app.settings());
-            let mut s = String::from("Chaîne de routage (ordre de bascule):\n");
-            for (i, ep) in chain.iter().enumerate() {
-                let key = if ep.api_key.is_some() || ep.provider_id == "local" {
-                    "clé ok"
-                } else {
-                    "sans clé"
-                };
-                s.push_str(&format!("  {}. {}  [{}]\n", i + 1, ep.label, key));
-            }
-            s.push_str("\n/route add <provider>/<model>  ·  /route clear");
-            app.messages.push(ChatMessage::notice(s));
+            let mut lines = crate::commands::route_lines(&app.settings());
+            lines.push(String::new());
+            lines.push(
+                "route add <provider>/<model>  ·  route auto [provider] [n]  ·  route clear"
+                    .to_string(),
+            );
+            app.messages.push(ChatMessage::notice(lines.join("\n")));
         }
         Some("add") => {
-            if let Some(r) = args.get(1) {
-                match route::add_global_route(r) {
-                    Ok(()) => app
-                        .messages
-                        .push(ChatMessage::notice(format!("Route ajoutée: {r}"))),
-                    Err(e) => app
-                        .messages
-                        .push(ChatMessage::notice(format!("Erreur: {e}"))),
+            let r = args.get(1).copied().unwrap_or("");
+            match crate::commands::route_add(r) {
+                Ok(lines) => {
+                    for line in lines {
+                        app.messages.push(ChatMessage::notice(line));
+                    }
                 }
-            } else {
-                app.messages
-                    .push(ChatMessage::notice("usage: /route add <provider>/<model>"));
+                Err(e) => app
+                    .messages
+                    .push(ChatMessage::notice(format!("Erreur: {e}"))),
             }
         }
+        Some("clear") => match crate::commands::route_clear() {
+            Ok(lines) => {
+                for line in lines {
+                    app.messages.push(ChatMessage::notice(line));
+                }
+            }
+            Err(e) => app
+                .messages
+                .push(ChatMessage::notice(format!("Erreur: {e}"))),
+        },
         Some("auto") => {
-            let n = args
-                .get(1)
-                .and_then(|s| s.parse::<usize>().ok())
-                .unwrap_or(4);
+            let (provider, n) = crate::commands::parse_auto_args(&args[1.min(args.len())..]);
             let ui = ui_tx.clone();
             tokio::spawn(async move {
-                match route::auto_free_routes("openrouter", "raisonnement code général", n).await
-                {
-                    Ok(eps) => {
-                        let routes: Vec<String> = eps
-                            .iter()
-                            .map(|e| format!("{}/{}", e.provider_id, e.model))
-                            .collect();
-                        let msg = if routes.is_empty() {
-                            "Aucun modèle :free trouvé chez OpenRouter.".to_string()
-                        } else {
-                            let _ = route::set_global_routes(routes.clone());
-                            let list = routes
-                                .iter()
-                                .enumerate()
-                                .map(|(i, r)| format!("  {}. {}", i + 1, r))
-                                .collect::<Vec<_>>()
-                                .join("\n");
-                            format!(
-                                "Chaîne de bascule remplie ({} modèles):\n{list}",
-                                routes.len()
-                            )
-                        };
-                        let _ = ui.send(UiEvent::Info(msg));
-                    }
-                    Err(e) => {
-                        let _ = ui.send(UiEvent::Info(format!("Erreur auto: {e}")));
-                    }
-                }
+                let msg = match crate::commands::route_auto(&provider, n).await {
+                    Ok(lines) => lines.join("\n"),
+                    Err(e) => format!("Erreur auto: {e}"),
+                };
+                let _ = ui.send(UiEvent::Info(msg));
             });
         }
-        Some("clear") => {
-            let _ = route::clear_global_routes();
-            app.messages
-                .push(ChatMessage::notice("Routes de bascule effacées."));
-        }
-        _ => app
-            .messages
-            .push(ChatMessage::notice("usage: /route [list|add|clear]")),
+        _ => app.messages.push(ChatMessage::notice(
+            "usage: /route [list|add <provider>/<model>|auto [provider] [n]|clear]",
+        )),
     }
 }
-
 /// `/quota` : usage observé + solde de la clé quand le provider le publie
 /// (OpenRouter `/auth/key` ; Cline ne publie rien). Le fetch live est async.
 fn cmd_quota(ui_tx: &UnboundedSender<UiEvent>, provider_id: String, key: Option<String>) {
