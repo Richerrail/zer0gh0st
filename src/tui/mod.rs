@@ -636,7 +636,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
         "/provider" => handle_provider(app, &args, ui_tx),
         "/model" => handle_model(app, &args, ui_tx),
         "/route" => handle_route(app, &args, ui_tx),
-        "/role" => handle_role(app, &args),
+        "/role" => handle_role(app, &args, ui_tx),
         "/project" => handle_project(app),
         "/memory" => handle_memory(app),
         "/embeddings" => handle_embeddings(app, &args),
@@ -1450,10 +1450,9 @@ fn handle_model(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) 
     }
 }
 
-fn handle_role(app: &mut App, args: &[&str]) {
+fn handle_role(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
     match args.first().copied() {
         None | Some("list") => {
-            let roles = config::effective_roles();
             let auto = match &app.forced_role {
                 Some(r) => format!("forcé: {r}"),
                 None if app.last_role.is_empty() => "auto".to_string(),
@@ -1465,16 +1464,21 @@ fn handle_role(app: &mut App, args: &[&str]) {
                 "désactivés — /role on pour réactiver"
             };
             let mut s = format!("Rôles ({etat} · {auto}):\n");
-            for r in route::KNOWN_ROLES {
-                let val = roles.get(*r).cloned().unwrap_or_else(|| "—".to_string());
-                let used = if app.forced_role.as_deref() == Some(*r) {
+            for (role, route) in crate::commands::roles_snapshot() {
+                let used = if app.forced_role.as_deref() == Some(role) {
                     "*"
                 } else {
                     " "
                 };
-                s.push_str(&format!(" {used} {:<10} {}\n", r, val));
+                s.push_str(&format!(
+                    " {used} {role:<10} {}\n",
+                    route.unwrap_or_else(|| "—".to_string())
+                ));
             }
-            s.push_str("\n/role on|off · /role set <role> <p>/<m> · /role use <role> · /role auto · /role unset <role>");
+            s.push_str(
+                "\n/role on|off · /role set <role> <p>/<m> · /role force <role> · \
+                 /role unforce · /role auto [provider] · /role unset <role>",
+            );
             app.messages.push(ChatMessage::notice(s));
         }
         Some("set") => {
@@ -1484,77 +1488,85 @@ fn handle_role(app: &mut App, args: &[&str]) {
                 app.messages.push(ChatMessage::notice(
                     "usage: /role set <role> <provider>/<model>",
                 ));
-            } else if route::parse_route(route_s).is_none() {
-                app.messages.push(ChatMessage::notice(format!(
-                    "route invalide: {route_s} (attendu provider/model, ex. openrouter/qwen/qwen3.8-27b:free)"
-                )));
             } else {
-                match config::set_role(role, route_s, false) {
-                    Ok(()) => app
-                        .messages
-                        .push(ChatMessage::notice(format!("Rôle {role} = {route_s}"))),
+                match crate::commands::role_set(role, route_s) {
+                    Ok(lines) => {
+                        for line in lines {
+                            app.messages.push(ChatMessage::notice(line));
+                        }
+                    }
                     Err(e) => app
                         .messages
                         .push(ChatMessage::notice(format!("Erreur: {e}"))),
                 }
             }
         }
-        Some("unset") => {
-            let role = args.get(1).copied().unwrap_or("");
-            let _ = config::unset_role(role, false);
-            app.messages
-                .push(ChatMessage::notice(format!("Rôle {role} supprimé")));
+        Some("unset") => match crate::commands::role_unset(args.get(1).copied().unwrap_or("")) {
+            Ok(lines) => {
+                for line in lines {
+                    app.messages.push(ChatMessage::notice(line));
+                }
+            }
+            Err(e) => app
+                .messages
+                .push(ChatMessage::notice(format!("Erreur: {e}"))),
+        },
+        Some("off") | Some("on") => {
+            let on = args[0] == "on";
+            match crate::commands::set_roles(on) {
+                Ok(lines) => {
+                    app.roles_enabled = on;
+                    if !on {
+                        app.forced_role = None;
+                    }
+                    for line in lines {
+                        app.messages.push(ChatMessage::notice(line));
+                    }
+                }
+                Err(e) => app
+                    .messages
+                    .push(ChatMessage::notice(format!("Erreur: {e}"))),
+            }
         }
-        Some("off") => match config::set_roles_enabled(false) {
-            Ok(()) => {
-                app.roles_enabled = false;
-                app.forced_role = None;
-                app.messages.push(ChatMessage::notice(
-                    "Rôles désactivés : un seul modèle (celui du provider actif) pour tout. /role on pour réactiver."
-                        .to_string(),
-                ));
-            }
-            Err(e) => app
-                .messages
-                .push(ChatMessage::notice(format!("Erreur: {e}"))),
-        },
-        Some("on") => match config::set_roles_enabled(true) {
-            Ok(()) => {
-                app.roles_enabled = true;
-                app.messages.push(ChatMessage::notice(
-                    "Rôles réactivés (routage auto par catégorie).".to_string(),
-                ));
-            }
-            Err(e) => app
-                .messages
-                .push(ChatMessage::notice(format!("Erreur: {e}"))),
-        },
-        Some("use") => {
+        // Forcer un rôle est un état de session (pas de config) : TUI seulement.
+        Some("use") | Some("force") => {
             let role = args.get(1).copied().unwrap_or("");
             if route::KNOWN_ROLES.contains(&role) {
                 if !app.roles_enabled {
-                    let _ = config::set_roles_enabled(true);
+                    let _ = crate::commands::set_roles(true);
                     app.roles_enabled = true;
                 }
                 app.forced_role = Some(role.to_string());
                 app.messages
                     .push(ChatMessage::notice(format!("Rôle forcé: {role}")));
             } else {
-                app.messages
-                    .push(ChatMessage::notice(format!("Rôle inconnu: {role}")));
+                app.messages.push(ChatMessage::notice(format!(
+                    "Rôle inconnu: {role} — connus : {}",
+                    route::KNOWN_ROLES.join(", ")
+                )));
             }
         }
-        Some("auto") => {
+        Some("unforce") => {
             app.forced_role = None;
             app.messages
-                .push(ChatMessage::notice("Routage automatique réactivé"));
+                .push(ChatMessage::notice("Rôle forcé retiré (routage auto)."));
+        }
+        Some("auto") => {
+            let (provider, _) = crate::commands::parse_auto_args(&args[1.min(args.len())..]);
+            let ui = ui_tx.clone();
+            tokio::spawn(async move {
+                let msg = match crate::commands::role_auto(&provider).await {
+                    Ok(lines) => lines.join("\n"),
+                    Err(e) => format!("Erreur auto: {e}"),
+                };
+                let _ = ui.send(UiEvent::Info(msg));
+            });
         }
         _ => app.messages.push(ChatMessage::notice(
-            "usage: /role [list|on|off|set|use|auto|unset]",
+            "usage: /role [list|on|off|set <role> <p>/<m>|force <role>|unforce|auto [provider]|unset <role>]",
         )),
     }
 }
-
 fn cmd_compact(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
     if app.streaming {
         app.messages.push(ChatMessage::notice(

@@ -1367,53 +1367,35 @@ fn project_cmd(action: ProjectAction) -> Result<()> {
 }
 
 async fn role_cmd(action: RoleAction) -> Result<()> {
-    match action {
+    let lines = match action {
         RoleAction::List => {
-            let roles = config::effective_roles();
-            if config::roles_enabled() {
-                println!("Rôles (actifs):");
+            let mut out = vec![if commands::roles_enabled() {
+                "Rôles (actifs):".to_string()
             } else {
-                println!("Rôles (désactivés — `zer0 role on` pour réactiver) :");
+                "Rôles (désactivés — `zer0 role on` pour réactiver) :".to_string()
+            }];
+            for (role, route) in commands::roles_snapshot() {
+                out.push(format!(
+                    "  {role:<10} {}",
+                    route.unwrap_or_else(|| "—".to_string())
+                ));
             }
-            for r in route::KNOWN_ROLES {
-                let v = roles.get(*r).cloned().unwrap_or_else(|| "—".to_string());
-                println!("  {:<10} {}", r, v);
-            }
+            out
         }
-        RoleAction::Off => {
-            config::set_roles_enabled(false)?;
-            println!("Rôles désactivés : un seul modèle (celui du provider actif) pour tout.");
-        }
-        RoleAction::On => {
-            config::set_roles_enabled(true)?;
-            println!("Rôles réactivés.");
-        }
-        RoleAction::Set { role, route: r } => {
-            route::parse_route(&r).ok_or_else(|| anyhow!("route invalide: {r}"))?;
-            config::set_role(&role, &r, false)?;
-            println!("Rôle {role} = {r}");
-        }
-        RoleAction::Unset { role } => {
-            config::unset_role(&role, false)?;
-            println!("Rôle {role} supprimé");
-        }
+        RoleAction::Off => commands::set_roles(false)?,
+        RoleAction::On => commands::set_roles(true)?,
+        RoleAction::Set { role, route: r } => commands::role_set(&role, &r)?,
+        RoleAction::Unset { role } => commands::role_unset(&role)?,
         RoleAction::Auto { provider } => {
-            let provider_id = provider.unwrap_or_else(|| "openrouter".to_string());
-            let assignments = route::auto_role_assignments(&provider_id).await?;
-            if assignments.is_empty() {
-                println!("Aucun modèle :free chez {provider_id}.");
-                return Ok(());
-            }
-            println!("Rôles auto-assignés depuis {provider_id}:");
-            for (role, r) in assignments {
-                config::set_role(&role, &r, false)?;
-                println!("  {role:<10} {r}");
-            }
+            let provider = provider.unwrap_or_else(|| "openrouter".to_string());
+            commands::role_auto(&provider).await?
         }
+    };
+    for line in lines {
+        println!("{line}");
     }
     Ok(())
 }
-
 async fn route_cmd(action: RouteAction) -> Result<()> {
     let lines = match action {
         RouteAction::List => commands::route_lines(&config::resolve()),

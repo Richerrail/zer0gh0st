@@ -242,6 +242,87 @@ pub async fn route_auto(provider: &str, n: usize) -> Result<Vec<String>> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Rôles
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Contenu effectif des rôles (données ; chaque interface met en forme).
+pub fn roles_snapshot() -> Vec<(&'static str, Option<String>)> {
+    let roles = crate::config::effective_roles();
+    crate::route::KNOWN_ROLES
+        .iter()
+        .map(|r| (*r, roles.get(*r).cloned()))
+        .collect()
+}
+
+pub fn roles_enabled() -> bool {
+    crate::config::roles_enabled()
+}
+
+fn validate_role(role: &str) -> Result<()> {
+    if crate::route::KNOWN_ROLES.contains(&role) {
+        Ok(())
+    } else {
+        Err(anyhow!(
+            "rôle inconnu `{role}` — connus : {}",
+            crate::route::KNOWN_ROLES.join(", ")
+        ))
+    }
+}
+
+fn validate_route(route: &str) -> Result<()> {
+    if crate::route::parse_route(route).is_some() {
+        Ok(())
+    } else {
+        Err(anyhow!(
+            "route invalide: {route} (attendu provider/model, \
+             ex. openrouter/qwen/qwen3.8-27b:free)"
+        ))
+    }
+}
+
+/// Active/désactive le routage par rôle.
+pub fn set_roles(on: bool) -> Result<Vec<String>> {
+    crate::config::set_roles_enabled(on)?;
+    Ok(vec![if on {
+        "Rôles réactivés (routage par catégorie).".to_string()
+    } else {
+        "Rôles désactivés : un seul modèle (celui du provider actif) pour tout.".to_string()
+    }])
+}
+
+pub fn role_set(role: &str, route: &str) -> Result<Vec<String>> {
+    validate_role(role)?;
+    validate_route(route)?;
+    crate::config::set_role(role, route, false)?;
+    Ok(vec![format!("Rôle {role} = {route}")])
+}
+
+pub fn role_unset(role: &str) -> Result<Vec<String>> {
+    // Pas de validation ici : on doit pouvoir retirer un rôle devenu inconnu.
+    crate::config::unset_role(role, false)?;
+    Ok(vec![format!("Rôle {role} supprimé")])
+}
+
+/// Assigne chaque rôle au meilleur modèle `:free` du provider.
+pub async fn role_auto(provider: &str) -> Result<Vec<String>> {
+    let provider = if provider.trim().is_empty() {
+        "openrouter"
+    } else {
+        provider.trim()
+    };
+    let assignments = crate::route::auto_role_assignments(provider).await?;
+    if assignments.is_empty() {
+        return Ok(vec![format!("Aucun modèle :free chez {provider}.")]);
+    }
+    let mut out = vec![format!("Rôles auto-assignés depuis {provider}:")];
+    for (role, route) in assignments {
+        crate::config::set_role(&role, &route, false)?;
+        out.push(format!("  {role:<10} {route}"));
+    }
+    Ok(out)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Recherche web
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -396,6 +477,18 @@ mod tests {
     fn unknown_subcommand_is_an_error_with_usage() {
         let e = parse_task(&["frobnicate"]).unwrap_err().to_string();
         assert!(e.contains("usage: task"), "{e}");
+    }
+
+    #[test]
+    fn role_validation_rejects_unknown_roles_and_routes() {
+        // Erreurs pures : aucune écriture de config n'est atteinte.
+        assert!(validate_role("code").is_ok());
+        assert!(validate_role("inconnu").is_err());
+        assert!(validate_route("openrouter/qwen/qwen3.8-27b:free").is_ok());
+        assert!(validate_route("openrouter/").is_err());
+        assert!(validate_route("sans-slash").is_err());
+        assert!(role_set("inconnu", "openrouter/qwen/x").is_err());
+        assert!(role_set("code", "sans-slash").is_err());
     }
 
     #[test]
