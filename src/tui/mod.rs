@@ -18,7 +18,6 @@ use crate::config::{self, Settings};
 use crate::event::UiEvent;
 use crate::http_client;
 use crate::llm::llama::ChatOptions;
-use crate::memory;
 use crate::models;
 use crate::providers;
 use crate::route;
@@ -638,7 +637,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
         "/route" => handle_route(app, &args, ui_tx),
         "/role" => handle_role(app, &args, ui_tx),
         "/project" => handle_project(app),
-        "/memory" => handle_memory(app),
+        "/memory" => handle_memory(app, &args),
         "/embeddings" => handle_embeddings(app, &args),
         "/img" => handle_img(app, &args),
         "/update" => cmd_update(app, &args, ui_tx),
@@ -2648,87 +2647,49 @@ fn handle_embeddings(app: &mut App, args: &[&str]) {
     }
 }
 
-fn handle_memory(app: &mut App) {
-    let entries = memory::load();
-    let probeable = entries.iter().filter(|e| e.trigger.is_some()).count();
-    let embedded = entries.iter().filter(|e| e.vector.is_some()).count();
-    let mut s = format!(
-        "Mémoire: {} entrée(s) · {embedded} embeddées · {probeable} testables\n\
-         trust_enforced: false (toutes untrusted) · store: {}\n",
-        entries.len(),
-        memory::store_path().display()
-    );
-    for e in entries.iter().rev().take(20) {
-        s.push_str(&format!(
-            "  [{}]{}{} {}\n",
-            e.trust,
-            if e.trigger.is_some() { " testable" } else { "" },
-            if e.vector.is_some() { " emb" } else { "" },
-            e.text.replace('\n', " ")
-        ));
-    }
-    app.messages.push(ChatMessage::notice(s));
+fn handle_memory(app: &mut App, args: &[&str]) {
+    // Même source que `zer0 memory list|stats`.
+    let lines = match args.first().copied() {
+        Some("stats") => crate::commands::memory_stats(),
+        Some("list") | None => crate::commands::memory_list(20),
+        Some(other) => vec![format!("usage: /memory [list|stats] (reçu : `{other}`)")],
+    };
+    app.messages.push(ChatMessage::notice(lines.join("\n")));
 }
-
 fn handle_forget(app: &mut App, args: &[&str]) {
-    let id = args.first().copied().unwrap_or("");
-    if id.is_empty() {
-        app.messages
-            .push(ChatMessage::notice("usage: /forget <id>"));
-        return;
-    }
-    match memory::forget(id) {
-        Ok(true) => app
-            .messages
-            .push(ChatMessage::notice(format!("Entrée {id} supprimée"))),
-        Ok(false) => app
-            .messages
-            .push(ChatMessage::notice(format!("Entrée {id} introuvable"))),
-        Err(e) => app
-            .messages
-            .push(ChatMessage::notice(format!("Erreur: {e}"))),
-    }
-}
-
-fn cmd_remember(args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
-    let text = args.join(" ");
-    if text.trim().is_empty() {
-        return;
-    }
-    let ui = ui_tx.clone();
-    tokio::spawn(async move {
-        match memory::save(&text, None, Vec::new()).await {
-            Ok(o) => {
-                let _ = ui.send(UiEvent::Info(format!(
-                    "Enregistré {} (embedded={}, testable={}, degraded={}{})",
-                    o.id,
-                    o.embedded,
-                    o.probeable,
-                    o.degraded,
-                    o.degraded_reason
-                        .map(|r| format!(" — {r}"))
-                        .unwrap_or_default()
-                )));
-            }
-            Err(e) => {
-                let _ = ui.send(UiEvent::Info(format!("Erreur mémoire: {e}")));
+    match crate::commands::memory_forget(args.first().copied().unwrap_or("")) {
+        Ok(lines) => {
+            for line in lines {
+                app.messages.push(ChatMessage::notice(line));
             }
         }
-    });
-}
-
-fn cmd_recall(args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
-    let q = args.join(" ");
-    if q.trim().is_empty() {
-        return;
+        Err(e) => app.messages.push(ChatMessage::notice(format!("{e}"))),
     }
+}
+fn cmd_remember(args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
+    let text = args.join(" ");
     let ui = ui_tx.clone();
     tokio::spawn(async move {
-        let o = memory::search(&q, 5).await;
-        let _ = ui.send(UiEvent::Info(memory::format_outcome(&o)));
+        // Même chemin que `zer0 memory save`.
+        let msg = match crate::commands::memory_save(&text, None).await {
+            Ok(lines) => lines.join("\n"),
+            Err(e) => format!("Erreur mémoire: {e}"),
+        };
+        let _ = ui.send(UiEvent::Info(msg));
     });
 }
-
+fn cmd_recall(args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
+    let q = args.join(" ");
+    let ui = ui_tx.clone();
+    tokio::spawn(async move {
+        // Même chemin que `zer0 memory search`.
+        let msg = match crate::commands::memory_search(&q, 5).await {
+            Ok(lines) => lines.join("\n"),
+            Err(e) => format!("Erreur mémoire: {e}"),
+        };
+        let _ = ui.send(UiEvent::Info(msg));
+    });
+}
 fn handle_project(app: &mut App) {
     let p = config::load_project();
     let mut s = format!("Projet: {}\n", config::project_path().display());

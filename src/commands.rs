@@ -242,6 +242,106 @@ pub async fn route_auto(provider: &str, n: usize) -> Result<Vec<String>> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Mémoire persistante
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Liste les entrées (les plus récentes d'abord) + l'état de l'embedder.
+pub fn memory_list(limit: usize) -> Vec<String> {
+    let entries = crate::memory::load();
+    let n = limit.clamp(1, 500);
+    let mut out = vec![format!(
+        "Mémoire: {} entrée(s) — {}",
+        entries.len(),
+        crate::memory::store_path().display()
+    )];
+    if entries.is_empty() {
+        out.push("  (vide)".to_string());
+    }
+    for e in entries.iter().rev().take(n) {
+        out.push(format!(
+            "  {} [{}]{}{} {}",
+            e.id,
+            e.trust,
+            if e.trigger.is_some() { " testable" } else { "" },
+            if e.vector.is_some() { " emb" } else { "" },
+            e.text.replace('\n', " ")
+        ));
+    }
+    out.push(format!(
+        "trust_enforced: false (toutes untrusted) · {}",
+        match crate::memory::embedder_id() {
+            Some(e) => format!("embedder: {e}"),
+            None => "embedder: (aucun)".to_string(),
+        }
+    ));
+    out
+}
+
+pub fn memory_stats() -> Vec<String> {
+    let entries = crate::memory::load();
+    let probeable = entries.iter().filter(|e| e.trigger.is_some()).count();
+    let embedded = entries.iter().filter(|e| e.vector.is_some()).count();
+    vec![
+        format!("Store      : {}", crate::memory::store_path().display()),
+        format!("Entrées    : {}", entries.len()),
+        format!("Embeddées  : {embedded}"),
+        format!("Testables  : {probeable}"),
+        format!(
+            "Embedder   : {}",
+            crate::memory::embedder_id().unwrap_or_else(|| "(aucun)".into())
+        ),
+    ]
+}
+
+pub async fn memory_save(text: &str, trigger: Option<String>) -> Result<Vec<String>> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Err(anyhow!("usage: memory save <texte>"));
+    }
+    let o = crate::memory::save(text, trigger, Vec::new()).await?;
+    Ok(vec![format!(
+        "Enregistré: {} (embedded={}, testable={}, degraded={}{})",
+        o.id,
+        o.embedded,
+        o.probeable,
+        o.degraded,
+        o.degraded_reason
+            .map(|r| format!(" — {r}"))
+            .unwrap_or_default()
+    )])
+}
+
+pub async fn memory_search(query: &str, k: usize) -> Result<Vec<String>> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Err(anyhow!("usage: memory search <requête>"));
+    }
+    let o = crate::memory::search(query, k.clamp(1, 20)).await;
+    Ok(crate::memory::format_outcome(&o)
+        .lines()
+        .map(|l| l.to_string())
+        .collect())
+}
+
+/// Vide le magasin de mémoire (irréversible).
+pub fn memory_clear() -> Result<Vec<String>> {
+    crate::memory::clear()?;
+    Ok(vec!["Mémoire vidée.".to_string()])
+}
+
+pub fn memory_forget(id: &str) -> Result<Vec<String>> {
+    let id = id.trim();
+    if id.is_empty() {
+        return Err(anyhow!("usage: memory forget <id>"));
+    }
+    if crate::memory::forget(id)? {
+        Ok(vec![format!("Entrée {id} supprimée.")])
+    } else {
+        Ok(vec![format!("Entrée {id} introuvable.")])
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Rôles
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -477,6 +577,14 @@ mod tests {
     fn unknown_subcommand_is_an_error_with_usage() {
         let e = parse_task(&["frobnicate"]).unwrap_err().to_string();
         assert!(e.contains("usage: task"), "{e}");
+    }
+
+    #[test]
+    fn memory_commands_validate_their_input() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        assert!(rt.block_on(memory_save("   ", None)).is_err());
+        assert!(rt.block_on(memory_search("", 5)).is_err());
+        assert!(memory_forget("  ").is_err());
     }
 
     #[test]

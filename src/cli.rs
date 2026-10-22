@@ -1,7 +1,6 @@
 use crate::{
-    agent, commands, config, enrich_system, fun, gwclient, http_client, jimmy, knowledge, memory,
-    models, pdf, personas, providers, route, telegram, tools, tui, update, vault, zerochan,
-    DEFAULT_SYSTEM,
+    agent, commands, config, enrich_system, fun, gwclient, http_client, jimmy, knowledge, models,
+    pdf, personas, providers, route, telegram, tools, tui, update, vault, zerochan, DEFAULT_SYSTEM,
 };
 use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand};
@@ -1256,72 +1255,23 @@ fn embeddings_cmd(action: EmbeddingsAction) -> Result<()> {
 }
 
 async fn memory_cmd(action: MemoryAction) -> Result<()> {
-    match action {
-        MemoryAction::List { limit } => {
-            let entries = memory::load();
-            let n = limit.unwrap_or(50);
-            println!(
-                "{} entrée(s) — {}",
-                entries.len(),
-                memory::store_path().display()
-            );
-            for e in entries.iter().rev().take(n) {
-                println!(
-                    "  {} [{}]{} {}",
-                    e.id,
-                    e.trust,
-                    if e.trigger.is_some() { " testable" } else { "" },
-                    e.text.replace('\n', " ")
-                );
-            }
-        }
+    let lines = match action {
+        MemoryAction::List { limit } => commands::memory_list(limit.unwrap_or(20)),
         MemoryAction::Save { text, trigger } => {
-            let text = text.join(" ");
-            let o = memory::save(&text, trigger, Vec::new()).await?;
-            println!(
-                "Enregistré: {} (embedded={}, testable={}, degraded={}{})",
-                o.id,
-                o.embedded,
-                o.probeable,
-                o.degraded,
-                o.degraded_reason
-                    .map(|r| format!(" — {r}"))
-                    .unwrap_or_default()
-            );
+            commands::memory_save(&text.join(" "), trigger).await?
         }
         MemoryAction::Search { query, k } => {
-            let query = query.join(" ");
-            let o = memory::search(&query, k.unwrap_or(5)).await;
-            println!("{}", memory::format_outcome(&o));
+            commands::memory_search(&query.join(" "), k.unwrap_or(5)).await?
         }
-        MemoryAction::Stats => {
-            let entries = memory::load();
-            let probeable = entries.iter().filter(|e| e.trigger.is_some()).count();
-            let embedded = entries.iter().filter(|e| e.vector.is_some()).count();
-            println!("Store      : {}", memory::store_path().display());
-            println!("Entrées    : {}", entries.len());
-            println!("Embeddées  : {embedded}");
-            println!("Testables  : {probeable}");
-            println!(
-                "Embedder   : {}",
-                memory::embedder_id().unwrap_or_else(|| "(aucun)".into())
-            );
-        }
-        MemoryAction::Forget { id } => {
-            if memory::forget(&id)? {
-                println!("Entrée {id} supprimée.");
-            } else {
-                println!("Entrée {id} introuvable.");
-            }
-        }
-        MemoryAction::Clear => {
-            memory::clear()?;
-            println!("Mémoire vidée.");
-        }
+        MemoryAction::Stats => commands::memory_stats(),
+        MemoryAction::Forget { id } => commands::memory_forget(&id)?,
+        MemoryAction::Clear => commands::memory_clear()?,
+    };
+    for line in lines {
+        println!("{line}");
     }
     Ok(())
 }
-
 fn project_cmd(action: ProjectAction) -> Result<()> {
     let p = config::load_project();
     match action {
