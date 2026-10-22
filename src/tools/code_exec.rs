@@ -220,6 +220,7 @@ mod tests {
         assert!(r.contains("affichage limité"));
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn runs_and_captures() {
         let r = run(r#"{"command":"printf 'ok'"}"#).await;
@@ -236,6 +237,7 @@ mod tests {
         assert!(run("{oops").await.contains("JSON invalides"));
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn timeout_kills_the_command() {
         let started = std::time::Instant::now();
@@ -244,6 +246,7 @@ mod tests {
         assert!(started.elapsed() < std::time::Duration::from_secs(5));
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn stdin_is_closed_so_reads_fail_fast() {
         // `cat` sans stdin doit terminer immédiatement (pas de blocage).
@@ -251,6 +254,7 @@ mod tests {
         assert!(!r.contains("délai dépassé"), "got: {r}");
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn big_output_is_capped() {
         let r =

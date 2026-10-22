@@ -530,14 +530,22 @@ pub fn embeddings_unset() -> Result<Vec<String>> {
 /// « zer0-gw » à la place de la clé, ce qui laissait croire qu'une clé était
 /// déposée alors que `provider keys` répondait « — ».
 pub fn provider_list() -> Vec<String> {
-    let g = crate::config::load_global();
-    let gw = crate::config::gateway_enabled();
+    provider_list_with(
+        crate::config::load_global().provider.as_deref(),
+        crate::config::gateway_enabled(),
+    )
+}
+
+/// Variante **pure** (provider actif et passerelle fournis) : c'est elle que les
+/// tests exercent, pour ne pas dépendre de la config de la machine — un runner
+/// CI vierge n'a aucun provider actif.
+pub fn provider_list_with(active_id: Option<&str>, gw: bool) -> Vec<String> {
     let mut out = vec![format!(
         "{:<3}{:<14}{:<26}{:<13}{:<11}{}",
         "", "id", "nom", "gratuit", "transport", "clé"
     )];
     for p in crate::providers::all() {
-        let active = if g.provider.as_deref() == Some(p.id.as_str()) {
+        let active = if active_id == Some(p.id.as_str()) {
             "*"
         } else {
             " "
@@ -1183,13 +1191,26 @@ mod tests {
     }
 
     #[test]
-    fn provider_list_marks_the_active_provider() {
-        let lines = provider_list();
+    fn provider_list_marks_the_given_active_provider() {
+        let lines = provider_list_with(Some("openrouter"), false);
+        let active = lines
+            .iter()
+            .find(|l| l.contains("openrouter"))
+            .expect("openrouter absent du catalogue");
         assert!(
-            lines.iter().any(|l| l.starts_with("*")),
-            "aucun provider actif marqué"
+            active.starts_with('*'),
+            "provider actif non marqué : {active}"
         );
-        assert!(lines.iter().any(|l| l.contains("openrouter")));
+        let other = lines
+            .iter()
+            .find(|l| l.contains("google"))
+            .expect("google absent du catalogue");
+        assert!(!other.starts_with('*'), "provider inactif marqué : {other}");
+
+        // Aucun provider actif (cas d'un runner vierge) : aucune étoile.
+        let none = provider_list_with(None, false);
+        assert!(none.iter().all(|l| !l.starts_with('*')));
+        assert!(none.iter().any(|l| l.contains("transport")));
     }
 
     #[test]
