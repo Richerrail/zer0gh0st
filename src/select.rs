@@ -48,19 +48,90 @@ pub fn classify(problem: &str) -> Category {
     let p = problem.to_ascii_lowercase();
     let has = |words: &[&str]| words.iter().any(|w| contains_word(&p, w));
 
-    if has(&["image", "photo", "capture", "screenshot", "graphique", "dessin", "vision", "vois", "diagramme"]) {
+    if has(&[
+        "image",
+        "photo",
+        "capture",
+        "screenshot",
+        "graphique",
+        "dessin",
+        "vision",
+        "vois",
+        "diagramme",
+    ]) {
         return Category::Vision;
     }
-    if has(&["code", "coder", "programme", "fonction", "function", "bug", "compile", "rust", "python", "c++", "java", "script", "debug", "api", "sql", "regex", "algorithme", "implémente", "refactor"]) {
+    if has(&[
+        "code",
+        "coder",
+        "programme",
+        "fonction",
+        "function",
+        "bug",
+        "compile",
+        "rust",
+        "python",
+        "c++",
+        "java",
+        "script",
+        "debug",
+        "api",
+        "sql",
+        "regex",
+        "algorithme",
+        "implémente",
+        "refactor",
+    ]) {
         return Category::Code;
     }
-    if has(&["calcul", "calcule", "math", "équation", "equation", "intégrale", "dérivée", "résous", "resous", "pourcentage", "combien font", "somme", "produit", "probabilité"]) {
+    if has(&[
+        "calcul",
+        "calcule",
+        "math",
+        "équation",
+        "equation",
+        "intégrale",
+        "dérivée",
+        "résous",
+        "resous",
+        "pourcentage",
+        "combien font",
+        "somme",
+        "produit",
+        "probabilité",
+    ]) {
         return Category::Math;
     }
-    if has(&["pourquoi", "explique", "raisonne", "analyse", "preuve", "plan", "stratégie", "compare", "logique", "démontre"]) {
+    if has(&[
+        "pourquoi",
+        "explique",
+        "raisonne",
+        "analyse",
+        "preuve",
+        "plan",
+        "stratégie",
+        "compare",
+        "logique",
+        "démontre",
+    ]) {
         return Category::Reasoning;
     }
-    if has(&["écris", "ecris", "rédige", "redige", "poème", "poeme", "histoire", "lettre", "résume", "resume", "traduis", "traduction", "email", "article"]) {
+    if has(&[
+        "écris",
+        "ecris",
+        "rédige",
+        "redige",
+        "poème",
+        "poeme",
+        "histoire",
+        "lettre",
+        "résume",
+        "resume",
+        "traduis",
+        "traduction",
+        "email",
+        "article",
+    ]) {
         return Category::Writing;
     }
     if has(&["rapide", "vite", "court", "simple", "bref"]) {
@@ -71,7 +142,11 @@ pub fn classify(problem: &str) -> Category {
 
 /// Published capability indices (0 when absent).
 fn bench(m: &ModelEntry) -> (f64, f64, f64) {
-    match m.benchmarks.as_ref().and_then(|b| b.artificial_analysis.as_ref()) {
+    match m
+        .benchmarks
+        .as_ref()
+        .and_then(|b| b.artificial_analysis.as_ref())
+    {
         Some(a) => (
             a.intelligence_index.unwrap_or(0.0),
             a.coding_index.unwrap_or(0.0),
@@ -92,16 +167,43 @@ fn has_image_input(m: &ModelEntry) -> bool {
 /// Heuristique de secours (nom du modèle) quand le catalogue n'est pas disponible.
 pub fn supports_images_by_name(model_id: &str) -> bool {
     let id = model_id.to_ascii_lowercase();
-    ["vl", "vision", "omni", "multimodal", "llava", "pixtral", "image"]
-        .iter()
-        .any(|k| id.contains(k))
+    [
+        "vl",
+        "vision",
+        "omni",
+        "multimodal",
+        "llava",
+        "pixtral",
+        "image",
+    ]
+    .iter()
+    .any(|k| id.contains(k))
 }
 
 /// Preference keywords per category (tie-break only; benchmarks dominate).
 fn keyword_bonus(id: &str, cat: Category) -> i64 {
     let prefs: &[&str] = match cat {
-        Category::Code => &["coder", "code", "deepseek", "laguna", "north-mini-code", "poolside", "qwen", "ling"],
-        Category::Reasoning => &["reasoning", "thinking", "think", "r1", "nemotron", "ultra", "super", "qwen", "magistral"],
+        Category::Code => &[
+            "coder",
+            "code",
+            "deepseek",
+            "laguna",
+            "north-mini-code",
+            "poolside",
+            "qwen",
+            "ling",
+        ],
+        Category::Reasoning => &[
+            "reasoning",
+            "thinking",
+            "think",
+            "r1",
+            "nemotron",
+            "ultra",
+            "super",
+            "qwen",
+            "magistral",
+        ],
         Category::Math => &["math", "reasoning", "qwen", "nemotron", "r1", "thinking"],
         Category::Writing => &["instruct", "chat", "gemma", "qwen", "ling", "mistral"],
         Category::Vision => &["vl", "vision", "omni", "image", "multimodal"],
@@ -169,14 +271,29 @@ pub fn score(m: &ModelEntry, cat: Category) -> i64 {
 fn fast_score(id: &str) -> i64 {
     let mut s = 0i64;
     for k in [
-        "flash", "mini", "small", "lightning", "nano", "lfm", "tiny", "north-mini", "2.6b", "1.5b",
-        "3b", "4b", "7b", "8b", "12b",
+        "flash",
+        "mini",
+        "small",
+        "lightning",
+        "nano",
+        "lfm",
+        "tiny",
+        "north-mini",
+        "2.6b",
+        "1.5b",
+        "3b",
+        "4b",
+        "7b",
+        "8b",
+        "12b",
     ] {
         if id.contains(k) {
             s += 40;
         }
     }
-    for k in ["550b", "120b", "ultra", "super", "pro", "27b", "31b", "26b", "72b"] {
+    for k in [
+        "550b", "120b", "ultra", "super", "pro", "27b", "31b", "26b", "72b",
+    ] {
         if id.contains(k) {
             s -= 40;
         }
@@ -185,7 +302,11 @@ fn fast_score(id: &str) -> i64 {
 }
 
 /// Rank models for a problem, best first.
-pub fn rank(problem: &str, models: &[ModelEntry], top: usize) -> (Category, Vec<(i64, ModelEntry)>) {
+pub fn rank(
+    problem: &str,
+    models: &[ModelEntry],
+    top: usize,
+) -> (Category, Vec<(i64, ModelEntry)>) {
     let cat = classify(problem);
     let mut scored: Vec<(i64, ModelEntry)> = models
         .iter()

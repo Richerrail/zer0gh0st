@@ -60,6 +60,16 @@ struct GwConfig {
     /// `keys.managed` à côté de gw.toml).
     #[serde(default)]
     keys_file: Option<String>,
+    /// Jeton exigé par les endpoints `/admin/*` (en-tête `x-zer0-admin`).
+    ///
+    /// Pourquoi : « loopback + écriture seule » protège la **confidentialité**
+    /// de la clé, pas l'**intégrité** du service. Sans jeton, n'importe quel
+    /// processus local peut remplacer la clé d'un provider (l'agent enverrait
+    /// alors ses prompts sur le compte d'un autre) ou la supprimer (déni de
+    /// service). Absent = comportement historique (loopback seul), avec un
+    /// avertissement au démarrage. Surchargeable par `ZER0_GW_ADMIN_TOKEN`.
+    #[serde(default)]
+    admin_token: Option<String>,
 }
 
 fn default_listen() -> String {
@@ -105,18 +115,28 @@ struct ProviderCfg {
     allowed_paths: Option<Vec<String>>,
 }
 
+/// Résolution de la clé d'un provider (**pur** : testable sans muter
+/// l'environnement — les tests Rust tournent en parallèle, y muter l'env
+/// serait une course et rendait la CI instable).
+/// Ordre : clé littérale → variable d'environnement.
+fn key_from(literal: Option<&str>, env_value: Option<&str>) -> Option<String> {
+    if let Some(k) = literal.map(str::trim).filter(|k| !k.is_empty()) {
+        return Some(k.to_owned());
+    }
+    env_value
+        .map(|v| v.trim().to_owned())
+        .filter(|v| !v.is_empty())
+}
+
 impl ProviderCfg {
     /// Résout la clé (variable d'env prioritaire dans les faits : `api_key` ne
     /// devrait servir qu'aux tests). Aucune clé n'est jamais journalisée.
     fn key(&self) -> Option<String> {
-        if let Some(k) = self.api_key.as_deref().map(str::trim).filter(|k| !k.is_empty()) {
-            return Some(k.to_owned());
-        }
-        self.api_key_env
+        let env_value = self
+            .api_key_env
             .as_ref()
-            .and_then(|e| std::env::var(e).ok())
-            .map(|v| v.trim().to_owned())
-            .filter(|v| !v.is_empty())
+            .and_then(|e| std::env::var(e).ok());
+        key_from(self.api_key.as_deref(), env_value.as_deref())
     }
 }
 
@@ -148,6 +168,8 @@ struct AppState {
     keys: Mutex<HashMap<String, String>>,
     /// Fichier de persistance (ex. `/etc/zer0-gw/keys.env`).
     keys_path: String,
+    /// Jeton admin effectif (config ou env). `None` = pas d'authentification.
+    admin_token: Option<String>,
 }
 
 /// Résolution d'une clé, par ordre : dépôt admin → variable d'env → gw.toml.
@@ -205,9 +227,10 @@ struct Window {
 }
 
 fn window_allow(windows: &mut HashMap<String, Window>, provider: &str, rpm: u32) -> bool {
-    let win = windows
-        .entry(provider.to_owned())
-        .or_insert(Window { count: 0, start: Instant::now() });
+    let win = windows.entry(provider.to_owned()).or_insert(Window {
+        count: 0,
+        start: Instant::now(),
+    });
     if win.start.elapsed() >= Duration::from_secs(60) {
         win.count = 0;
         win.start = Instant::now();
@@ -327,7 +350,10 @@ async fn proxy(
 
     // 3) Méthode et chemin en liste blanche.
     if !matches!(method, Method::POST | Method::GET) {
-        return err(StatusCode::METHOD_NOT_ALLOWED, "seules POST et GET sont autorisées");
+        return err(
+            StatusCode::METHOD_NOT_ALLOWED,
+            "seules POST et GET sont autorisées",
+        );
     }
     if !path_allowed(pcfg, subpath) {
         return err(StatusCode::FORBIDDEN, "chemin non autorisé");
@@ -336,14 +362,21 @@ async fn proxy(
     // 4) Rate-limit par provider.
     let rpm = state.cfg.limits.requests_per_minute;
     if !window_allow(&mut state.windows.lock().expect("mutex"), provider_id, rpm) {
-        return err(StatusCode::TOO_MANY_REQUESTS, "rate-limit zer0-gw (réessayez plus tard)");
+        return err(
+            StatusCode::TOO_MANY_REQUESTS,
+            "rate-limit zer0-gw (réessayez plus tard)",
+        );
     }
 
     // 5) Construction de l'appel upstream : la clé est injectée ICI, jamais
     //    transmise par l'agent (l'en-tête Authorization entrant est ignoré).
     let model = serde_json::from_slice::<serde_json::Value>(&body)
         .ok()
-        .and_then(|v| v.get("model").and_then(serde_json::Value::as_str).map(str::to_owned));
+        .and_then(|v| {
+            v.get("model")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        });
 
     let url = upstream_url(&pcfg.base_url, subpath, uri.query());
 
@@ -425,6 +458,42 @@ fn loopback_or_403(peer: SocketAddr) -> Option<Response> {
     (!peer.ip().is_loopback()).then(|| err(StatusCode::FORBIDDEN, "accès loopback uniquement"))
 }
 
+/// Vérifie loopback **et** (si configuré) le jeton admin.
+///
+/// Comparaison à temps constant (les jetons font la même longueur) pour ne pas
+/// offrir un oracle de timing sur un endpoint local.
+fn admin_guard(peer: SocketAddr, headers: &HeaderMap, token: Option<&str>) -> Option<Response> {
+    if let Some(r) = loopback_or_403(peer) {
+        return Some(r);
+    }
+    let Some(expected) = token else {
+        return None; // pas de jeton configuré : comportement historique
+    };
+    let got = headers
+        .get("x-zer0-admin")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    if constant_time_eq(got.as_bytes(), expected.as_bytes()) {
+        None
+    } else {
+        Some(err(
+            StatusCode::UNAUTHORIZED,
+            "jeton admin requis (en-tête x-zer0-admin)",
+        ))
+    }
+}
+
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
 /// `GET /health` — état de la passerelle + *présence* des clés (jamais leur valeur).
 async fn health(
     State(state): State<Arc<AppState>>,
@@ -452,8 +521,9 @@ async fn health(
 async fn admin_list(
     State(state): State<Arc<AppState>>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
 ) -> Response {
-    if let Some(r) = loopback_or_403(peer) {
+    if let Some(r) = admin_guard(peer, &headers, state.admin_token.as_deref()) {
         return r;
     }
     let keys = state.keys.lock().expect("mutex");
@@ -480,9 +550,10 @@ async fn admin_set(
     State(state): State<Arc<AppState>>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     Path(provider): Path<String>,
+    headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> Response {
-    if let Some(r) = loopback_or_403(peer) {
+    if let Some(r) = admin_guard(peer, &headers, state.admin_token.as_deref()) {
         return r;
     }
     let id = provider.trim().to_ascii_lowercase();
@@ -491,7 +562,12 @@ async fn admin_set(
     }
     let parsed: serde_json::Value = match serde_json::from_slice(&body) {
         Ok(v) => v,
-        Err(_) => return err(StatusCode::BAD_REQUEST, "corps JSON attendu : {\"api_key\":\"…\"}"),
+        Err(_) => {
+            return err(
+                StatusCode::BAD_REQUEST,
+                "corps JSON attendu : {\"api_key\":\"…\"}",
+            )
+        }
     };
     let key = parsed
         .get("api_key")
@@ -524,8 +600,9 @@ async fn admin_delete(
     State(state): State<Arc<AppState>>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     Path(provider): Path<String>,
+    headers: HeaderMap,
 ) -> Response {
-    if let Some(r) = loopback_or_403(peer) {
+    if let Some(r) = admin_guard(peer, &headers, state.admin_token.as_deref()) {
         return r;
     }
     let id = provider.trim().to_ascii_lowercase();
@@ -552,7 +629,10 @@ fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/admin/keys", get(admin_list))
-        .route("/admin/keys/:provider", post(admin_set).delete(admin_delete))
+        .route(
+            "/admin/keys/:provider",
+            post(admin_set).delete(admin_delete),
+        )
         .fallback(proxy)
         .layer(DefaultBodyLimit::max(max_body))
         .with_state(state)
@@ -598,12 +678,31 @@ async fn main() -> anyhow::Result<()> {
     // MAJUSCULES) est laissé au fichier et rechargé par systemd.
     keys.retain(|id, _| cfg.providers.contains_key(id));
 
+    // Jeton admin : variable d'environnement prioritaire (systemd), sinon gw.toml.
+    // Absent → endpoints admin ouverts à tout processus local (comportement
+    // historique) : on le dit au démarrage, une fois, en clair.
+    let admin_token = std::env::var("ZER0_GW_ADMIN_TOKEN")
+        .ok()
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .or_else(|| cfg.admin_token.clone().filter(|t| !t.trim().is_empty()));
+    if admin_token.is_none() {
+        log_line(
+            "warn",
+            serde_json::json!({
+                "msg": "aucun jeton admin : /admin/keys est accessible à tout processus local. \
+                        Définis admin_token dans gw.toml (ou ZER0_GW_ADMIN_TOKEN).",
+            }),
+        );
+    }
+
     let state = Arc::new(AppState {
         cfg: cfg.clone(),
         http,
         windows: Mutex::new(HashMap::new()),
         keys: Mutex::new(keys.clone()),
         keys_path: keys_path.clone(),
+        admin_token,
     });
 
     let app = router(state);
@@ -637,6 +736,35 @@ async fn main() -> anyhow::Result<()> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn admin_guard_rejects_non_loopback() {
+        let peer: SocketAddr = "10.0.0.2:1234".parse().unwrap();
+        let hs = HeaderMap::new();
+        assert!(admin_guard(peer, &hs, None).is_some());
+    }
+
+    #[test]
+    fn admin_guard_requires_token_when_configured() {
+        let peer: SocketAddr = "127.0.0.1:1234".parse().unwrap();
+        let hs = HeaderMap::new();
+        assert!(admin_guard(peer, &hs, Some("secret")).is_some());
+    }
+
+    #[test]
+    fn admin_guard_accepts_matching_token() {
+        let peer: SocketAddr = "127.0.0.1:1234".parse().unwrap();
+        let mut hs = HeaderMap::new();
+        hs.insert("x-zer0-admin", "secret".parse().unwrap());
+        assert!(admin_guard(peer, &hs, Some("secret")).is_none());
+    }
+
+    #[test]
+    fn constant_time_eq_basics() {
+        assert!(constant_time_eq(b"abc", b"abc"));
+        assert!(!constant_time_eq(b"abc", b"abd"));
+        assert!(!constant_time_eq(b"abc", b"ab"));
+    }
+
     fn pcfg(base: &str, allowed: Option<Vec<&str>>) -> ProviderCfg {
         ProviderCfg {
             base_url: base.to_owned(),
@@ -652,7 +780,10 @@ mod tests {
             split_provider("/openrouter/v1/chat/completions"),
             Some(("openrouter", "v1/chat/completions"))
         );
-        assert_eq!(split_provider("/local/v1/models"), Some(("local", "v1/models")));
+        assert_eq!(
+            split_provider("/local/v1/models"),
+            Some(("local", "v1/models"))
+        );
     }
 
     #[test]
@@ -695,16 +826,19 @@ mod tests {
 
     #[test]
     fn key_from_env_and_blank_ignored() {
-        let mut p = pcfg("https://x.example", None);
-        p.api_key = Some("  ".to_owned());
-        assert_eq!(p.key(), None);
-        p.api_key = Some("sk-test".to_owned());
-        assert_eq!(p.key(), Some("sk-test".to_owned()));
-        unsafe { std::env::set_var("ZGW_TEST_KEY", "sk-env") };
-        p.api_key = None;
-        p.api_key_env = Some("ZGW_TEST_KEY".to_owned());
-        assert_eq!(p.key(), Some("sk-env".to_owned()));
-        unsafe { std::env::remove_var("ZGW_TEST_KEY") };
+        // Fonction **pure** : pas de mutation d'environnement (course en
+        // parallèle → la CI devenait instable).
+        // Littéral vide → ignoré.
+        assert_eq!(key_from(Some("  "), None), None);
+        // Littéral → il prime.
+        assert_eq!(
+            key_from(Some("sk-test"), Some("sk-env")),
+            Some("sk-test".to_owned())
+        );
+        // Sinon la variable d'environnement.
+        assert_eq!(key_from(None, Some("sk-env")), Some("sk-env".to_owned()));
+        // Variable vide → ignorée.
+        assert_eq!(key_from(None, Some("  ")), None);
     }
 
     #[test]
@@ -712,11 +846,7 @@ mod tests {
         let dir = std::env::temp_dir().join("zer0-gw-test-bad");
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("gw.toml");
-        std::fs::write(
-            &path,
-            "[providers.x]\nbase_url = \"ftp://non-http\"\n",
-        )
-        .unwrap();
+        std::fs::write(&path, "[providers.x]\nbase_url = \"ftp://non-http\"\n").unwrap();
         assert!(GwConfig::load(path.to_str().unwrap()).is_err());
     }
 
@@ -728,7 +858,11 @@ mod tests {
         );
         // base avec slash final → un seul slash
         assert_eq!(
-            upstream_url("https://openrouter.ai/api/", "v1/chat/completions", Some("a=1")),
+            upstream_url(
+                "https://openrouter.ai/api/",
+                "v1/chat/completions",
+                Some("a=1")
+            ),
             "https://openrouter.ai/api/v1/chat/completions?a=1"
         );
         // base SANS version → version du sous-chemin conservée
@@ -772,15 +906,27 @@ mod tests {
         save_keys(path.to_str().unwrap(), &keys).unwrap();
 
         let reloaded = load_keys(path.to_str().unwrap());
-        assert_eq!(reloaded.get("openrouter").map(String::as_str), Some("sk-test"));
-        assert_eq!(reloaded.get("nvidia").map(String::as_str), Some("nvapi-test"));
+        assert_eq!(
+            reloaded.get("openrouter").map(String::as_str),
+            Some("sk-test")
+        );
+        assert_eq!(
+            reloaded.get("nvidia").map(String::as_str),
+            Some("nvapi-test")
+        );
 
         // Retrait : la clé doit disparaître du fichier (fichier 100 % géré).
         keys.remove("openrouter");
         save_keys(path.to_str().unwrap(), &keys).unwrap();
         let reloaded = load_keys(path.to_str().unwrap());
-        assert!(!reloaded.contains_key("openrouter"), "clé retirée encore présente");
-        assert_eq!(reloaded.get("nvidia").map(String::as_str), Some("nvapi-test"));
+        assert!(
+            !reloaded.contains_key("openrouter"),
+            "clé retirée encore présente"
+        );
+        assert_eq!(
+            reloaded.get("nvidia").map(String::as_str),
+            Some("nvapi-test")
+        );
         let raw = std::fs::read_to_string(&path).unwrap();
         assert!(raw.contains("# Clés déposées"));
     }

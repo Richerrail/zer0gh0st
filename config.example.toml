@@ -94,3 +94,8 @@
 # Par défaut, l'application « Zer0 » est utilisée (client_id ci-dessous) :
 # `zer0 vote login` fonctionne donc out of the box, sans configuration.
 # github_client_id = "Ov23lioyZzAN5wtt0j0o"
+
+# Jeton des endpoints /admin/* de zer0-gw (en-tête `x-zer0-admin`).
+# Doit être identique à `admin_token` dans /etc/zer0-gw/gw.toml.
+# Préférer la variable d'environnement ZER0_GW_ADMIN_TOKEN (ne touche pas le disque).
+# gw_admin_token = "…"

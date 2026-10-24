@@ -1,11 +1,15 @@
 [package]
 name = "zer0"
-version = "0.5.7"
+version = "0.6.5"
 edition = "2021"
 description = "ZER0|GH0ST - a terminal-native AI agent (CLI-only, Rust)"
 authors = ["richerrail"]
 license = "MIT"
 readme = "README.md"
+
+[lib]
+name = "zer0"
+path = "src/lib.rs"
 
 [[bin]]
 name = "zer0"

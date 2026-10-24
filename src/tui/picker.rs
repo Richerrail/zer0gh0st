@@ -26,6 +26,8 @@ pub enum Kind {
 
 #[derive(Debug)]
 pub struct Picker {
+    /// Cible optionnelle (ex. nom de rôle pour `/role set <role>`).
+    pub target: Option<String>,
     pub title: String,
     pub items: Vec<Item>,
     pub filter: String,
@@ -37,6 +39,7 @@ impl Picker {
     pub fn new(title: impl Into<String>, items: Vec<Item>, kind: Kind) -> Self {
         let sel = 0;
         Self {
+            target: None,
             title: title.into(),
             items,
             filter: String::new(),
@@ -93,6 +96,13 @@ impl Picker {
     }
 
     pub fn selected(&self) -> Option<&Item> {
+        // `sel` est un index dans `items`, mais il n'a de sens que s'il fait
+        // partie des visibles. Sans ce contrôle, taper une commande inconnue
+        // puis Entrée exécutait le **premier** élément de la liste.
+        let vis = self.visible();
+        if !vis.contains(&self.sel) {
+            return None;
+        }
         self.items.get(self.sel)
     }
 }
@@ -219,11 +229,13 @@ mod tests {
     }
 
     #[test]
-    fn empty_filter_result_is_handled() {
+    fn empty_filter_result_has_no_selection() {
         let mut p = Picker::new("t", items(&["a"]), Kind::Model);
         p.push_char('z');
         assert!(p.visible().is_empty());
         p.move_sel(1); // ne panique pas
-        assert_eq!(p.selected().map(|i| i.id.as_str()), Some("a"));
+                       // Régression : `selected()` renvoyait l'élément 0 malgré un filtre vide,
+                       // donc Entrée exécutait une commande que l'utilisateur n'avait pas choisie.
+        assert!(p.selected().is_none());
     }
 }

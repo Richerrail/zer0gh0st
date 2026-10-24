@@ -33,6 +33,11 @@ pub enum UiEvent {
     ContextWindow(u64),
     /// Liste de modèles reçue : ouvre le sélecteur de modèle.
     ModelList(Vec<crate::models::ModelEntry>),
+    /// Liste de modèles demandée par l'assistant de démarrage (ne l'ouvre pas
+    /// dans le sélecteur : elle alimente l'écran du wizard).
+    WizardModels(Vec<crate::models::ModelEntry>),
+    /// Liste de modèles `:free` pour le sélecteur `/free`.
+    FreeModels(Vec<crate::models::ModelEntry>),
     /// Le bot Telegram a demandé à s'éteindre (/shutdown).
     TelegramShutdown,
 }

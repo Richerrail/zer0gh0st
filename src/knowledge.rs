@@ -12,15 +12,32 @@ use std::path::{Path, PathBuf};
 use crate::mods;
 
 /// Fichier SQLite de la base de connaissance.
+///
+/// Dans un checkout source : `<projet>/knowledge.db` (comme `data/`).
+/// Pour un binaire **installé** ailleurs (ex. `/usr/local/bin/zer0`), la racine
+/// du projet déduite du chemin de l'exécutable n'existe pas — on écrit alors
+/// dans le dossier de données de l'utilisateur, sinon la base part à la
+/// racine du système et échoue en « unable to open database file ».
 pub fn db_path() -> PathBuf {
-    mods::project_root().join("knowledge.db")
+    // Toujours dans le dossier de données utilisateur (XDG), comme `data/`.
+    // La migration depuis `<projet>/knowledge.db` est faite par `config::data_dir`.
+    crate::config::data_dir().join("knowledge.db")
 }
 
 /// Dossier source par défaut (`<ZER0v1>/base_connaissance`).
 pub fn default_dir() -> PathBuf {
     std::env::var("ZER0_KB_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| mods::project_root().join("base_connaissance"))
+        .unwrap_or_else(|_| {
+            let root = mods::project_root();
+            if root.join("Cargo.toml").is_file() {
+                root.join("base_connaissance")
+            } else {
+                // Binaire installé hors checkout : pas de dossier projet →
+                // on reste dans le dossier de données de l'utilisateur.
+                crate::config::data_dir().join("base_connaissance")
+            }
+        })
 }
 
 #[derive(Debug, Clone)]
@@ -32,10 +49,83 @@ pub struct Hit {
     pub score: f32,
 }
 
+/// Version du schéma SQLite (`PRAGMA user_version`).
+const KB_SCHEMA_VERSION: i64 = 1;
+
 pub(crate) fn open() -> Result<Connection> {
-    let c = Connection::open(db_path())?;
+    let path = db_path();
+    let c = Connection::open(&path)?;
     init(&c)?;
+    check_schema(&c, &path)?;
+    import_legacy_if_empty(&c, &path);
     Ok(c)
+}
+
+/// Récupère une base historique restée dans le checkout quand la base courante
+/// est vide.
+///
+/// Cas réel : le binaire a été lancé une fois **avant** la migration XDG, ce qui
+/// a créé une base vide dans `~/.local/share/zer0gh0st/` ; la migration ne copie
+/// jamais par-dessus un fichier existant, donc les 1 283 chunks du checkout
+/// devenaient invisibles. On rattache l'ancienne base, on copie les lignes et on
+/// reconstruit l'index FTS.
+///
+/// Les **vecteurs** ne sont pas importés (leurs identifiants référencent
+/// l'ancienne base) : il faut relancer `kb ingest --embed` pour les recalculer.
+fn import_legacy_if_empty(c: &Connection, current: &Path) {
+    let local: i64 = c
+        .query_row("SELECT COUNT(*) FROM knowledge", [], |r| r.get(0))
+        .unwrap_or(0);
+    if local > 0 {
+        return;
+    }
+    let legacy = crate::mods::project_root().join("knowledge.db");
+    if !legacy.is_file() || legacy == current {
+        return;
+    }
+    let attach = c.execute(
+        "ATTACH DATABASE ?1 AS legacy",
+        params![legacy.to_string_lossy().to_string()],
+    );
+    if attach.is_err() {
+        return;
+    }
+    let imported: i64 = c
+        .query_row("SELECT COUNT(*) FROM legacy.knowledge", [], |r| r.get(0))
+        .unwrap_or(0);
+    if imported > 0 {
+        let _ = c.execute(
+            "INSERT INTO knowledge (sujet, contenu, source)
+             SELECT sujet, contenu, source FROM legacy.knowledge",
+            [],
+        );
+        let _ = c.execute(
+            "INSERT INTO knowledge_fts(knowledge_fts) VALUES('rebuild')",
+            [],
+        );
+        eprintln!(
+            "📚 base de connaissance importée depuis {} ({imported} chunks) — \
+             vecteurs à recalculer : `zer0 kb ingest --embed`",
+            legacy.display()
+        );
+    }
+    let _ = c.execute("DETACH DATABASE legacy", []);
+}
+
+/// Refuse d'écrire dans une base créée par un binaire plus récent.
+fn check_schema(c: &Connection, path: &Path) -> Result<()> {
+    let v: i64 = c.pragma_query_value(None, "user_version", |r| r.get(0))?;
+    if v > KB_SCHEMA_VERSION {
+        return Err(anyhow!(
+            "base de connaissance {} créée par une version plus récente \
+             (schéma {v} > {KB_SCHEMA_VERSION}) — mets à jour ZER0|GH0ST",
+            path.display()
+        ));
+    }
+    if v < KB_SCHEMA_VERSION {
+        c.pragma_update(None, "user_version", KB_SCHEMA_VERSION)?;
+    }
+    Ok(())
 }
 
 fn init(c: &Connection) -> Result<()> {
@@ -123,17 +213,133 @@ fn blob_to_f32(b: &[u8]) -> Vec<f32> {
 
 /// Mots vides ignorés dans la requête FTS (FR + EN).
 const STOPWORDS: &[&str] = &[
-    "le", "la", "les", "un", "une", "des", "de", "du", "au", "aux", "et", "ou", "où", "que",
-    "qui", "quoi", "dont", "pour", "par", "sur", "dans", "avec", "sans", "en", "vers", "chez", "ce",
-    "cet", "cette", "ces", "mon", "ma", "mes", "ton", "ta", "tes", "son", "sa", "ses", "notre",
-    "nos", "votre", "vos", "leur", "leurs", "je", "tu", "il", "elle", "on", "nous", "vous", "ils",
-    "elles", "me", "te", "se", "moi", "toi", "lui", "est", "sont", "etre", "être", "ete", "été",
-    "avoir", "ai", "as", "avons", "avez", "ont", "parle", "parler", "dis", "dire", "explique",
-    "expliquer", "donne", "donner", "fais", "faire", "comment", "pourquoi", "quel", "quelle", "quels",
-    "the", "an", "of", "to", "in", "is", "are", "and", "or", "for", "with", "what", "how", "why",
-    "salut", "bonjour", "hello", "merci", "stp", "svp", "raconte", "raconter", "tout", "tous",
-    "toute", "toutes", "monde", "chose", "choses", "quelque", "beaucoup", "peux", "peut", "veux",
-    "voudrais", "aimerais", "svp", "sais", "voir", "juste",
+    "le",
+    "la",
+    "les",
+    "un",
+    "une",
+    "des",
+    "de",
+    "du",
+    "au",
+    "aux",
+    "et",
+    "ou",
+    "où",
+    "que",
+    "qui",
+    "quoi",
+    "dont",
+    "pour",
+    "par",
+    "sur",
+    "dans",
+    "avec",
+    "sans",
+    "en",
+    "vers",
+    "chez",
+    "ce",
+    "cet",
+    "cette",
+    "ces",
+    "mon",
+    "ma",
+    "mes",
+    "ton",
+    "ta",
+    "tes",
+    "son",
+    "sa",
+    "ses",
+    "notre",
+    "nos",
+    "votre",
+    "vos",
+    "leur",
+    "leurs",
+    "je",
+    "tu",
+    "il",
+    "elle",
+    "on",
+    "nous",
+    "vous",
+    "ils",
+    "elles",
+    "me",
+    "te",
+    "se",
+    "moi",
+    "toi",
+    "lui",
+    "est",
+    "sont",
+    "etre",
+    "être",
+    "ete",
+    "été",
+    "avoir",
+    "ai",
+    "as",
+    "avons",
+    "avez",
+    "ont",
+    "parle",
+    "parler",
+    "dis",
+    "dire",
+    "explique",
+    "expliquer",
+    "donne",
+    "donner",
+    "fais",
+    "faire",
+    "comment",
+    "pourquoi",
+    "quel",
+    "quelle",
+    "quels",
+    "the",
+    "an",
+    "of",
+    "to",
+    "in",
+    "is",
+    "are",
+    "and",
+    "or",
+    "for",
+    "with",
+    "what",
+    "how",
+    "why",
+    "salut",
+    "bonjour",
+    "hello",
+    "merci",
+    "stp",
+    "svp",
+    "raconte",
+    "raconter",
+    "tout",
+    "tous",
+    "toute",
+    "toutes",
+    "monde",
+    "chose",
+    "choses",
+    "quelque",
+    "beaucoup",
+    "peux",
+    "peut",
+    "veux",
+    "voudrais",
+    "aimerais",
+    "svp",
+    "sais",
+    "voir",
+    "juste",
 ];
 
 /// Mots significatifs d'une requête (minuscule, >=3 lettres, sans stopword).
@@ -210,6 +416,39 @@ fn like_search(c: &Connection, query: &str, limit: usize) -> Result<Vec<Hit>> {
 
 /// Recherche hybride FTS5 + vectoriel. `degraded` = pas d'embedder / pas de vecteurs.
 pub async fn search(query: &str, limit: usize) -> (Vec<Hit>, Option<String>) {
+    // L'embedding est une requête réseau (await) ; tout le reste est du SQLite
+    // synchrone (FTS5 + scan des vecteurs). Cette recherche tourne à **chaque
+    // tour** (injection de connaissance) : elle ne doit pas bloquer un worker du
+    // runtime. On isole donc l'embedding, puis la base part en `spawn_blocking`.
+    let embedder = crate::memory::embedder_id();
+    let (qv, embed_err) = match &embedder {
+        Some(_) => match crate::memory::embed(query).await {
+            Ok(v) => (Some(v), None),
+            Err(e) => (None, Some(format!("embedding requête échoué: {e}"))),
+        },
+        None => (None, None),
+    };
+
+    let q = query.to_string();
+    if let Ok((hits, degraded)) =
+        tokio::task::spawn_blocking(move || search_blocking(&q, limit, embedder, qv)).await
+    {
+        return (hits, degraded.or(embed_err));
+    }
+    // La tâche bloquante a paniqué : on dégrade, sans mentir sur la cause.
+    (
+        Vec::new(),
+        Some("recherche interrompue (tâche bloquante)".into()),
+    )
+}
+
+/// Partie 100 % synchrone de la recherche (exécutée hors du runtime async).
+fn search_blocking(
+    query: &str,
+    limit: usize,
+    embedder: Option<String>,
+    qv: Option<Vec<f32>>,
+) -> (Vec<Hit>, Option<String>) {
     let c = match open() {
         Ok(c) => c,
         Err(e) => return (Vec::new(), Some(format!("DB: {e}"))),
@@ -218,54 +457,61 @@ pub async fn search(query: &str, limit: usize) -> (Vec<Hit>, Option<String>) {
     let mut hits = fts_search(&c, query, limit).unwrap_or_default();
     let mut degraded = None;
 
-    // vectoriel si un embedder est configuré
-    if let Some(embedder) = crate::memory::embedder_id() {
-        match crate::memory::embed(query).await {
-            Ok(qv) => {
-                let mut stmt = c
-                    .prepare("SELECT knowledge_id, vector FROM embeddings WHERE embedder = ?1")
-                    .unwrap();
-                let rows = stmt.query_map(params![embedder], |r| {
-                    let id: i64 = r.get(0)?;
-                    let v: Vec<u8> = r.get(1)?;
-                    Ok((id, v))
+    match (embedder, qv) {
+        (Some(embedder), Some(qv)) => {
+            let rows = c
+                .prepare("SELECT knowledge_id, vector FROM embeddings WHERE embedder = ?1")
+                .and_then(|mut stmt| {
+                    let mapped = stmt
+                        .query_map(params![embedder], |r| {
+                            let id: i64 = r.get(0)?;
+                            let v: Vec<u8> = r.get(1)?;
+                            Ok((id, v))
+                        })?
+                        .collect::<std::result::Result<Vec<_>, _>>();
+                    mapped
                 });
-                if let Ok(rows) = rows {
-                    let mut vec_scores: Vec<(i64, f32)> = Vec::new();
-                    for row in rows.flatten() {
-                        let v = blob_to_f32(&row.1);
-                        vec_scores.push((row.0, cosine(&qv, &v)));
-                    }
-                    vec_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-                    for (id, s) in vec_scores.into_iter().take(limit) {
-                        if let Some(h) = hits.iter_mut().find(|h| h.id == id) {
-                            h.score = (h.score + s).max(h.score);
-                        } else if let Ok(mut stmt) = c.prepare(
-                            "SELECT id, sujet, contenu, source FROM knowledge WHERE id = ?1",
-                        ) {
-                            if let Ok(r) = stmt.query_row(params![id], |r| {
-                                Ok(Hit {
-                                    id: r.get(0)?,
-                                    sujet: r.get(1)?,
-                                    contenu: r.get(2)?,
-                                    source: r.get(3)?,
-                                    score: s,
-                                })
-                            }) {
-                                hits.push(r);
-                            }
+            if let Ok(rows) = rows {
+                let mut vec_scores: Vec<(i64, f32)> = rows
+                    .into_iter()
+                    .map(|(id, v)| (id, cosine(&qv, &blob_to_f32(&v))))
+                    .collect();
+                vec_scores
+                    .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                for (id, s) in vec_scores.into_iter().take(limit) {
+                    if let Some(h) = hits.iter_mut().find(|h| h.id == id) {
+                        h.score = (h.score + s).max(h.score);
+                    } else if let Ok(mut stmt) =
+                        c.prepare("SELECT id, sujet, contenu, source FROM knowledge WHERE id = ?1")
+                    {
+                        if let Ok(r) = stmt.query_row(params![id], |r| {
+                            Ok(Hit {
+                                id: r.get(0)?,
+                                sujet: r.get(1)?,
+                                contenu: r.get(2)?,
+                                source: r.get(3)?,
+                                score: s,
+                            })
+                        }) {
+                            hits.push(r);
                         }
                     }
                 }
             }
-            Err(e) => degraded = Some(format!("embedding requête échoué: {e}")),
         }
-    } else if hits.is_empty() {
-        hits = like_search(&c, query, limit).unwrap_or_default();
-        degraded = Some("aucun embedder configuré → recherche FTS5/LIKE".into());
+        _ => {
+            if hits.is_empty() {
+                hits = like_search(&c, query, limit).unwrap_or_default();
+                degraded = Some("aucun embedder configuré → recherche FTS5/LIKE".into());
+            }
+        }
     }
 
-    hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    hits.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     hits.truncate(limit);
     (hits, degraded)
 }
@@ -353,14 +599,19 @@ pub async fn ingest_dir(dir: &Path, embed: bool) -> Result<(usize, usize)> {
 /// Reconstruit l'index FTS5.
 pub fn rebuild_fts() -> Result<()> {
     let c = open()?;
-    c.execute("INSERT INTO knowledge_fts(knowledge_fts) VALUES('rebuild')", [])?;
+    c.execute(
+        "INSERT INTO knowledge_fts(knowledge_fts) VALUES('rebuild')",
+        [],
+    )?;
     Ok(())
 }
 
 pub fn stats() -> Result<String> {
     let c = open()?;
     let entries: i64 = c.query_row("SELECT COUNT(*) FROM knowledge", [], |r| r.get(0))?;
-    let files: i64 = c.query_row("SELECT COUNT(DISTINCT source) FROM knowledge", [], |r| r.get(0))?;
+    let files: i64 = c.query_row("SELECT COUNT(DISTINCT source) FROM knowledge", [], |r| {
+        r.get(0)
+    })?;
     let vecs: i64 = c.query_row("SELECT COUNT(*) FROM embeddings", [], |r| r.get(0))?;
     Ok(format!(
         "Base de connaissance : {}\n  entrées (chunks) : {entries}\n  fichiers         : {files}\n  vecteurs         : {vecs}\n  embedder         : {}\n  FTS5             : activé",
@@ -373,7 +624,7 @@ pub fn stats() -> Result<String> {
 
 /// Fichier de log des injections (`<ZER0v1>/knowledge.log`).
 pub fn log_path() -> PathBuf {
-    mods::project_root().join("knowledge.log")
+    crate::config::data_dir().join("knowledge.log")
 }
 
 fn now() -> String {
@@ -388,7 +639,10 @@ pub fn log_injection(query: &str, hits: &[Hit]) {
     use std::io::Write;
     let mut line = format!("[{}] query={query:?}", now());
     for h in hits {
-        line.push_str(&format!(" | {} <{}> score={:.3}", h.sujet, h.source, h.score));
+        line.push_str(&format!(
+            " | {} <{}> score={:.3}",
+            h.sujet, h.source, h.score
+        ));
     }
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)
@@ -421,7 +675,11 @@ pub fn format_hits(hits: &[Hit], degraded: &Option<String>) -> String {
             h.score,
             h.sujet,
             h.source,
-            h.contenu.replace('\n', " ").chars().take(300).collect::<String>()
+            h.contenu
+                .replace('\n', " ")
+                .chars()
+                .take(300)
+                .collect::<String>()
         ));
     }
     s
@@ -434,7 +692,10 @@ mod tests {
     #[test]
     fn tokens_filters_short_and_stopwords() {
         // Mots longs non-stopwords conservés.
-        assert_eq!(tokens("algorithmique boussole"), vec!["algorithmique", "boussole"]);
+        assert_eq!(
+            tokens("algorithmique boussole"),
+            vec!["algorithmique", "boussole"]
+        );
         // Tokens < 3 lettres ignorés.
         assert!(tokens("a bb ccc").contains(&"ccc".to_string()));
         assert!(!tokens("a bb").iter().any(|t| t.len() < 3));

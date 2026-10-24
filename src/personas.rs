@@ -15,7 +15,11 @@ pub fn list() -> Vec<String> {
     };
     let mut v: Vec<String> = rd
         .filter_map(|e| e.ok())
-        .filter_map(|e| e.path().file_stem().map(|s| s.to_string_lossy().to_string()))
+        .filter_map(|e| {
+            e.path()
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+        })
         .collect();
     v.sort();
     v

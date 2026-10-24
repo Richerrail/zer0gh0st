@@ -175,11 +175,19 @@ impl Pong {
 
         let vertical = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(0), Constraint::Length(H as u16 + 2), Constraint::Min(0)])
+            .constraints([
+                Constraint::Min(0),
+                Constraint::Length(H as u16 + 2),
+                Constraint::Min(0),
+            ])
             .split(area);
         let horizontal = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Min(0), Constraint::Length(W as u16 + 2), Constraint::Min(0)])
+            .constraints([
+                Constraint::Min(0),
+                Constraint::Length(W as u16 + 2),
+                Constraint::Min(0),
+            ])
             .split(vertical[1]);
         f.render_widget(p, horizontal[1]);
     }

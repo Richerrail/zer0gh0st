@@ -234,7 +234,12 @@ pub async fn run(check_only: bool, force: bool) -> Result<String> {
         rel.tag, rel.url
     );
     if !rel.notes.is_empty() {
-        let excerpt: Vec<&str> = rel.notes.lines().filter(|l| !l.trim().is_empty()).take(3).collect();
+        let excerpt: Vec<&str> = rel
+            .notes
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .take(3)
+            .collect();
         out.push_str(&format!("notes : {}\n", excerpt.join(" · ")));
     }
     if !newer && !force {
@@ -245,7 +250,9 @@ pub async fn run(check_only: bool, force: bool) -> Result<String> {
         .map(|p| is_dev_build(&p.display().to_string()))
         .unwrap_or(false);
     if dev {
-        out.push_str("ℹ binaire de développement (target/) — `cargo build --release` fait foi ici.\n");
+        out.push_str(
+            "ℹ binaire de développement (target/) — `cargo build --release` fait foi ici.\n",
+        );
     }
     if check_only {
         out.push_str(if newer {

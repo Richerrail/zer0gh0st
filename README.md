@@ -1,6 +1,8 @@
 # ZER0│GH0ST
 
-> **Un agent IA qui vit dans ton terminal.** Rust · TUI · local ou cloud · aucune clé requise.
+> **Un agent IA qui vit dans ton terminal.** Rust · TUI · local ou cloud · zéro dépendance Python pour le noyau.
+
+<img src="./logo.png" alt="ZER0│GH0ST" width="520">
 
 ![ZER0│GH0ST](./zer0-ghost.png)
 
@@ -10,7 +12,7 @@
 ![CLI only](https://img.shields.io/badge/interface-CLI%20%2F%20TUI-black.svg)
 ![CI](https://github.com/Richerrail/zer0gh0st/actions/workflows/ci.yml/badge.svg)
 
-**Version** : 0.5.7 · **Licence** : MIT · **Interface** : terminal uniquement (pas de GUI web).
+**Version** : 0.6.5 · **Licence** : MIT · **Interface** : terminal uniquement (pas de GUI web).
 
 ![Aperçu de ZER0│GH0ST](./screenshot.png)
 
@@ -238,8 +240,6 @@ zer0 models --free                         # liste les modèles gratuits
 zer0 select "Écris une fonction Rust"      # recommande un modèle :free
 ```
 
-Voir [`SPEC.md`](./SPEC.md) §1 pour le périmètre exact.
-
 ---
 
 ### Catalogue d'APIs publiques
@@ -342,11 +342,11 @@ Zer0 agit : tu décris un but, il appelle les outils nécessaires.
 **TUI** (extrait) : `/help` `/think` `/provider` `/model` `/models` `/quota` `/vote` `/ctx` `/free` `/select` `/route` `/telegram` `/tg`
 `/role` `/project` `/memory` `/recall` `/compact` `/task` `/work` `/ask` `/review` `/search`
 `/stop` `/context` `/whoami` `/vault` `/pdf` `/jev` `/kb` `/new` `/history` `/radio` `/bintime`
-`/pong` `/kristal` `/streaming` `/retro` `/panel` `/clear` `/quit` `/img` `/update` `/embeddings`.
+`/pong` `/panel` `/clear` `/quit` `/img` `/update` `/embeddings`.
 
 **CLI** : `zer0 provider|models|model|select|route|role|project|memory|embeddings|task|search|whoami|vault|pdf|jev|bintime|pong|kb|update|quota|vote|0box` — alias débat : `zer0box "<sujet>"` (binaire-lien ou `scripts/zer0box.cmd` depuis les sources).
 
-Détails : `zer0 --help`, ou les `ROADMAP*.md`.
+Détails : `zer0 --help`, ou [`docs/COMMANDS.md`](./docs/COMMANDS.md).
 
 ---
 
@@ -449,7 +449,6 @@ Le jeton est aussi cherché dans l'environnement
 | `/radio [dossier\|fichier\|url]` | panneau audio à droite, playlist auto | natif Rust |
 | `/bintime` | panneau horloge binaire CRT | natif Rust |
 | `/pong` | Pong **contre l'agent** (plein écran) | natif Rust |
-| `/kristal` · `/streaming` · `/retro` | apps lancées en fenêtre séparée | `mods/` (optionnel) |
 
 Les modules `mods/` ne sont **pas fournis** (voir [`mods/README.md`](./mods/README.md)).
 Détails : [`ECOSYSTEM.md`](./ECOSYSTEM.md).
@@ -474,13 +473,12 @@ Le projet assume ses limites (principe directeur, §12) :
 
 | Fichier | Contenu |
 |---|---|
-| [`SPEC.md`](./SPEC.md) | périmètre, modes de défaillance, critères d'acceptation |
 | [`SAFETY.md`](./SAFETY.md) | modèle de menace, choix assumés, ce qui **n'est pas** protégé |
 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | structure technique, flux, modules |
 | [`ECOSYSTEM.md`](./ECOSYSTEM.md) | modules fun, portabilité Linux/macOS/Windows |
 | [`BRAINSTORM_ZEROCHAN.md`](./BRAINSTORM_ZEROCHAN.md) | analyse & roadmap Zero-chan |
 | [`CHANGELOG.md`](./CHANGELOG.md) | historique des versions |
-| `ROADMAP.md` · `ROADMAP_FUN.md` · `ROADMAP_PORT_SLASH.md` | feuilles de route |
+| [`docs/COMMANDS.md`](./docs/COMMANDS.md) | référence des commandes, générée depuis le CLI |
 | [`LICENSE`](./LICENSE) | MIT |
 
 **Principe directeur :**
@@ -499,8 +497,6 @@ contre l'exfiltration par le processus, et `SAFETY.md` liste ce que le bac à sa
 2. `cargo build` et `cargo clippy` doivent passer sans avertissement.
 3. Commits clairs ; ouvre une *pull request* en décrivant le **pourquoi**.
 4. Par principe : documente les **limites** de ce que tu ajoutes (pas de promesse non tenue).
-
-Idées ouvertes : voir `ROADMAP*.md`.
 
 ---
 

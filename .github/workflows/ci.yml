@@ -32,9 +32,9 @@ jobs:
       - name: Tests
         run: cargo test --all-targets
 
-      # Formatage : informatif seulement (pas encore rustfmt-strict).
-      - name: Format (informatif)
-        continue-on-error: true
+      # Formatage : bloquant. Le code est rustfmt-clean depuis l'extraction de
+      # `src/lib.rs` ; laisser ce job « informatif » garantissait la dérive.
+      - name: Format
         run: cargo fmt --all -- --check
 
   gateway:

@@ -1,4 +1,168 @@
-## Non publié — vote 👍/👎 (star GitHub)
+## v0.6.5 — Quotas observables et bascule raisonnée (2026-10-24)
+
+- **`/quota` persiste** : cumul par jour et par endpoint dans
+  `<données>/quota.json` (14 jours), écrit au plus toutes les 2 s, immédiat sur 429.
+  `zer0 quota` lancé à part affiche enfin la journée réelle au lieu d'une page blanche.
+- **`max_tokens` plafonné à 2 048 pour les modèles `:free`** : la sortie réservée
+  n'est plus comptée contre le quota pour rien.
+- **Bascule ciblée** : une erreur déterministe (400/422) n'est plus rejouée sur tous les
+  endpoints — sauf mention d'outils, où un autre modèle peut les supporter.
+
+## v0.6.4 — Quotas gratuits et palette de commandes (2026-10-24)
+
+- **429 définitif reconnu** : un `free-models-per-day` / quota journalier / crédits épuisés ne
+  déclenche plus 3 réessais puis une bascule. Message immédiat, avec la marche à suivre.
+- **Pas de bascule sur 429 d'un modèle `:free`** : tous partagent le quota du compte, changer
+  de modèle ne rend pas de quota — ça ne faisait que multiplier les requêtes.
+- **Budget d'itérations réduit** à 4 (au lieu de 8) quand la chaîne contient un `:free`.
+- **Palette de commandes** : `Espace` valide la frappe et rend la main à la saisie, `Entrée`
+  sans résultat réinjecte le texte tapé. `/whoami zero-vamp` et `/task add …` sont enfin
+  saisissables. `Picker::selected()` respecte le filtre (avant, Entrée pouvait exécuter le
+  premier élément de la liste).
+- Personas compactées côté données (8 Ko → < 1 Ko), avec une section « Exécution » qui
+  rappelle de répondre d'abord et de n'appeler un outil que si nécessaire.
+
+## v0.6.3 — Assistant de première connexion (2026-10-23)
+
+- **Assistant en 8 étapes** (`/setup`, proposé au premier lancement) : inférence (cloud/local),
+  provider, clé API, modèle, Telegram, raisonnement, `code_exec`, visite des commandes.
+  Chaque écran explique le **pourquoi** avant le **comment**, et `Échap` enregistre l'étape
+  pour reprendre plus tard.
+- **Saisie masquée** pour les clés et jetons : l'écran n'affiche que `●`, le secret ne passe
+  ni dans l'historique ni dans le journal d'audit.
+- **Menus sélectionnables** au lieu de syntaxes à mémoriser : `/model`, `/model use`
+  (sans identifiant), `/free`, `/provider`, `/role set <rôle>` (le modèle choisi alimente
+  le rôle).
+- **`/login` / `/logout`** : connexion complète (provider → clé → modèle) en une commande.
+- **`/help` court** (14 commandes utiles) ; `/help all` conserve la liste exhaustive.
+- **Choix persistants** : `think` et `code_exec` sont enregistrés dans `config.toml`
+  (`false` par défaut pour les deux) ; `--think` / `--allow-exec` restent prioritaires.
+- **Pas d'intrusion chez l'existant** : une config qui a déjà un provider/modèle ne
+  déclenche pas l'assistant (`setup_done` migré).
+
+## v0.6.2 — Liste de tâches globale (2026-10-22)
+
+- **`tasks::path()` ne dépend plus du dossier courant.** Il renvoyait
+  `.zer0/tasks.md` **relatif au cwd** : lancé depuis `~`, l'agent écrivait dans
+  `~/.zer0/tasks.md` ; depuis le dépôt, ailleurs — listes différentes selon
+  l'endroit de lancement, et des `.zer0/` dispersés.
+  Désormais `~/.local/share/zer0gh0st/tasks.md`, surchargeable par
+  `ZERO_TASKS_FILE` pour une liste propre à un projet.
+- **Migration unique** : reprend la liste la plus récente parmi `.zer0/tasks.md`
+  (cwd), `<racine du projet>/.zer0/tasks.md` et `~/.zer0/tasks.md`, sans jamais
+  écraser une liste existante.
+- **Prompt système** : le bloc « Environnement » annonçait encore
+  `<projet>/data`, `<projet>/knowledge.db` et `<projet>/.zer0` ; il donne
+  maintenant les chemins XDG réels (données, base, tâches).
+
+## v0.6.1 — Correctifs issus de la revue (2026-10-22)
+
+- **TUI — cache de rendu** : chaque frame re-découpait et re-parsait toute la conversation
+  (O(conversation) par frame, donc par token). Rendu mémoïsé par message (index, largeur,
+  empreinte du contenu), invalidé au changement du nombre de messages.
+- **I/O hors du runtime async** : `knowledge::search` (appelée à chaque tour) exécute FTS5
+  et le scan des vecteurs en `spawn_blocking` ; idem pour la lecture/écriture de
+  `memory.jsonl`. Un `prepare().unwrap()` du chemin vectoriel devient une erreur gérée.
+- **Migration des données** : les journaux JSONL sont repris s'ils sont **plus récents**
+  que la copie XDG. Corrige une mémoire amputée (21 entrées → 5) après le passage en XDG.
+- **Journal d'audit** : purge d'ancienneté (90 jours par défaut, `ZER0_AUDIT_RETENTION_DAYS`,
+  `0` = désactivée), une fois par processus ; les lignes illisibles sont conservées.
+- **Référence des commandes générée** : `zer0 commands` produit `docs/COMMANDS.md`
+  (559 lignes) depuis clap ; un test échoue si le fichier diverge du binaire.
+- **Usage stable** : `bin_name("zer0")` — l'asset brut n'affiche plus
+  `Usage: zer0-x86_64-unknown-linux-gnu`.
+- `.gitattributes` : fins de ligne normalisées, markdown en LF (le test anti-dérive
+  échouait sur un checkout Windows en CRLF).
+
+## v0.6.0 — Noyau testable, correctifs critiques et garde-fous (2026-10-22)
+
+### Corrigé — pertes de données et crashs silencieux
+- **Troncature UTF-8** : `String::truncate` paniquait au milieu d'un caractère (toute
+  sortie d'outil accentuée > 16 Ko) et tuait la tâche de génération sans message ; la TUI
+  restait bloquée en « streaming ». Nouveau module `util` + tests de régression.
+- **Markdown aplati** : `sanitize_content` écrasait tous les blancs (retours à la ligne,
+  indentation) de **chaque** réponse assistant, contenu ensuite persisté et renvoyé au
+  modèle. Ne touche plus qu'aux tokens `<|…|>` et aux lignes vides excédentaires.
+- **`code_exec` non borné** : `output()` bloquant, sans timeout ni plafond, insensible à
+  `/stop`. Désormais `tokio::process` + timeout (120 s, max 3600) + kill + capture bornée.
+- **`--resume`** : la coupe du JSONL pouvait produire un historique refusé par les
+  providers (400 partout). `convo::repair` + `load_repaired`.
+- **Compaction non persistée** : le résumé ne survivait pas au redémarrage.
+- **Fin de flux** sans `[DONE]`/`finish_reason` : signalée (`eof`), plus acceptée en silence.
+- **Double backoff 429** : un seul endroit décide, dans le client.
+- **Outils `0box` figés** : `Runtime` en `RwLock`, `F3`/`F4` s'appliquent réellement.
+- **Config illisible** : sauvegarde `.corrupt-*.bak` et écritures refusées (le
+  `save_global` suivant écrasait les clés API).
+
+### Sécurité (droits utilisateur assumés, sans sandbox)
+- `zer0-gw` : jeton admin (`x-zer0-admin`, gw.toml ou `ZER0_GW_ADMIN_TOKEN`), comparaison
+  à temps constant, avertissement au démarrage si absent.
+- Telegram : `code_exec` **et** `text_editor` derrière `/exec` ; `/exec on` refusé sur un
+  chat lié automatiquement (`ZER0_TELEGRAM_ALLOW_EXEC=1` pour forcer).
+- Journal d'audit append-only (`data/audit.jsonl`) : `zer0 audit`, `/audit`.
+- Sauvegardes `<fichier>.zer0.bak` avant écrasement ou suppression.
+- Budget d'appels LLM par tour (120, `ZER0_MAX_LLM_CALLS`), sous-agents inclus.
+
+### Architecture
+- Noyau des commandes dans `src/commands.rs` : `select`, `search`, `task`, `model`, `route`,
+  `role`, `memory`, `kb`, `provider`, `quota`, `pdf`, `apis`, `whoami`, `vault`, `embeddings`.
+  Le CLI et la TUI n'ont plus qu'un adaptateur chacun — plusieurs commandes avaient déjà
+  divergé (`role auto` avait deux sens opposés, `select` 8 vs 5 modèles, `task add --role`
+  ignoré en TUI).
+- `provider list` distingue le **transport** (direct / zer0-gw) de la **présence d'une clé**.
+- Données hors du dépôt : `~/.local/share/zer0gh0st` (XDG), `ZER0_DATA_DIR` pour surcharger.
+  Migration unique depuis `data/` et `knowledge.db` du checkout, plus reprise d'une base
+  vide laissée par un lancement antérieur.
+- Schémas versionnés : `schema_version` dans `config.toml`, `PRAGMA user_version` en SQLite.
+- Modules `/kristal`, `/streaming` et `/retro` retirés : leurs sources n'étaient pas
+  versionnées, donc les commandes étaient mortes après un clone (`/bintime`, `/radio`,
+  `/pong` restent, dans `src/fun/`).
+
+### Tests
+- Noyau extrait dans `src/lib.rs` + `src/cli.rs` ; `src/main.rs` n'est plus qu'un lanceur.
+- `src/commands.rs` : source unique CLI/TUI pour `select`, `search`, `task` (les deux
+  implémentations avaient divergé : 8 vs 5 modèles, `--role` ignoré en TUI).
+- `tests/streaming.rs` : faux serveur SSE local, 7 tests (tool_calls fragmentés, flux
+  tronqué, 429, bascule d'endpoint, outils transmis).
+- 152 tests (127 lib + 14 gateway + 11 intégration) ; `cargo fmt --check` bloquant en CI.
+
+## v0.5.9 — Rafraîchissement du jeton GitHub (opt-in) (2026-10-21)
+
+- **Support des jetons expirables (opt-in)** : si l'app OAuth a l'option
+  « Expire user access tokens », GitHub renvoie un `refresh_token` en plus du jeton
+  d'accès. Zer0 le conserve **chiffré** (coffre, clé `github_refresh`) et renouvelle
+  automatiquement le jeton d'accès sur un 401, puis rejoue l'action → le 👍 reste
+  automatique au-delà des 8 h.
+- **Opt-in par nature** : sans `refresh_token` stocké, rien ne change (aucune requête
+  supplémentaire, aucun comportement modifié). `vote logout` retire les deux.
+- Test rendu **indépendant de l'environnement** (il lisait la config réelle de
+  l'utilisateur) + test de l'opt-in.
+
+## v0.5.8 — Vote 👍 (vraie star GitHub), /quota live, correctifs (2026-10-21)
+
+Points saillants :
+
+- **👍 dans la TUI = une vraie étoile GitHub** sur `Richerrail/zer0gh0st`, posée avec le
+  compte de l'utilisateur (OAuth *device flow* : un code à coller, **aucun
+  `client_secret`** dans le code). Sans jeton, la page du dépôt s'ouvre dans le
+  navigateur — **rien n'est simulé**. Compteur d'étoiles réel (API publique, cache 10 min).
+  Le jeton n'est **jamais** stocké en clair : env → **coffre chiffré** (Argon2 +
+  ChaCha20-Poly1305, fichier 0600) ; aucun champ `github_token` dans `config.toml`.
+- **`/quota`** : quotas et crédits OpenRouter en direct.
+- **Correctif capture souris (Windows)** : `cmd /C start` réinheritait le mode console
+  qui porte la capture de la souris de crossterm → après un clic, plus aucun événement
+  souris (menu compris). Mesuré : `mouse=true` → `mouse=false`. Correctif :
+  `rundll32 url.dll,FileProtocolHandler` (aucune console annexe) + stdio détachés.
+- **Les messages nomment le bon binaire** : « `zer0` codé en dur » pouvait désigner un
+  autre programme (une ancienne appli Python, p. ex.) → la commande indiquée était
+  fausse. `ZER0_CMD_NAME` (posé par le lanceur) est prioritaire, sinon le chemin réel
+  de l'exécutant.
+- **Fichiers communities** GitHub (`CONTRIBUTING`, `CODE_OF_CONDUCT`, `SECURITY`,
+  `ACCESSIBILITY`, templates d'issues et de PR) + description et topics du dépôt.
+- Corrige aussi : la base de connaissances partait à `/` pour un binaire installé hors
+  checkout source → désormais dans `~/.local/share/zer0gh0st/`.
+
+### Détail — vote 👍/👎
 
 - **Nouveau module `vote.rs`** : deux petits pouces **en bas à droite de l'écran
   principal** (pied de page, clicables à la souris) — le **pouce haut = une star
