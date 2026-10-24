@@ -154,7 +154,8 @@ Prérequis : **Rust** (cargo) + un **compilateur C** (`cc`) — `rusqlite` est c
 rien à installer côté SQLite. `llama-server` (llama.cpp) seulement pour le mode **local**.
 
 **Portabilité** : presse-papier via `wl-copy` (Wayland) → `xclip`/`xsel` (X11) → OSC 52 ;
-micro via `pw-record` (PipeWire) → `parecord` (PulseAudio) → `arecord` (ALSA).
+micro via `pw-record` (PipeWire) → `parecord` (PulseAudio) → `arecord` (ALSA) → `sox_ng`/`sox`
+(macOS et Windows).
 
 ### Depuis GitHub
 
@@ -205,7 +206,21 @@ cargo build --release
 >   (`bash scripts/install.sh`) ou **WSL**.
 > - `code_exec` utilise **`cmd /C`** : installe **Git Bash** ou **WSL** pour disposer
 >   des commandes bash.
-> - Optionnel (voix/média) : `choco install sox ffmpeg` (Chocolatey) ou installe-les séparément.
+> - Optionnel (voix/média), sous PowerShell :
+>   ```powershell
+>   winget install Gyan.FFmpeg
+>   winget install sox_ng.sox_ng
+>   ```
+>   `sox_ng` est l'enregistreur micro recommandé sous Windows. Pour la
+>   transcription locale :
+>   ```powershell
+>   winget install Python.Python.3.12
+>   py -3.12 -m venv "$env:USERPROFILE\.venvs\zer0-whisper"
+>   & "$env:USERPROFILE\.venvs\zer0-whisper\Scripts\python.exe" -m pip install "faster-whisper" "av<16"
+>   [Environment]::SetEnvironmentVariable("ZER0_PYTHON", "$env:USERPROFILE\.venvs\zer0-whisper\Scripts\python.exe", "User")
+>   ```
+>   Redémarre ensuite le terminal. Zer0 détecte aussi automatiquement le venv
+>   `~/.venvs/zer0-whisper`, même si `ZER0_PYTHON` n'est pas encore exporté.
 
 ### Binaires précompilés
 
@@ -218,7 +233,7 @@ Silicon)** et **Windows (x86_64)** dans [Releases](https://github.com/Richerrail
 |---|---|---|
 | 🐧 **Linux** | `build-essential pkg-config` · audio `pipewire`/`pulseaudio-utils` · `wl-clipboard`\|`xclip` · `mpv`/`ffmpeg` | cible principale (testé) |
 | 🍎 **macOS** | Xcode CLT · `brew install sox mpv ffmpeg` | via `pbcopy`, micro via `sox` |
-| 🪟 **Windows** | **Visual Studio Build Tools (C++)** · `choco install sox ffmpeg` | `code_exec` = `cmd /C` → Git Bash/WSL conseillé |
+| 🪟 **Windows** | **Visual Studio Build Tools (C++)** · `winget install Gyan.FFmpeg` + `winget install sox_ng.sox_ng` | micro via `sox_ng` ; `code_exec` = `cmd /C` → Git Bash/WSL conseillé |
 
 ### Mode 100 % local (aucune clé API)
 
@@ -358,8 +373,10 @@ Assistante vocale intégrée, **sans boîte chat ni barre dédiée** :
   (`en veille` / `écoute…` / `réfléchit…` / `parle…`), mini-visualiseur animé.
 - **Deux boutons** à droite de la barre de saisie : `0chan:ON/off` et `MIC:REC/off`
   — cliquables à la souris, ou **`F8`** (0chan) / **`F10`** (micro).
-- Le **micro** enregistre (`pw-record`, 16 kHz) puis transcrit (`faster-whisper`) ; le texte
-  reconnu est envoyé **dans la chat de l'agent**, comme un message tapé.
+- Le **micro** enregistre en WAV mono 16 kHz (`pw-record`, `parecord`, `arecord`,
+  `sox_ng`/`sox`) puis transcrit (`faster-whisper`) ; le texte reconnu est envoyé
+  **dans la chat de l'agent**, comme un message tapé. Sous Windows, `sox_ng` est
+  recommandé : l'ancien SoX 14.4 ne sait pas toujours ouvrir le micro par défaut.
 - L'avatar et la voix ne dupliquent **pas** l'UI : ils réutilisent chat + input de l'agent.
 
 Roadmap et détails : [`BRAINSTORM_ZEROCHAN.md`](./BRAINSTORM_ZEROCHAN.md).

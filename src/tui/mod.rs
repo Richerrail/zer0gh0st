@@ -4519,8 +4519,13 @@ fn toggle_mic(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
             crate::zerochan::MAX_REC_SECS as u32
         )));
     } else {
-        app.messages
-            .push(ChatMessage::notice("zero-chan : micro indisponible"));
+        let detail = app.zc.last.clone();
+        let message = if detail.trim().is_empty() {
+            "zero-chan : micro indisponible".to_string()
+        } else {
+            format!("zero-chan : micro indisponible — {detail}")
+        };
+        app.messages.push(ChatMessage::notice(message));
     }
 }
 

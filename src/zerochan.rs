@@ -4,8 +4,9 @@
 //! réutilise la chat et l'input de l'agent. Il n'ajoute qu'un petit bloc d'état
 //! (à droite du banner) et deux boutons (à droite de la barre de saisie).
 
-use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use std::process::{Child, ChildStderr, Command, Stdio};
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -44,12 +45,16 @@ fn has(cmd: &str) -> bool {
 
 /// Commande d'enregistrement WAV mono 16 kHz, selon l'écosystème audio dispo :
 /// PipeWire (`pw-record`) → PulseAudio (`parecord`) → ALSA (`arecord`) → SoX.
-fn recorder(path: &std::path::Path) -> Option<Command> {
+///
+/// Windows : `sox_ng` est préféré à l'ancien `sox`. Le paquet WinGet
+/// `sox_ng.sox_ng` sait réellement ouvrir le périphérique d'enregistrement
+/// Windows, alors que SoX 14.4 peut répondre « no default audio device ».
+fn recorder(path: &Path) -> Option<(Command, &'static str)> {
     if has("pw-record") {
         let mut c = Command::new("pw-record");
         c.args(["--format", "s16", "--rate", "16000", "--channels", "1"])
             .arg(path);
-        return Some(c);
+        return Some((c, "pw-record"));
     }
     if has("parecord") {
         let mut c = Command::new("parecord");
@@ -60,33 +65,124 @@ fn recorder(path: &std::path::Path) -> Option<Command> {
             "--file-format=wav",
         ])
         .arg(path);
-        return Some(c);
+        return Some((c, "parecord"));
     }
     if has("arecord") {
         let mut c = Command::new("arecord");
         c.args(["-f", "S16_LE", "-r", "16000", "-c", "1"]).arg(path);
-        return Some(c);
+        return Some((c, "arecord"));
     }
+
+    #[cfg(windows)]
+    if has("sox_ng") {
+        return Some((sox_recorder("sox_ng", path), "sox_ng"));
+    }
+
     // macOS / Windows (et Linux sans PipeWire/PulseAudio) : SoX.
     if has("sox") {
-        let mut c = Command::new("sox");
-        c.args([
-            "-d",
-            "-r",
-            "16000",
-            "-c",
-            "1",
-            "-b",
-            "16",
-            "-e",
-            "signed-integer",
-            "-t",
-            "wav",
-        ])
-        .arg(path);
-        return Some(c);
+        return Some((sox_recorder("sox", path), "sox"));
     }
     None
+}
+
+/// Commande SoX commune à `sox` et `sox_ng`.
+fn sox_recorder(exe: &str, path: &Path) -> Command {
+    let mut c = Command::new(exe);
+    c.args([
+        "-d",
+        "-r",
+        "16000",
+        "-c",
+        "1",
+        "-b",
+        "16",
+        "-e",
+        "signed-integer",
+        "-t",
+        "wav",
+    ])
+    .arg(path);
+    c
+}
+
+/// Message d'installation adapté à la plateforme.
+fn recorder_hint() -> &'static str {
+    if cfg!(windows) {
+        "installer SoX_ng (`winget install sox_ng.sox_ng`), puis redémarrer le terminal"
+    } else {
+        "installer pipewire / pulseaudio-utils / alsa-utils (ou sox)"
+    }
+}
+
+/// Lit une sortie d'erreur d'un enregistreur sans la laisser polluer le TUI.
+fn stderr_text(mut stderr: Option<ChildStderr>) -> String {
+    let Some(mut stderr) = stderr.take() else {
+        return String::new();
+    };
+    let mut s = String::new();
+    let _ = stderr.read_to_string(&mut s);
+    s.trim().chars().take(400).collect()
+}
+
+/// Répare les tailles RIFF/data d'un WAV interrompu brutalement.
+///
+/// Windows ne permet pas d'envoyer SIGINT comme Unix. L'arrêt du processus
+/// SoX termine donc le fichier avant sa finalisation : les tailles RIFF et data
+/// restent provisionales, alors que les échantillons PCM sont présents. On
+/// recalcule ces deux tailles à partir de la longueur réelle du fichier.
+fn repair_wav(path: &Path) -> std::io::Result<()> {
+    use std::io::{Error, ErrorKind};
+
+    let mut bytes = std::fs::read(path)?;
+    if bytes.len() < 44 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
+        return Err(Error::new(
+            ErrorKind::InvalidData,
+            "enregistrement WAV absent ou invalide",
+        ));
+    }
+
+    let mut pos = 12usize;
+    let mut data_pos = None;
+    while pos + 8 <= bytes.len() {
+        let chunk_id = &bytes[pos..pos + 4];
+        let chunk_size = u32::from_le_bytes([
+            bytes[pos + 4],
+            bytes[pos + 5],
+            bytes[pos + 6],
+            bytes[pos + 7],
+        ]) as usize;
+        if chunk_id == b"data" {
+            data_pos = Some(pos);
+            break;
+        }
+        let payload = pos + 8;
+        let Some(next) = payload
+            .checked_add(chunk_size)
+            .and_then(|n| n.checked_add(chunk_size & 1))
+        else {
+            break;
+        };
+        if next <= pos || next > bytes.len() {
+            break;
+        }
+        pos = next;
+    }
+
+    let data_pos = data_pos
+        .ok_or_else(|| Error::new(ErrorKind::InvalidData, "chunk WAV « data » introuvable"))?;
+    let payload = data_pos + 8;
+    let mut data_len = bytes.len().saturating_sub(payload);
+    // Un échantillon PCM 16 bits fait 2 octets : ignore un éventuel octet
+    // partial écrit juste avant l'arrêt du processus.
+    data_len -= data_len % 2;
+    let riff_len = bytes.len() - 8;
+    if riff_len > u32::MAX as usize || data_len > u32::MAX as usize {
+        return Err(Error::new(ErrorKind::InvalidData, "WAV trop volumineux"));
+    }
+
+    bytes[4..8].copy_from_slice(&(riff_len as u32).to_le_bytes());
+    bytes[data_pos + 4..data_pos + 8].copy_from_slice(&(data_len as u32).to_le_bytes());
+    std::fs::write(path, bytes)
 }
 
 pub struct ZeroChan {
@@ -95,6 +191,7 @@ pub struct ZeroChan {
     pub frame: u32,
     pub last: String,
     rec: Option<Child>,
+    rec_stderr: Option<ChildStderr>,
     rec_started: Option<std::time::Instant>,
 }
 
@@ -115,6 +212,7 @@ impl ZeroChan {
             frame: 0,
             last: String::new(),
             rec: None,
+            rec_stderr: None,
             rec_started: None,
         }
     }
@@ -136,36 +234,55 @@ impl ZeroChan {
             return false;
         }
         let path = rec_path();
-        let Some(mut cmd) = recorder(&path) else {
-            self.last =
-                "aucun enregistreur (installer pipewire / pulseaudio-utils / alsa-utils)".into();
+        // Ne jamais réutiliser un ancien WAV si le nouvel enregistrement échoue.
+        let _ = std::fs::remove_file(&path);
+
+        let Some((mut cmd, label)) = recorder(&path) else {
+            self.last = format!("aucun enregistreur : {}", recorder_hint());
             return false;
         };
         let child = cmd
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .spawn();
-        match child {
-            Ok(c) => {
-                self.rec = Some(c);
-                self.rec_started = Some(std::time::Instant::now());
-                self.state = State::Listening;
-                self.last = "écoute du micro…".into();
-                true
-            }
+        let mut child = match child {
+            Ok(c) => c,
             Err(e) => {
-                self.last = format!("pw-record: {e}");
-                false
+                self.last = format!("{label} : impossible de démarrer le micro ({e})");
+                return false;
             }
+        };
+
+        // Certains enregistreurs échouent immédiatement (micro absent, privacy
+        // Windows, périphérique déjà utilisé). On laisse un court délai, puis on
+        // remonte leur erreur au lieu d'afficher un vague « indisponible ».
+        std::thread::sleep(std::time::Duration::from_millis(120));
+        if let Ok(Some(status)) = child.try_wait() {
+            let detail = stderr_text(child.stderr.take());
+            self.last = if detail.is_empty() {
+                format!("{label} : micro indisponible (code {status})")
+            } else {
+                format!("{label} : micro indisponible — {detail}")
+            };
+            return false;
         }
+
+        self.rec_stderr = child.stderr.take();
+        self.rec = Some(child);
+        self.rec_started = Some(std::time::Instant::now());
+        self.state = State::Listening;
+        self.last = "écoute du micro…".into();
+        true
     }
 
-    /// Arrête l'enregistrement (SIGINT pour finaliser le WAV), attente bornée.
+    /// Arrête l'enregistrement, attend la fermeture du processus et répare le
+    /// WAV si Windows a interrompu SoX avant sa finalisation.
     pub fn stop_rec(&mut self) {
         self.rec_started = None;
         if let Some(mut c) = self.rec.take() {
-            // SIGINT = finalise proprement le WAV (Unix). Windows : kill direct.
+            // SIGINT = finalise proprement le WAV (Unix). Windows : kill direct,
+            // puis `repair_wav` recalcule les tailles du RIFF.
             #[cfg(unix)]
             {
                 let pid = c.id();
@@ -185,6 +302,25 @@ impl ZeroChan {
                 std::thread::sleep(std::time::Duration::from_millis(25));
             }
             let _ = c.kill();
+            let _ = c.wait();
+        }
+
+        let detail = stderr_text(self.rec_stderr.take());
+        let path = rec_path();
+        if !path.exists() {
+            self.last = if detail.is_empty() {
+                "micro indisponible : aucun fichier audio produit".into()
+            } else {
+                format!("micro indisponible — {detail}")
+            };
+            return;
+        }
+        if let Err(e) = repair_wav(&path) {
+            self.last = if detail.is_empty() {
+                format!("enregistrement WAV invalide : {e}")
+            } else {
+                format!("enregistrement WAV invalide : {e} — {detail}")
+            };
         }
     }
 
@@ -317,7 +453,7 @@ pub async fn transcribe(path: &PathBuf) -> anyhow::Result<String> {
             .collect();
         return Err(anyhow::anyhow!(
             "Échec STT (faster-whisper). Interpréteur : `{}`.\n\
-             Installe-le : `pip install faster-whisper` (ou dans un venv, puis \
+             Installe-le : `pip install \"faster-whisper\" \"av<16\"` (dans un venv, puis \
              `ZER0_PYTHON=/chemin/venv/bin/python`).\nDétail : {err}",
             crate::platform::python()
         ));
@@ -432,5 +568,63 @@ pub fn block_layout(banner_area: Rect, on: bool) -> (Rect, Rect) {
                 height: 0,
             },
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_wav(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("zer0-{name}-{nanos}.wav"))
+    }
+
+    #[test]
+    fn repair_wav_fixes_truncated_riff_sizes() {
+        let path = temp_wav("repair-wav");
+        let mut wav = vec![0u8; 44];
+        wav[0..4].copy_from_slice(b"RIFF");
+        wav[8..12].copy_from_slice(b"WAVE");
+        wav[12..16].copy_from_slice(b"fmt ");
+        wav[16..20].copy_from_slice(&16u32.to_le_bytes());
+        wav[20..22].copy_from_slice(&1u16.to_le_bytes()); // PCM
+        wav[22..24].copy_from_slice(&1u16.to_le_bytes()); // mono
+        wav[24..28].copy_from_slice(&16_000u32.to_le_bytes());
+        wav[28..32].copy_from_slice(&32_000u32.to_le_bytes());
+        wav[32..34].copy_from_slice(&2u16.to_le_bytes());
+        wav[34..36].copy_from_slice(&16u16.to_le_bytes());
+        wav[36..40].copy_from_slice(b"data");
+        // SoX interrompu brutalement : tailles encore provisoires.
+        wav[4..8].copy_from_slice(&u32::MAX.to_le_bytes());
+        wav[40..44].copy_from_slice(&u32::MAX.to_le_bytes());
+        wav.extend_from_slice(&[0u8; 100]); // 50 échantillons PCM 16 bits
+        std::fs::write(&path, &wav).unwrap();
+
+        repair_wav(&path).unwrap();
+        let fixed = std::fs::read(&path).unwrap();
+        assert_eq!(u32::from_le_bytes(fixed[4..8].try_into().unwrap()), 136);
+        assert_eq!(u32::from_le_bytes(fixed[40..44].try_into().unwrap()), 100);
+
+        let wave = std::fs::File::open(&path).unwrap();
+        let mut reader = std::io::BufReader::new(wave);
+        let mut header = [0u8; 44];
+        std::io::Read::read_exact(&mut reader, &mut header).unwrap();
+        assert_eq!(&header[0..4], b"RIFF");
+        assert_eq!(&header[8..12], b"WAVE");
+        assert_eq!(&header[36..40], b"data");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn repair_wav_rejects_non_wav() {
+        let path = temp_wav("not-wav");
+        std::fs::write(&path, b"not a wav file").unwrap();
+        assert!(repair_wav(&path).is_err());
+        let _ = std::fs::remove_file(path);
     }
 }

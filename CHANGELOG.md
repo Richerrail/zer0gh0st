@@ -1,3 +1,14 @@
+## Non publié
+
+- **Zero-chan sous Windows** : prise en charge de `sox_ng`, qui ouvre réellement
+  le périphérique d'enregistrement Windows (l'ancien SoX 14.4 peut renvoyer
+  « no default audio device »). L'arrêt du processus d'enregistrement est suivi d'une réparation
+  des tailles RIFF du WAV, afin que `faster-whisper` puisse le lire.
+- L'erreur « micro indisponible » affiche maintenant la cause réelle et la
+  commande d'installation adaptée au système.
+- Le venv STT `~/.venvs/zer0-whisper` est détecté automatiquement ; la variable
+  `ZER0_PYTHON` reste prioritaire.
+
 ## v0.6.6 — Séparation stricte des deux applications (2026-10-24)
 
 - **Plus d'import depuis l'application Python** : `migrate_old_data()` relisait

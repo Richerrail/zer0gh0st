@@ -3,6 +3,7 @@
 //! Linux reste la cible principale ; macOS et Windows passent par des replis
 //! (shell, presse-papier, ouverture de fichiers, enregistreur micro).
 
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 /// `true` si `cmd` est trouvé dans le PATH (gère `.exe`/`.cmd` sur Windows).
@@ -237,16 +238,36 @@ pub fn restore_mouse_capture() {
     }
 }
 
-/// Interpréteur Python. Priorité : `$ZER0_PYTHON`, puis `python3`, puis `python`.
+/// Interpréteur Python. Priorité : `$ZER0_PYTHON`, puis le venv STT
+/// `~/.venvs/zer0-whisper`, puis `python3`, puis `python`.
 ///
-/// `$ZER0_PYTHON` permet de pointer un **venv** (utile quand `faster-whisper`
-/// n'est pas installé dans le Python système, ex. Ubuntu/WSL) :
+/// `$ZER0_PYTHON` permet de pointer un autre **venv** (utile quand
+/// `faster-whisper` n'est pas installé dans le Python système, ex. Ubuntu/WSL) :
 /// `ZER0_PYTHON=~/.venvs/whisper/bin/python`.
 pub fn python() -> String {
     if let Ok(p) = std::env::var("ZER0_PYTHON") {
         if !p.trim().is_empty() {
             return p;
         }
+    }
+    // Convention Zero-chan : un venv STT dédié dans le dossier utilisateur.
+    // La détection automatique évite de dépendre d'un terminal déjà ouvert
+    // avant la définition de `$ZER0_PYTHON`.
+    let venv = if cfg!(windows) {
+        PathBuf::from(home())
+            .join(".venvs")
+            .join("zer0-whisper")
+            .join("Scripts")
+            .join("python.exe")
+    } else {
+        PathBuf::from(home())
+            .join(".venvs")
+            .join("zer0-whisper")
+            .join("bin")
+            .join("python")
+    };
+    if venv.is_file() {
+        return venv.to_string_lossy().into_owned();
     }
     if has("python3") {
         "python3".to_string()
