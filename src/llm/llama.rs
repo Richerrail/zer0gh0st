@@ -17,6 +17,20 @@ const MAX_STREAM_CHARS: usize = 1_000_000;
 /// Abort a stream that sends nothing for this long.
 const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// Plafond de sortie pour les modèles `:free` : les providers comptent souvent
+/// la sortie **réservée** contre le quota, et un `max_tokens` élevé rapproche
+/// le 429 sans rien apporter sur une réponse normale.
+const FREE_MAX_TOKENS: u32 = 2048;
+
+/// `max_tokens` effectif (pur, testable).
+fn effective_max_tokens(model: &str, requested: u32) -> u32 {
+    if model.to_ascii_lowercase().contains(":free") {
+        requested.min(FREE_MAX_TOKENS)
+    } else {
+        requested
+    }
+}
+
 /// Per-request generation options.
 #[derive(Clone, Debug)]
 pub struct ChatOptions {
@@ -109,7 +123,7 @@ impl ApiClient {
             "messages": msgs,
             "stream": true,
             "temperature": options.temperature,
-            "max_tokens": options.max_tokens,
+            "max_tokens": effective_max_tokens(&self.model, options.max_tokens),
         });
         // `chat_template_kwargs` est un paramètre llama.cpp/vLLM : l'endpoint OpenAI-compat
         // de Google le REJETTE (400 « Unknown name "chat_template_kwargs" ») — bug constaté
@@ -548,6 +562,14 @@ fn merge_call(partial: &mut Vec<PartialCall>, delta: ToolCallDelta) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn free_models_get_a_lower_output_cap() {
+        assert_eq!(effective_max_tokens("vendor/x:free", 8192), 2048);
+        assert_eq!(effective_max_tokens("VENDOR/X:FREE", 1000), 1000);
+        assert_eq!(effective_max_tokens("vendor/x", 8192), 8192);
+        assert_eq!(effective_max_tokens("vendor/x:free", 512), 512);
+    }
 
     #[test]
     fn definitive_quota_is_recognised() {
