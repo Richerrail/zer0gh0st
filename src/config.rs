@@ -214,7 +214,6 @@ pub fn data_dir() -> PathBuf {
             .unwrap_or_else(|| PathBuf::from(".zer0-data"));
         let _ = fs::create_dir_all(&dir);
         migrate_checkout_data(&crate::mods::project_root(), &dir);
-        migrate_old_data(&dir);
         dir
     })
     .clone()
@@ -270,7 +269,16 @@ fn copy_dir_if_missing(from: &Path, to: &Path) {
     }
 }
 
-/// Migration des données historiquement écrites dans le checkout.
+/// Migration des données historiquement écrites **dans le checkout de
+/// ZER0|GH0ST** (`<projet>/data`, `<projet>/knowledge.db`).
+///
+/// Volontairement limitée à notre propre arbre : l'ancienne application Python
+/// (`~/.local/share/zer0`) est un **produit distinct**, avec son propre format de
+/// conversation et ses personas (`whoami/`). Une migration « ancienne appli →
+/// ZER0|GH0ST » existait et rejouait à chaque lancement : elle réimportait la
+/// conversation Python dès que la nôtre était archivée par `/new`, et faisait
+/// réapparaître les personas supprimés. Supprimée : chaque application reste
+/// chez elle.
 ///
 /// Fonction pure vis-à-vis des chemins (testable avec des dossiers temporaires).
 pub(crate) fn migrate_checkout_data(root: &Path, target: &Path) {
@@ -290,59 +298,6 @@ pub(crate) fn migrate_checkout_data(root: &Path, target: &Path) {
     copy_if_missing(&root.join("knowledge.db"), &target.join("knowledge.db"));
     copy_if_missing(&root.join("knowledge.log"), &target.join("knowledge.log"));
     copy_dir_if_missing(&old.join("personas"), &target.join("personas"));
-}
-
-/// Migration unique depuis les anciens dossiers XDG (`…/zer0gh0st`, `…/zer0`).
-fn migrate_old_data(new: &Path) {
-    static ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-    ONCE.get_or_init(|| {
-        let _ = fs::create_dir_all(new);
-        let olds: Vec<PathBuf> = ["zer0gh0st", "zer0"]
-            .iter()
-            .filter_map(|n| {
-                directories::ProjectDirs::from("", "", n).map(|d| d.data_dir().to_path_buf())
-            })
-            .collect();
-        for old in olds {
-            if old == *new || !old.is_dir() {
-                continue;
-            }
-            let copy = |name: &str| {
-                let s = old.join(name);
-                let d = new.join(name);
-                if s.is_file() && !d.exists() {
-                    let _ = fs::copy(&s, &d);
-                }
-            };
-            copy("conversation.jsonl");
-            copy("memory.jsonl");
-            let op = old.join("personas");
-            let np = new.join("personas");
-            if op.is_dir() {
-                let _ = fs::create_dir_all(&np);
-                if let Ok(rd) = fs::read_dir(&op) {
-                    for e in rd.flatten() {
-                        let d = np.join(e.file_name());
-                        if !d.exists() {
-                            let _ = fs::copy(e.path(), d);
-                        }
-                    }
-                }
-            }
-            if let Ok(rd) = fs::read_dir(&old) {
-                for e in rd.flatten() {
-                    let name = e.file_name();
-                    let ns = name.to_string_lossy();
-                    if ns.starts_with("conversation_") && ns.ends_with(".jsonl") {
-                        let d = new.join(&name);
-                        if !d.exists() {
-                            let _ = fs::copy(e.path(), &d);
-                        }
-                    }
-                }
-            }
-        }
-    });
 }
 
 /// Cache de la config globale, invalidé par le `mtime` du fichier.
