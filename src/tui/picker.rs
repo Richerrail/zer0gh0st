@@ -96,6 +96,13 @@ impl Picker {
     }
 
     pub fn selected(&self) -> Option<&Item> {
+        // `sel` est un index dans `items`, mais il n'a de sens que s'il fait
+        // partie des visibles. Sans ce contrôle, taper une commande inconnue
+        // puis Entrée exécutait le **premier** élément de la liste.
+        let vis = self.visible();
+        if !vis.contains(&self.sel) {
+            return None;
+        }
         self.items.get(self.sel)
     }
 }
@@ -222,11 +229,13 @@ mod tests {
     }
 
     #[test]
-    fn empty_filter_result_is_handled() {
+    fn empty_filter_result_has_no_selection() {
         let mut p = Picker::new("t", items(&["a"]), Kind::Model);
         p.push_char('z');
         assert!(p.visible().is_empty());
         p.move_sel(1); // ne panique pas
-        assert_eq!(p.selected().map(|i| i.id.as_str()), Some("a"));
+                       // Régression : `selected()` renvoyait l'élément 0 malgré un filtre vide,
+                       // donc Entrée exécutait une commande que l'utilisateur n'avait pas choisie.
+        assert!(p.selected().is_none());
     }
 }

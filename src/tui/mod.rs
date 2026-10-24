@@ -1111,6 +1111,21 @@ fn handle_picker_key(
             }
         }
         KeyCode::Char(c) => {
+            // Palette de commandes : l'espace VALIDE la frappe et ferme la
+            // palette. Sans ça, elle avalait la suite et `/whoami zero-vamp`
+            // (ou `/task add …`) était impossible à écrire.
+            let is_command = app
+                .picker
+                .as_ref()
+                .map(|p| p.kind == picker::Kind::Command)
+                .unwrap_or(false);
+            if is_command && c == ' ' {
+                if let Some(p) = app.picker.take() {
+                    let text = palette_text(&p.filter);
+                    input_set(app, format!("{text} "));
+                }
+                return;
+            }
             if let Some(p) = app.picker.as_mut() {
                 p.push_char(c)
             }
@@ -1118,6 +1133,9 @@ fn handle_picker_key(
         KeyCode::Enter => {
             let Some(p) = app.picker.take() else { return };
             let Some(item) = p.selected().cloned() else {
+                // Aucun résultat : on rend la frappe à la saisie au lieu de
+                // l'avaler (et de risquer d'exécuter le premier élément).
+                input_set(app, palette_text(&p.filter));
                 return;
             };
             match p.kind {
@@ -1267,6 +1285,17 @@ fn handle_img(app: &mut App, args: &[&str]) {
 }
 
 /// Ouvre la palette de commandes (filtrable) depuis l'arbre du menu cliquable.
+/// Texte à réinjecter dans la saisie quand on quitte la palette de commandes.
+/// (pur : testable sans interface)
+fn palette_text(filter: &str) -> String {
+    let f = filter.trim();
+    if f.is_empty() {
+        "/".to_string()
+    } else {
+        format!("/{f}")
+    }
+}
+
 fn open_command_palette(app: &mut App) {
     let items: Vec<picker::Item> = menu::flat_commands()
         .into_iter()
@@ -4771,6 +4800,13 @@ mod tests {
         assert_eq!(ctx_window_label(200_000), "200k");
         assert_eq!(ctx_window_label(128_000), "128k");
         assert_eq!(ctx_window_label(500), "500");
+    }
+
+    #[test]
+    fn palette_commit_keeps_the_typed_text() {
+        assert_eq!(palette_text("whoami"), "/whoami");
+        assert_eq!(palette_text("  whoami  "), "/whoami");
+        assert_eq!(palette_text(""), "/");
     }
 
     #[test]
