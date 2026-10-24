@@ -67,6 +67,13 @@ pub struct GlobalConfig {
     /// L'utilisateur a déjà vu l'invitation de connexion GitHub.
     #[serde(default)]
     pub github_prompted: bool,
+    /// Raisonnement (`think`) activé au démarrage (choix de l'assistant).
+    #[serde(default)]
+    pub thinking: bool,
+    /// Shell (`code_exec`) activé au démarrage. `false` par défaut : c'est un
+    /// choix explicite, jamais une conséquence d'une installation.
+    #[serde(default)]
+    pub code_exec: bool,
     /// Assistant de première connexion terminé ?
     #[serde(default)]
     pub setup_done: bool,
@@ -108,6 +115,8 @@ impl Default for GlobalConfig {
             github_client_id: None,
             github_prompt_count: 0,
             github_prompted: false,
+            thinking: false,
+            code_exec: false,
             setup_done: false,
             setup_step: 0,
             gw_admin_token: None,

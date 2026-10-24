@@ -250,6 +250,7 @@ pub async fn run(
     resume: bool,
 ) -> Result<()> {
     let system = crate::enrich_system(system);
+    let g_initial = config::load_global();
     let mut terminal = ratatui::init();
     let _ = crossterm::execute!(
         std::io::stdout(),
@@ -294,7 +295,7 @@ pub async fn run(
         persona: None,
         all_tools,
         read_write: true,
-        code_exec: allow_exec,
+        code_exec: allow_exec || g_initial.code_exec,
         provider_id: settings.provider_id,
         provider_name: settings.provider_name,
         base_url: settings.base_url,
@@ -347,7 +348,7 @@ pub async fn run(
         menu_focus: false,
         menu_sel: 0,
         last_key_event: None,
-        thinking: options.thinking,
+        thinking: options.thinking || g_initial.thinking,
         max_tokens: options.max_tokens,
         temperature: options.temperature,
     };

@@ -425,6 +425,7 @@ fn activate(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
             }
             match crate::commands::provider_use(&id) {
                 Ok(_) => {
+                    app.reload_settings();
                     if let Some(w) = app.wizard.as_mut() {
                         w.provider = Some(id.clone());
                         w.cursor = 0;
@@ -455,6 +456,7 @@ fn activate(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
             };
             match crate::commands::provider_add(&id, Some(&input)) {
                 Ok(_) => {
+                    app.reload_settings();
                     next = Some(Step::Model);
                     clear_input = true;
                     secret = false;
@@ -534,6 +536,9 @@ fn activate(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
         }
         Step::Thinking => {
             app.thinking = cursor == 1;
+            let mut g = config::load_global();
+            g.thinking = app.thinking;
+            let _ = config::save_global(&g);
             if let Some(w) = app.wizard.as_mut() {
                 w.thinking = app.thinking;
                 w.cursor = 0;
@@ -542,6 +547,9 @@ fn activate(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
         }
         Step::Exec => {
             app.code_exec = cursor == 1;
+            let mut g = config::load_global();
+            g.code_exec = app.code_exec;
+            let _ = config::save_global(&g);
             app.refresh_runtime();
             if let Some(w) = app.wizard.as_mut() {
                 w.exec = app.code_exec;
