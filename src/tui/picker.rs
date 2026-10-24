@@ -26,6 +26,8 @@ pub enum Kind {
 
 #[derive(Debug)]
 pub struct Picker {
+    /// Cible optionnelle (ex. nom de rôle pour `/role set <role>`).
+    pub target: Option<String>,
     pub title: String,
     pub items: Vec<Item>,
     pub filter: String,
@@ -37,6 +39,7 @@ impl Picker {
     pub fn new(title: impl Into<String>, items: Vec<Item>, kind: Kind) -> Self {
         let sel = 0;
         Self {
+            target: None,
             title: title.into(),
             items,
             filter: String::new(),

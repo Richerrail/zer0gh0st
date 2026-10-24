@@ -1,6 +1,7 @@
 mod banner;
 mod menu;
 mod picker;
+mod wizard;
 
 use anyhow::Result;
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
@@ -23,6 +24,30 @@ use crate::providers;
 use crate::route;
 use crate::select;
 use crate::tools::ToolSpec;
+
+/// Aide par défaut : uniquement ce dont un nouvel utilisateur a besoin.
+/// Le reste est derrière `/help all` (le pouvoir reste, le bruit part).
+const HELP_SHORT: &str =
+    "Commandes essentielles (tape `/` pour la palette, `/help all` pour tout) :
+
+  /setup              assistant de démarrage (8 étapes)
+  /login  /logout     connexion provider → clé → modèle, ou retrait
+  /provider           choisir un provider (menu)
+  /model              choisir un modèle (menu)
+  /free               modèles gratuits (menu)
+  /role               rôles ; /role set <rôle> ouvre un menu
+  /route              chaîne de bascule si un modèle échoue
+  /think              raisonnement on/off
+  /codeexec           shell on/off (F4) — mêmes droits que toi, sans bac à sable
+  /readwrite          écriture de fichiers on/off (F3)
+  /img <chemin>       joindre une image
+  /kb  /memory  /task outils (base locale, mémoire, tâches)
+  /telegram           bot à distance on/off
+  /help all           la liste complète (26 commandes de plus)
+  /quit  /new  /chats session
+
+  Touches : F2 menu · F3 écriture · F4 shell · F5 aide · F6 sessions
+            F7 relance · F8 0chan · F10 micro · Ctrl+O déplier un outil";
 
 /// Palette inspirée du thème Pi « omarchy-system ».
 mod theme {
@@ -81,6 +106,12 @@ pub struct App {
     pub roles_enabled: bool,
     /// Sélecteur ouvert (`/model` ou `/provider` sans argument).
     pub picker: Option<picker::Picker>,
+    /// Assistant de première connexion (écran plein).
+    pub wizard: Option<wizard::Wizard>,
+    /// Saisie masquée (clé API, jeton) : le buffer reste réel, l'affichage non.
+    pub secret_mode: bool,
+    /// Cible à appliquer quand la liste de modèles arrivera (ex. rôle à définir).
+    pub pending_picker_target: Option<String>,
     /// Image en attente, jointe au prochain message envoyé (data URL).
     pub pending_image: Option<String>,
     pub pending_image_name: Option<String>,
@@ -274,6 +305,9 @@ pub async fn run(
         last_role: String::new(),
         roles_enabled: config::roles_enabled(),
         picker: None,
+        wizard: None,
+        secret_mode: false,
+        pending_picker_target: None,
         pending_image: None,
         pending_image_name: None,
         vision_models: Vec::new(),
@@ -326,6 +360,16 @@ pub async fn run(
     if let Some(msg) = config::corruption() {
         app.messages
             .push(ChatMessage::notice(format!("⚠ configuration : {msg}")));
+    }
+
+    // Première connexion (ou assistant interrompu) : on prend l'utilisateur par
+    // la main. `--resume`/`--once` ne sont pas concernés (headless).
+    {
+        let g = config::load_global();
+        if !g.setup_done {
+            let step = wizard::Step::from_idx(g.setup_step);
+            wizard::start(&mut app, &ui_tx, step);
+        }
     }
 
     // Démarrage = NOUVELLE conversation (l'ancienne est archivée → F6).
@@ -646,14 +690,25 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
         }
         "/think" => {
             app.thinking = !app.thinking;
-            let state = if app.thinking { "ON (nettement plus lent)" } else { "OFF" };
-            app.messages.push(ChatMessage::notice(format!("Raisonnement: {state}")));
+            let state = if app.thinking {
+                "ON (nettement plus lent)"
+            } else {
+                "OFF"
+            };
+            app.messages
+                .push(ChatMessage::notice(format!("Raisonnement: {state}")));
         }
         "/tools" => {
             let mut s = String::from("Outils:\n");
             for t in &app.all_tools {
-                let on = (t.name != "text_editor" || app.read_write) && (t.name != "code_exec" || app.code_exec);
-                s.push_str(&format!("  [{}] {} — {}\n", if on { "on " } else { "off" }, t.name, t.description));
+                let on = (t.name != "text_editor" || app.read_write)
+                    && (t.name != "code_exec" || app.code_exec);
+                s.push_str(&format!(
+                    "  [{}] {} — {}\n",
+                    if on { "on " } else { "off" },
+                    t.name,
+                    t.description
+                ));
             }
             app.messages.push(ChatMessage::notice(s));
         }
@@ -679,7 +734,8 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
             if app.streaming {
                 crate::cancel::request();
             } else {
-                app.messages.push(ChatMessage::notice("Rien à interrompre."));
+                app.messages
+                    .push(ChatMessage::notice("Rien à interrompre."));
             }
         }
         "/context" => handle_context(app),
@@ -721,8 +777,9 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
         "/menu" => {
             app.menu_focus = true;
             app.menu_sel = 0;
-            app.messages
-                .push(ChatMessage::notice("Menu : ↑↓ naviguer · Entrée choisir (Esc pour sortir)"));
+            app.messages.push(ChatMessage::notice(
+                "Menu : ↑↓ naviguer · Entrée choisir (Esc pour sortir)",
+            ));
         }
         "/readwrite" => {
             match args.first().copied() {
@@ -763,8 +820,10 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
         "/jimmy" => {
             let task = args.join(" ");
             if task.is_empty() {
-                app.messages
-                    .push(ChatMessage::notice(format!("🐌 Jimmy : {}", crate::jimmy::reply())));
+                app.messages.push(ChatMessage::notice(format!(
+                    "🐌 Jimmy : {}",
+                    crate::jimmy::reply()
+                )));
             } else {
                 app.messages.push(ChatMessage::notice(format!(
                     "🐌 Jimmy se gratte la tête… (tâche : « {task} »)"
@@ -797,9 +856,8 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
                 app.messages.push(ChatMessage::notice(format!(
                     "🐌 Jimmy devait « {task} » → il a répondu : « {jab} »"
                 )));
-                app.messages.push(ChatMessage::notice(format!(
-                    "⚡ provocation → rôle {role}"
-                )));
+                app.messages
+                    .push(ChatMessage::notice(format!("⚡ provocation → rôle {role}")));
                 let prompt = format!(
                     "Le cancre Jimmy devait « {task} » et a seulement répondu : « {jab} ». \
                      Une IA compétente ferait mieux. Fais le travail correctement : {task}"
@@ -824,8 +882,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
                 let ui = ui_tx.clone();
                 tokio::spawn(async move {
                     let res = crate::agent::subagent::run_subagent(
-                        endpoints, system, prompt, tools, options,
-                        None,
+                        endpoints, system, prompt, tools, options, None,
                     )
                     .await;
                     let _ = ui.send(UiEvent::Info(format!("⚡ Zer0 (piqué au vif) :\n{res}")));
@@ -849,16 +906,32 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
                 ))),
             }
         }
-        "/free" => cmd_list_models(app, ui_tx, true),
+        "/free" => cmd_pick_free(ui_tx),
         "/select" => {
             let problem = args.join(" ");
             if problem.trim().is_empty() {
-                app.messages.push(ChatMessage::notice("usage: /select <problème à résoudre>"));
+                app.messages
+                    .push(ChatMessage::notice("usage: /select <problème à résoudre>"));
             } else {
                 cmd_select(&problem, ui_tx);
             }
         }
-        "/help" => app.messages.push(ChatMessage::notice(
+        "/help" if args.first().copied() != Some("all") => {
+            app.messages.push(ChatMessage::notice(HELP_SHORT))
+        }
+        "/setup" => wizard::start(app, ui_tx, wizard::Step::Inference),
+        "/login" => wizard::start(app, ui_tx, wizard::Step::Provider),
+        "/logout" => match crate::commands::provider_remove(&app.provider_id) {
+            Ok(lines) => {
+                for line in lines {
+                    app.messages.push(ChatMessage::notice(line));
+                }
+                app.reload_settings();
+            }
+            Err(e) => app.messages.push(ChatMessage::notice(format!("{e}"))),
+        },
+        "/help" if args.first().copied() == Some("all") => {
+            app.messages.push(ChatMessage::notice(
             "Commandes:\n\
              /help                      cette aide\n\
              /tools                     liste des outils\n\
@@ -879,7 +952,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
              /models [free]             liste les modèles du provider\n\
              /ctx [N|1M|auto]           contexte du modèle (auto/override)\n\
              /telegram [on|off]         bot Telegram à distance (long polling)\n\
-             /free                      liste les modèles gratuits\n\
+             /free                      menu des modèles gratuits\n\
              /quota                     usage des modèles (appels, 429, solde de clé)\n\
              /vote [up|down|status]     vote pour zer0gh0st (👍 = une star GitHub)\n\
              /route [list|add|clear]    chaîne de bascule (failover)\n\
@@ -888,7 +961,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
              /role [list]               rôles et modèles associés\n\
              /role off|on               off = un seul modèle, sans bascule ; on = routage\n\
              /role set <role> <p>/<m>   associe un modèle à un rôle\n\
-             /role use <role>|auto      force un rôle ou repasse en auto\n\
+             /role force <role>|unforce force un rôle ou repasse en auto\n\
              /project                   config du projet courant\n\
              /memory                    entrées + honnêteté du store\n\
              /embeddings set <p> <m>    embedder de la mémoire sémantique\n\
@@ -918,8 +991,11 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
              /new                       efface la conversation (fichier inclus)\n\
              /history                   montre la conversation persistée\n\
              /quit                      quitter",
-        )),
-        other => app.messages.push(ChatMessage::notice(format!("Commande inconnue: {other}"))),
+            ));
+        }
+        other => app
+            .messages
+            .push(ChatMessage::notice(format!("Commande inconnue: {other}"))),
     }
 }
 
@@ -1044,7 +1120,24 @@ fn handle_picker_key(
                 return;
             };
             match p.kind {
-                picker::Kind::Model => set_model(app, &item.id, ui_tx),
+                picker::Kind::Model => {
+                    if let Some(role) = p.target.clone() {
+                        // `/role set <rôle>` sans modèle : le menu fournit le modèle.
+                        let route = format!("{}/{}", app.provider_id, item.id);
+                        match crate::commands::role_set(&role, &route) {
+                            Ok(lines) => {
+                                for line in lines {
+                                    app.messages.push(ChatMessage::notice(line));
+                                }
+                            }
+                            Err(e) => app
+                                .messages
+                                .push(ChatMessage::notice(format!("Erreur: {e}"))),
+                        }
+                    } else {
+                        set_model(app, &item.id, ui_tx)
+                    }
+                }
                 picker::Kind::Provider => set_provider(app, &item.id, ui_tx),
                 picker::Kind::Command => {
                     // Une commande finissant par un espace attend un argument :
@@ -1190,7 +1283,29 @@ fn open_command_palette(app: &mut App) {
 }
 
 /// Récupère la liste des modèles du provider actif puis ouvre le sélecteur.
-fn cmd_pick_model(ui_tx: &UnboundedSender<UiEvent>) {
+/// `/free` : menu des modèles gratuits du provider (au lieu d'une liste texte).
+fn cmd_pick_free(ui_tx: &UnboundedSender<UiEvent>) {
+    let settings = config::resolve();
+    let Some(provider) = providers::find(&settings.provider_id) else {
+        return;
+    };
+    let key = settings.api_key.clone();
+    let ui = ui_tx.clone();
+    tokio::spawn(async move {
+        match models::list(&http_client::HTTP_CLIENT, &provider, key.as_deref()).await {
+            Ok(list) => {
+                let free: Vec<_> = list.into_iter().filter(models::is_free).collect();
+                let _ = ui.send(UiEvent::FreeModels(free));
+            }
+            Err(e) => {
+                let _ = ui.send(UiEvent::Info(format!("Erreur modèles :free : {e}")));
+            }
+        }
+    });
+}
+
+fn cmd_pick_model(app: &mut App, ui_tx: &UnboundedSender<UiEvent>, target: Option<String>) {
+    app.pending_picker_target = target;
     let settings = config::resolve();
     let Some(provider) = providers::find(&settings.provider_id) else {
         return;
@@ -1220,7 +1335,7 @@ fn handle_model(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) 
                 "Modèle actuel: {} — sélection ci-dessous",
                 app.model
             )));
-            cmd_pick_model(ui_tx);
+            cmd_pick_model(app, ui_tx, None);
             return;
         }
         Some(m) => Some(m),
@@ -1239,9 +1354,12 @@ fn handle_model(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) 
                 Err(e) => app.messages.push(ChatMessage::notice(format!("❌ {e}"))),
             }
         }
-        None => app
-            .messages
-            .push(ChatMessage::notice("usage: /model use <id>")),
+        None => {
+            // Sans identifiant : menu sélectionnable (plus de saisie à l'aveugle).
+            cmd_pick_model(app, ui_tx, None);
+            app.messages
+                .push(ChatMessage::notice("Choisis un modèle dans la liste."));
+        }
     }
 }
 
@@ -1279,10 +1397,17 @@ fn handle_role(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
         Some("set") => {
             let role = args.get(1).copied().unwrap_or("");
             let route_s = args.get(2).copied().unwrap_or("");
-            if role.is_empty() || route_s.is_empty() {
+            if role.is_empty() {
                 app.messages.push(ChatMessage::notice(
-                    "usage: /role set <role> <provider>/<model>",
+                    "usage: /role set <role>  (sans modèle : un menu s'ouvre)",
                 ));
+            } else if route_s.is_empty() {
+                // Menu sélectionnable : plus besoin de connaître la syntaxe
+                // `provider/model` pour associer un modèle à un rôle.
+                cmd_pick_model(app, ui_tx, Some(role.to_string()));
+                app.messages.push(ChatMessage::notice(format!(
+                    "Choisis le modèle du rôle `{role}`."
+                )));
             } else {
                 match crate::commands::role_set(role, route_s) {
                     Ok(lines) => {
@@ -2760,6 +2885,25 @@ fn handle_input(ev: Event, app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
     }
     // ================================================================================
 
+    // Assistant ouvert : il capte tout (clavier + collage), y compris le collage
+    // des clés API (le presse-papier est indispensable pour une clé).
+    if app.wizard.is_some() {
+        match ev {
+            Event::Key(k) => wizard::handle_key(k, app, ui_tx),
+            Event::Paste(text)
+                if app
+                    .wizard
+                    .as_ref()
+                    .map(|w| w.step.needs_text())
+                    .unwrap_or(false) =>
+            {
+                input_insert_str(app, &text);
+            }
+            _ => {}
+        }
+        return;
+    }
+
     // Sélecteur ouvert : il capte tout le clavier.
     if let Event::Key(key) = ev {
         if app.picker.is_some() {
@@ -3174,6 +3318,31 @@ fn handle_ui(ev: UiEvent, app: &mut App) {
                 app.reasoning_text.push_str(&t);
             }
         }
+        UiEvent::WizardModels(list) => {
+            wizard::on_models(app, list);
+        }
+        UiEvent::FreeModels(list) => {
+            let items: Vec<picker::Item> = list
+                .into_iter()
+                .map(|m| picker::Item {
+                    id: m.id.clone(),
+                    label: m.id,
+                    note: m
+                        .context_length
+                        .map(|c| format!("ctx {c}"))
+                        .unwrap_or_default(),
+                })
+                .collect();
+            if items.is_empty() {
+                app.messages
+                    .push(ChatMessage::notice("Aucun modèle :free pour ce provider."));
+            } else {
+                let target = app.pending_picker_target.take();
+                let mut p = picker::Picker::new("Modèles :free", items, picker::Kind::Model);
+                p.target = target;
+                app.picker = Some(p);
+            }
+        }
         UiEvent::ModelList(list) => {
             // Retient qui accepte les images (garde-fou de /img)…
             app.vision_models = list
@@ -3288,6 +3457,12 @@ fn handle_ui(ev: UiEvent, app: &mut App) {
 
 fn draw(f: &mut Frame, app: &mut App) {
     let area = f.area();
+
+    // Assistant de première connexion : plein écran, avant tout le reste.
+    if app.wizard.is_some() {
+        wizard::draw(f, area, app);
+        return;
+    }
 
     // Full-screen modes.
     match app.mode {
@@ -3971,7 +4146,12 @@ fn draw_input(f: &mut Frame, area: Rect, app: &App) {
     let prompt = "❯ ";
     let pad = prompt.chars().count();
     let inner_w = (area.width as usize).saturating_sub(pad).max(1);
-    let (text_lines, crow, ccol) = wrap_with_cursor(&app.input, inner_w, app.cursor);
+    let shown: String = if app.secret_mode {
+        "●".repeat(app.input.chars().count())
+    } else {
+        app.input.clone()
+    };
+    let (text_lines, crow, ccol) = wrap_with_cursor(&shown, inner_w, app.cursor);
     let max_lines = area.height.max(1) as usize;
     // Défilement : garder le curseur visible.
     let mut start = text_lines.len().saturating_sub(max_lines);
@@ -4452,6 +4632,9 @@ mod tests {
             last_role: String::new(),
             roles_enabled: true,
             picker: None,
+            wizard: None,
+            secret_mode: false,
+            pending_picker_target: None,
             pending_image: None,
             pending_image_name: None,
             vision_models: vec![],

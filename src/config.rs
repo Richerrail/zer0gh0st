@@ -67,6 +67,12 @@ pub struct GlobalConfig {
     /// L'utilisateur a déjà vu l'invitation de connexion GitHub.
     #[serde(default)]
     pub github_prompted: bool,
+    /// Assistant de première connexion terminé ?
+    #[serde(default)]
+    pub setup_done: bool,
+    /// Étape de reprise de l'assistant (0 = pas commencé, 8 = terminé).
+    #[serde(default)]
+    pub setup_step: u8,
     /// Jeton exigé par les endpoints `/admin/*` de zer0-gw (en-tête `x-zer0-admin`).
     /// La variable d'environnement `ZER0_GW_ADMIN_TOKEN` est prioritaire.
     #[serde(default)]
@@ -102,6 +108,8 @@ impl Default for GlobalConfig {
             github_client_id: None,
             github_prompt_count: 0,
             github_prompted: false,
+            setup_done: false,
+            setup_step: 0,
             gw_admin_token: None,
         }
     }
@@ -340,6 +348,14 @@ fn cache() -> &'static ConfigCache {
     C.get_or_init(|| std::sync::Mutex::new(None))
 }
 
+/// Une config qui a déjà un provider/modèle vient d'un utilisateur existant :
+/// on ne lui impose pas l'assistant de première connexion.
+fn apply_setup_migration(cfg: &mut GlobalConfig) {
+    if !cfg.setup_done && (cfg.provider.is_some() || cfg.model.is_some()) {
+        cfg.setup_done = true;
+    }
+}
+
 pub fn load_global() -> GlobalConfig {
     let path = global_path();
     let stamp = fs::metadata(&path).and_then(|m| m.modified()).ok();
@@ -351,6 +367,7 @@ pub fn load_global() -> GlobalConfig {
         }
     }
     let mut cfg: GlobalConfig = read_toml(&path).unwrap_or_default();
+    apply_setup_migration(&mut cfg);
     if cfg.schema_version == 0 {
         // Ancien fichier : on adopte la version courante en mémoire ; elle sera
         // écrite au prochain `save_global`.
@@ -718,6 +735,25 @@ fn write_toml<T: Serialize>(p: &Path, v: &T) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn existing_config_skips_the_wizard() {
+        let mut cfg = GlobalConfig::default();
+        assert!(!cfg.setup_done);
+        cfg.model = Some("minimax/foo".into());
+        apply_setup_migration(&mut cfg);
+        assert!(
+            cfg.setup_done,
+            "un utilisateur existant ne doit pas voir /setup"
+        );
+
+        let mut fresh = GlobalConfig::default();
+        apply_setup_migration(&mut fresh);
+        assert!(
+            !fresh.setup_done,
+            "une config vierge doit lancer l'assistant"
+        );
+    }
 
     #[test]
     fn schema_version_is_versioned() {
