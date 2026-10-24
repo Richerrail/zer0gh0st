@@ -45,12 +45,16 @@ pub enum ChatError {
     },
     /// Failed after streaming started; tokens may already be visible.
     Mid(anyhow::Error),
+    /// Quota définitif (journalier / crédits) : réessayer ou basculer vers un
+    /// autre modèle `:free` du même compte ne sert à rien.
+    Quota { detail: String },
 }
 
 impl std::fmt::Display for ChatError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ChatError::Setup { err, .. } | ChatError::Mid(err) => write!(f, "{err:#}"),
+            ChatError::Quota { detail } => write!(f, "quota épuisé : {detail}"),
         }
     }
 }
@@ -169,6 +173,11 @@ impl ApiClient {
                     .unwrap_or(2u64.pow(3 - retries));
                 let text = resp.text().await.unwrap_or_default();
                 crate::quota::record_rate_limited(&quota_label, &text);
+                if let Some(detail) = definitive_quota(&text) {
+                    // Inutile de réessayer : attendre la réinitialisation ou
+                    // changer de modèle gratuit ne rendra pas de quota.
+                    return Err(ChatError::Quota { detail });
+                }
                 if retries == 0 {
                     return Err(ChatError::Setup {
                         err: anyhow!("429: {}", text.chars().take(200).collect::<String>()),
@@ -417,6 +426,26 @@ impl ApiClient {
     }
 }
 
+/// Détecte un 429 **définitif** (quota journalier, crédits épuisés) d'après le
+/// corps renvoyé par le provider. Retourne un message court, ou `None` si la
+/// limite est probablement passagère (rafale par minute).
+fn definitive_quota(body: &str) -> Option<String> {
+    let b = body.to_ascii_lowercase();
+    let daily = b.contains("free-models-per-day")
+        || b.contains("per-day")
+        || b.contains("per day")
+        || b.contains("daily limit")
+        || b.contains("daily quota")
+        || b.contains("quota exceeded")
+        || b.contains("insufficient credits")
+        || b.contains("not enough credits");
+    if !daily {
+        return None;
+    }
+    let msg: String = body.chars().filter(|c| !c.is_control()).take(220).collect();
+    Some(msg.trim().to_string())
+}
+
 /// En-têtes d'attribution envoyés à OpenRouter (tableau de bord + `HTTP-Referer`).
 ///
 /// La version précédente avait `zer0gh0st/0.5.5` et `github.com/richerrail/...`
@@ -519,6 +548,19 @@ fn merge_call(partial: &mut Vec<PartialCall>, delta: ToolCallDelta) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn definitive_quota_is_recognised() {
+        assert!(definitive_quota(
+            r#"{"error":{"message":"Rate limit exceeded: free-models-per-day"}}"#
+        )
+        .is_some());
+        assert!(definitive_quota("daily limit reached").is_some());
+        assert!(definitive_quota("Insufficient credits").is_some());
+        // Une rafale par minute n'est PAS définitive : on réessaie.
+        assert!(definitive_quota("rate limit exceeded, retry in 3s").is_none());
+        assert!(definitive_quota("").is_none());
+    }
 
     #[test]
     fn markdown_and_indentation_are_preserved() {

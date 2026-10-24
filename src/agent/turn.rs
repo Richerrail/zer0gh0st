@@ -59,6 +59,15 @@ pub async fn run_turn_budgeted(
         return;
     }
 
+    // Les modèles `:free` ont un quota de requêtes serré : un tour ne doit pas
+    // consommer 8 appels. On plafonne à 4 itérations.
+    let free_chain = endpoints.iter().any(|e| e.model.contains(":free"));
+    let max_iterations = if free_chain {
+        max_iterations.min(4)
+    } else {
+        max_iterations
+    };
+
     crate::cancel::clear();
     // Budget partagé par tous les appels LLM de ce tour, sous-agents `0box`
     // compris. Le compteur n'est remis à zéro qu'au premier niveau.
@@ -105,6 +114,17 @@ pub async fn run_turn_budgeted(
                 break 'endpoints;
             }
             Err(ChatError::Setup { err, status }) => {
+                // Un 429 sur un modèle gratuit est un plafond de compte : la
+                // chaîne de bascule est faite des mêmes modèles `:free`.
+                if status == Some(429) && ep.model.contains(":free") {
+                    route::mark_failed(&ep.label);
+                    let _ = ui.send(UiEvent::Error(format!(
+                        "limite atteinte sur {} ({err})\n\
+                         Les modèles `:free` partagent le quota du compte : pas de bascule.",
+                        ep.label
+                    )));
+                    return;
+                }
                 // Le backoff 429 est fait **une seule fois**, dans le client
                 // (`llm::llama`, qui honore `Retry-After`). Ici, un 429 signifie
                 // donc « essais épuisés » : on bascule d'endpoint au lieu
@@ -123,6 +143,18 @@ pub async fn run_turn_budgeted(
                 )));
                 last_err = format!("{err}");
                 continue 'endpoints;
+            }
+            Err(ChatError::Quota { detail }) => {
+                // Quota de compte : basculer vers un autre `:free` ne rend pas
+                // de quota, et réessayer ne fait que retarder le message.
+                route::mark_failed(&ep.label);
+                let _ = ui.send(UiEvent::Error(format!(
+                    "quota épuisé sur {} — {detail}\n\
+                     Attends la réinitialisation, ajoute du crédit chez le provider, \
+                     ou passe en local (`/provider use local`).",
+                    ep.label
+                )));
+                return;
             }
             Err(ChatError::Mid(e)) => {
                 let _ = ui.send(UiEvent::Error(format!(

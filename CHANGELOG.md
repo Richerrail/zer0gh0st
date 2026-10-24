@@ -1,3 +1,17 @@
+## v0.6.4 — Quotas gratuits et palette de commandes (2026-10-24)
+
+- **429 définitif reconnu** : un `free-models-per-day` / quota journalier / crédits épuisés ne
+  déclenche plus 3 réessais puis une bascule. Message immédiat, avec la marche à suivre.
+- **Pas de bascule sur 429 d'un modèle `:free`** : tous partagent le quota du compte, changer
+  de modèle ne rend pas de quota — ça ne faisait que multiplier les requêtes.
+- **Budget d'itérations réduit** à 4 (au lieu de 8) quand la chaîne contient un `:free`.
+- **Palette de commandes** : `Espace` valide la frappe et rend la main à la saisie, `Entrée`
+  sans résultat réinjecte le texte tapé. `/whoami zero-vamp` et `/task add …` sont enfin
+  saisissables. `Picker::selected()` respecte le filtre (avant, Entrée pouvait exécuter le
+  premier élément de la liste).
+- Personas compactées côté données (8 Ko → < 1 Ko), avec une section « Exécution » qui
+  rappelle de répondre d'abord et de n'appeler un outil que si nécessaire.
+
 ## v0.6.3 — Assistant de première connexion (2026-10-23)
 
 - **Assistant en 8 étapes** (`/setup`, proposé au premier lancement) : inférence (cloud/local),

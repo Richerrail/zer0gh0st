@@ -110,6 +110,11 @@ pub async fn compact_now(
             Err(ChatError::Mid(e)) => {
                 last_err = format!("{}: {e}", ep.label);
             }
+            // Quota de compte : passer au modèle suivant ne changerait rien.
+            Err(ChatError::Quota { detail }) => {
+                last_err = format!("{}: quota épuisé — {detail}", ep.label);
+                break;
+            }
         }
     }
 
