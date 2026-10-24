@@ -17,6 +17,25 @@ const MAX_CONTINUATIONS: u32 = 4;
 /// The first model call fails over across endpoints (setup failures only),
 /// with exponential backoff on HTTP 429. Once an endpoint answers, the rest
 /// of the turn sticks to it.
+/// Une erreur de *setup* justifie-t-elle de basculer vers l'endpoint suivant ?
+///
+/// Oui pour le réseau et les statuts qui peuvent dépendre du provider
+/// (clé, crédit, accès, modèle, indisponibilité). Non pour une erreur
+/// **déterministe** (400/422) — sauf si elle parle d'outils, auquel cas un autre
+/// modèle peut les supporter.
+fn should_failover(status: Option<u16>, err: &str) -> bool {
+    match status {
+        None => true,
+        Some(400 | 422) => {
+            let e = err.to_ascii_lowercase();
+            e.contains("tool") || e.contains("function") || e.contains("not support")
+        }
+        Some(408 | 409 | 425 | 429) => true,
+        Some(s) if (500..=599).contains(&s) => true,
+        Some(_) => true,
+    }
+}
+
 pub async fn run_turn(
     endpoints: Vec<Endpoint>,
     system: String,
@@ -137,6 +156,16 @@ pub async fn run_turn_budgeted(
                     Some(404) => " — modèle ou endpoint introuvable",
                     _ => "",
                 };
+                if !should_failover(status, &err.to_string()) {
+                    // Erreur déterministe : elle se reproduira à l'identique sur
+                    // tous les endpoints. Basculer ne ferait que consommer du
+                    // quota et du temps.
+                    let _ = ui.send(UiEvent::Error(format!(
+                        "{} : erreur déterministe{hint} ({err}) — pas de bascule",
+                        ep.label
+                    )));
+                    return;
+                }
                 let _ = ui.send(UiEvent::Info(format!(
                     "⚠ {} indisponible{hint} ({err}) → endpoint suivant",
                     ep.label
@@ -265,4 +294,25 @@ pub async fn run_turn_budgeted(
     }
 
     let _ = ui.send(UiEvent::TurnComplete(messages));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_failover;
+
+    #[test]
+    fn failover_is_selective() {
+        // réseau : on bascule
+        assert!(should_failover(None, "connexion refusée"));
+        // dépend du provider : on bascule
+        for s in [401u16, 402, 403, 404, 408, 409, 429, 500, 502, 503] {
+            assert!(should_failover(Some(s), "n'importe quoi"), "statut {s}");
+        }
+        // déterministe : on ne bascule pas
+        assert!(!should_failover(Some(400), "invalid request: bad json"));
+        assert!(!should_failover(Some(422), "unprocessable entity"));
+        // … sauf si un autre modèle peut supporter les outils
+        assert!(should_failover(Some(400), "model does not support tools"));
+        assert!(should_failover(Some(400), "function calling unsupported"));
+    }
 }
