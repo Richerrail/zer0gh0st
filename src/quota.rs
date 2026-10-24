@@ -8,8 +8,11 @@
 //! quand un fournisseur les révèle au passage.
 //!
 //! Ce qui n'est pas observé n'est pas affiché (principe d'honnêteté du projet).
-//! Les compteurs vivent en mémoire : ils repartent à zéro à chaque lancement
-//! (comme la mémoire d'échecs de `route.rs`).
+//! Les compteurs de session vivent en mémoire ; un **cumul par jour** est
+//! persisté dans `<données>/quota.json` (14 jours), pour que `/quota` et
+//! `zer0 quota` montrent ce qui a réellement été consommé aujourd'hui — même
+//! après un redémarrage. Sans cette persistance, un 429 journalier était
+//! indiscernable d'une rafale passagère.
 
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
@@ -28,6 +31,133 @@ struct Usage {
     remain: Option<u64>,
     /// Message d'erreur tronqué du dernier 429 (ex. `free-models-per-day`).
     note: Option<String>,
+}
+
+/// Cumul persisté pour un endpoint, un jour donné.
+#[derive(Default, Clone, serde::Serialize, serde::Deserialize)]
+struct DayLabel {
+    #[serde(default)]
+    ok: u64,
+    #[serde(default)]
+    limited: u64,
+    #[serde(default)]
+    limit: Option<u64>,
+    #[serde(default)]
+    remain: Option<u64>,
+    #[serde(default)]
+    note: Option<String>,
+}
+
+/// Fichier `quota.json` : `jours -> endpoint -> cumul`.
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct Store {
+    #[serde(default)]
+    days: BTreeMap<String, BTreeMap<String, DayLabel>>,
+}
+
+/// Jours conservés (au-delà, purge).
+const KEEP_DAYS: usize = 14;
+
+fn store_path() -> std::path::PathBuf {
+    crate::config::data_dir().join("quota.json")
+}
+
+fn today() -> String {
+    crate::platform::now()
+        .split_whitespace()
+        .next()
+        .unwrap_or("inconnu")
+        .to_string()
+}
+
+fn load_from(path: &std::path::Path) -> Store {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn save_to(path: &std::path::Path, st: &Store) {
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Ok(json) = serde_json::to_string_pretty(st) {
+        let _ = std::fs::write(path, json);
+    }
+}
+
+/// Purge les jours les plus anciens (fonction pure, testable).
+fn prune(st: &mut Store, keep: usize) {
+    let mut days: Vec<String> = st.days.keys().cloned().collect();
+    if days.len() <= keep {
+        return;
+    }
+    days.sort();
+    for d in &days[..days.len() - keep] {
+        st.days.remove(d);
+    }
+}
+
+fn bump_ok(st: &mut Store, date: &str, label: &str) {
+    st.days
+        .entry(date.to_string())
+        .or_default()
+        .entry(label.to_string())
+        .or_default()
+        .ok += 1;
+}
+
+fn bump_429(st: &mut Store, date: &str, label: &str, note: Option<&str>) {
+    let e = st
+        .days
+        .entry(date.to_string())
+        .or_default()
+        .entry(label.to_string())
+        .or_default();
+    e.limited += 1;
+    if let Some(n) = note {
+        e.note = Some(n.chars().take(120).collect::<String>().replace('\n', " "));
+    }
+}
+
+fn bump_limits(st: &mut Store, date: &str, label: &str, limit: Option<u64>, remain: Option<u64>) {
+    let e = st
+        .days
+        .entry(date.to_string())
+        .or_default()
+        .entry(label.to_string())
+        .or_default();
+    if limit.is_some() {
+        e.limit = limit;
+    }
+    if remain.is_some() {
+        e.remain = remain;
+    }
+}
+
+fn persisted() -> &'static Mutex<Store> {
+    static S: OnceLock<Mutex<Store>> = OnceLock::new();
+    S.get_or_init(|| Mutex::new(load_from(&store_path())))
+}
+
+/// Écrit le cumul sur disque, au plus une fois toutes les 2 s (force = 429).
+fn maybe_persist(force: bool) {
+    static LAST: Mutex<Option<Instant>> = Mutex::new(None);
+    let now = Instant::now();
+    {
+        let Ok(mut last) = LAST.lock() else { return };
+        if !force {
+            if let Some(t) = *last {
+                if now.duration_since(t).as_secs() < 2 {
+                    return;
+                }
+            }
+        }
+        *last = Some(now);
+    }
+    if let Ok(st) = persisted().lock() {
+        save_to(&store_path(), &st);
+    }
 }
 
 fn registry() -> &'static Mutex<BTreeMap<String, Usage>> {
@@ -65,6 +195,12 @@ pub fn record_success(label: &str) {
         // Un succès après un 429 prouve que le quota n'est pas épuisé.
         u.last_429 = None;
     }
+    let date = today();
+    if let Ok(mut st) = persisted().lock() {
+        bump_ok(&mut st, &date, label);
+        prune(&mut st, KEEP_DAYS);
+    }
+    maybe_persist(false);
 }
 
 /// À appeler sur chaque 429. `body` est le corps brut de la réponse ; les
@@ -80,8 +216,15 @@ pub fn record_rate_limited(label: &str, body: &str) {
         if remain.is_some() {
             u.remain = remain;
         }
-        u.note = note;
+        u.note = note.clone();
     }
+    let date = today();
+    if let Ok(mut st) = persisted().lock() {
+        bump_429(&mut st, &date, label, note.as_deref());
+        prune(&mut st, KEEP_DAYS);
+    }
+    // Un 429 est l'information la plus utile : on l'écrit tout de suite.
+    maybe_persist(true);
 }
 
 /// Limites révélées par les **en-têtes** d'une réponse (200 ou 429) — quand le
@@ -99,6 +242,11 @@ pub fn record_limits(label: &str, limit: Option<u64>, remain: Option<u64>) {
             u.remain = remain;
         }
     }
+    let date = today();
+    if let Ok(mut st) = persisted().lock() {
+        bump_limits(&mut st, &date, label, limit, remain);
+    }
+    maybe_persist(false);
 }
 
 /// Lit un compteur dans les en-têtes (plusieurs noms acceptés, insensible à la casse).
@@ -189,16 +337,15 @@ pub fn report() -> String {
         return "Registre d'usage indisponible.".into();
     };
     if m.is_empty() {
-        return "Aucun appel de modèle dans cette session.\n\
-                (les compteurs vivent dans le process en cours — la TUI les \
-                accumule pendant la session ; ce binaire lancé à part part d'une \
-                page blanche)\n\n\
-                /quota n'affiche que ce que Zer0 a réellement observé — appels \
-                réussis, 429, limites révélées par le fournisseur. Les API ne \
-                publient pas leur quota (Cline : rien ; OpenRouter : seulement \
-                dans le corps des 429) : ce qui n'est pas observé n'est pas \
-                inventé."
-            .into();
+        let mut s = String::from("Aucun appel de modèle dans cette session.\n");
+        s.push_str(&today_section());
+        s.push_str(
+            "\n/quota n'affiche que ce que Zer0 a réellement observé — appels réussis, 429, \
+             limites révélées par le fournisseur. Les API ne publient pas leur quota \
+             (Cline : rien ; OpenRouter : seulement dans le corps des 429) : ce qui n'est \
+             pas observé n'est pas inventé.",
+        );
+        return s;
     }
     let mut s = String::from("Usage observé par Zer0 (cette session) :\n");
     for (label, u) in m.iter() {
@@ -245,11 +392,41 @@ pub fn report() -> String {
         }
         s.push_str(&format!("      {}\n", details.join(" · ")));
     }
+    s.push_str(&today_section());
     s.push_str(
-        "\nHonnêteté : compteurs locaux à la session (zéro au lancement). « restant » \
-         n'apparaît que si le fournisseur le révèle (en-têtes ou corps d'un 429) — \
-         sinon seul l'observé est affiché.",
+        "\nHonnêteté : la session est remise à zéro au lancement ; le cumul du jour \
+         vient de `quota.json` (14 jours). « restant » n'apparaît que si le fournisseur \
+         le révèle (en-têtes ou corps d'un 429) — sinon seul l'observé est affiché.",
     );
+    s
+}
+
+/// Section « aujourd'hui » issue du cumul persisté (tous processus confondus).
+fn today_section() -> String {
+    let date = today();
+    let Ok(st) = persisted().lock() else {
+        return String::new();
+    };
+    let Some(labels) = st.days.get(&date) else {
+        return String::new();
+    };
+    if labels.is_empty() {
+        return String::new();
+    }
+    let mut s = format!("\nAujourd'hui ({date}, cumul persisté) :\n");
+    for (label, d) in labels {
+        let mut parts = vec![format!("{} ok", d.ok)];
+        if d.limited > 0 {
+            parts.push(format!("{} × 429", d.limited));
+        }
+        if let Some(r) = fmt_remaining(d.limit, d.remain) {
+            parts.push(r);
+        }
+        if let Some(n) = &d.note {
+            parts.push(n.clone());
+        }
+        s.push_str(&format!("  {label} : {}\n", parts.join(" · ")));
+    }
     s
 }
 
@@ -306,6 +483,51 @@ pub fn parse_auth_key(v: &serde_json::Value) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn store_accumulates_prunes_and_roundtrips() {
+        let dir = std::env::temp_dir().join(format!("zer0-quota-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("quota.json");
+
+        let mut st = Store::default();
+        bump_ok(&mut st, "2026-10-24", "openrouter/x:free");
+        bump_ok(&mut st, "2026-10-24", "openrouter/x:free");
+        bump_429(
+            &mut st,
+            "2026-10-24",
+            "openrouter/x:free",
+            Some("free-models-per-day"),
+        );
+        bump_limits(
+            &mut st,
+            "2026-10-24",
+            "openrouter/x:free",
+            Some(50),
+            Some(0),
+        );
+
+        let e = &st.days["2026-10-24"]["openrouter/x:free"];
+        assert_eq!(e.ok, 2);
+        assert_eq!(e.limited, 1);
+        assert_eq!(e.limit, Some(50));
+        assert_eq!(e.remain, Some(0));
+
+        save_to(&path, &st);
+        let back = load_from(&path);
+        assert_eq!(back.days["2026-10-24"]["openrouter/x:free"].ok, 2);
+
+        // purge : on ne garde que les N jours les plus récents
+        for d in 1..=20 {
+            bump_ok(&mut st, &format!("2026-09-{d:02}"), "m");
+        }
+        prune(&mut st, 14);
+        assert_eq!(st.days.len(), 14);
+        assert!(st.days.contains_key("2026-10-24"));
+        assert!(!st.days.contains_key("2026-09-01"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     use super::*;
 
     #[test]
