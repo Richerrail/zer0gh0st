@@ -1,3 +1,13 @@
+## v0.6.5 — Quotas observables et bascule raisonnée (2026-10-24)
+
+- **`/quota` persiste** : cumul par jour et par endpoint dans
+  `<données>/quota.json` (14 jours), écrit au plus toutes les 2 s, immédiat sur 429.
+  `zer0 quota` lancé à part affiche enfin la journée réelle au lieu d'une page blanche.
+- **`max_tokens` plafonné à 2 048 pour les modèles `:free`** : la sortie réservée
+  n'est plus comptée contre le quota pour rien.
+- **Bascule ciblée** : une erreur déterministe (400/422) n'est plus rejouée sur tous les
+  endpoints — sauf mention d'outils, où un autre modèle peut les supporter.
+
 ## v0.6.4 — Quotas gratuits et palette de commandes (2026-10-24)
 
 - **429 définitif reconnu** : un `free-models-per-day` / quota journalier / crédits épuisés ne
