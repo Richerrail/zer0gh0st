@@ -1,3 +1,21 @@
+## v0.6.3 — Assistant de première connexion (2026-10-23)
+
+- **Assistant en 8 étapes** (`/setup`, proposé au premier lancement) : inférence (cloud/local),
+  provider, clé API, modèle, Telegram, raisonnement, `code_exec`, visite des commandes.
+  Chaque écran explique le **pourquoi** avant le **comment**, et `Échap` enregistre l'étape
+  pour reprendre plus tard.
+- **Saisie masquée** pour les clés et jetons : l'écran n'affiche que `●`, le secret ne passe
+  ni dans l'historique ni dans le journal d'audit.
+- **Menus sélectionnables** au lieu de syntaxes à mémoriser : `/model`, `/model use`
+  (sans identifiant), `/free`, `/provider`, `/role set <rôle>` (le modèle choisi alimente
+  le rôle).
+- **`/login` / `/logout`** : connexion complète (provider → clé → modèle) en une commande.
+- **`/help` court** (14 commandes utiles) ; `/help all` conserve la liste exhaustive.
+- **Choix persistants** : `think` et `code_exec` sont enregistrés dans `config.toml`
+  (`false` par défaut pour les deux) ; `--think` / `--allow-exec` restent prioritaires.
+- **Pas d'intrusion chez l'existant** : une config qui a déjà un provider/modèle ne
+  déclenche pas l'assistant (`setup_done` migré).
+
 ## v0.6.2 — Liste de tâches globale (2026-10-22)
 
 - **`tasks::path()` ne dépend plus du dossier courant.** Il renvoyait
