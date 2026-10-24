@@ -160,13 +160,15 @@ micro via `pw-record` (PipeWire) → `parecord` (PulseAudio) → `arecord` (ALSA
 ### Depuis GitHub
 
 > 💡 **Installation automatique** Linux/macOS (dépendances selon la distro —
-> Debian/Ubuntu/**Kali**/Fedora/Arch/openSUSE) : `./scripts/install.sh`
-> (ou `--minimal` pour compiler seulement). Sous Windows, voir juste en dessous.
+> Debian/Ubuntu/**Kali**/Fedora/Arch/openSUSE) : `./scripts/install.sh`.
+> Sous Windows : `.\scripts\install.cmd`. Les deux installent aussi les
+> prérequis **Zero-chan** (micro + Whisper local), sauf en mode minimal
+> (`--minimal` sous Unix, `-Minimal` sous Windows).
 
 ```bash
 git clone https://github.com/Richerrail/zer0gh0st.git
 cd zer0gh0st
-./scripts/install.sh         # dépendances + build (ou : cargo build --release)
+./scripts/install.sh         # dépendances + Zero-chan + build (ou : cargo build --release)
 ./target/release/zer0        # ou : ./scripts/run.sh
 ```
 
@@ -188,16 +190,41 @@ Puis, dans **PowerShell** (pour voir la sortie) :
 > Windows SmartScreen peut avertir (exe non signé) : *Informations complémentaires →
 > Exécuter quand même*. Sur Windows 10+, la commande `tar -xzf …` marche aussi.
 
-**Option 2 — depuis les sources** (PowerShell) :
+**Option 2 — depuis les sources, installation automatique** (PowerShell) :
 
 ```powershell
-winget install Rustlang.Rustup          # Rust
-winget install Git.Git                  # git
-# Compilateur C++ requis pour rusqlite :
-winget install Microsoft.VisualStudio.2022.BuildTools
-
+winget install Git.Git                  # requis pour cloner le dépôt
 git clone https://github.com/Richerrail/zer0gh0st.git
 cd zer0gh0st
+.\scripts\install.cmd
+```
+
+`install.cmd` installe et vérifie :
+
+- Rust/Cargo, Git et Visual Studio Build Tools (compilateur C++ de `rusqlite`) ;
+- FFmpeg et **SoX_ng** pour l'enregistrement du micro Windows ;
+- Python 3.12 dans un venv `~\.venvs\zer0-whisper` ;
+- `faster-whisper` + une version compatible de PyAV (`av<16`) ;
+- la variable utilisateur `ZER0_PYTHON`, puis le binaire release.
+
+Options utiles :
+
+```powershell
+.\scripts\install.cmd -VoiceOnly  # uniquement micro + Whisper (installation déjà faite)
+.\scripts\install.cmd -Minimal    # outils de compilation seulement, sans voix/média
+.\scripts\install.cmd -SkipBuild  # installe les dépendances sans compiler
+```
+
+Si l'automatisation n'est pas Possible, équivalent manuel :
+
+```powershell
+winget install Rustlang.Rustup
+winget install Microsoft.VisualStudio.2022.BuildTools
+winget install Gyan.FFmpeg
+winget install sox_ng.sox_ng
+winget install Python.Python.3.12
+py -3.12 -m venv "$env:USERPROFILE\.venvs\zer0-whisper"
+& "$env:USERPROFILE\.venvs\zer0-whisper\Scripts\python.exe" -m pip install "faster-whisper" "av<16"
 cargo build --release
 .\target\release\zer0.exe
 ```
@@ -206,14 +233,10 @@ cargo build --release
 >   (`bash scripts/install.sh`) ou **WSL**.
 > - `code_exec` utilise **`cmd /C`** : installe **Git Bash** ou **WSL** pour disposer
 >   des commandes bash.
-> - Optionnel (voix/média), sous PowerShell :
+> - Installation **manuelle** de la voix (si `install.cmd` n'est pas utilisé) :
 >   ```powershell
 >   winget install Gyan.FFmpeg
 >   winget install sox_ng.sox_ng
->   ```
->   `sox_ng` est l'enregistreur micro recommandé sous Windows. Pour la
->   transcription locale :
->   ```powershell
 >   winget install Python.Python.3.12
 >   py -3.12 -m venv "$env:USERPROFILE\.venvs\zer0-whisper"
 >   & "$env:USERPROFILE\.venvs\zer0-whisper\Scripts\python.exe" -m pip install "faster-whisper" "av<16"

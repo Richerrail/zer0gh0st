@@ -22,6 +22,21 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - name: Validate Unix install scripts
+        shell: bash
+        run: bash -n scripts/install.sh scripts/install-zerochan.sh
+
+      - name: Validate Windows install script
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $errors = $null
+          $tokens = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            "$PWD\scripts\install-windows.ps1", [ref]$tokens, [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }
+
       - name: Build (release)
         run: cargo build --release
 

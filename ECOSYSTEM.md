@@ -95,8 +95,15 @@ passphrase exigée à chaque lancement). Il n'est **pas** prévu pour être lanc
 - Les modules `mods/` (Qt6, torrent) ne sont **pas prévus** pour Windows.
 
 ### Installation automatique
-`./scripts/install.sh` détecte la distribution Linux (Debian/Ubuntu/Kali, Fedora, Arch,
-openSUSE) et installe les dépendances ; `--minimal` ne prend que le nécessaire à la compilation.
+
+- **Linux/macOS** : `./scripts/install.sh` détecte la distribution (Debian/Ubuntu/Kali,
+  Fedora, Arch, openSUSE, macOS/Homebrew), installe les dépendances audio/média,
+  crée le venv `~/.venvs/zer0-whisper` avec `faster-whisper`, puis compile.
+  `--minimal` exclut la voix et les médias.
+- **Windows** : `.\scripts\install.cmd` installe Rust, Git, Visual Studio Build Tools,
+  FFmpeg, SoX_ng, Python 3.12 et le venv Whisper, puis compile. `-VoiceOnly`
+  limite l'opération à Zero-chan ; `-Minimal` exclut la voix ; `-SkipBuild`
+  saute la compilation.
 
 ---
 

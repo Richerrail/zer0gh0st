@@ -8,6 +8,10 @@
   commande d'installation adaptée au système.
 - Le venv STT `~/.venvs/zer0-whisper` est détecté automatiquement ; la variable
   `ZER0_PYTHON` reste prioritaire.
+- **Installation des prérequis Zero-chan** : `scripts/install.sh` installe
+  désormais l'enregistreur et le venv Whisper sous Linux/macOS ; le nouveau
+  `scripts/install.cmd` fait de même sous Windows (Rust, Build Tools, FFmpeg,
+  SoX_ng, Python 3.12, `faster-whisper`) avant la compilation.
 
 ## v0.6.6 — Séparation stricte des deux applications (2026-10-24)
 
