@@ -3,7 +3,7 @@
 > Délimite le **noyau** (l'agent) des **outils intégrés** et de l'**écosystème** (modules fun),
 > et documente la portabilité. Complète le README.
 
-**Version** : 1.1 (2026-10-11) · **Projet** : 0.6.5
+**Version** : 1.1 (2026-10-11) · **Projet** : 0.6.6
 
 ---
 

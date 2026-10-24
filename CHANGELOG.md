@@ -1,3 +1,13 @@
+## v0.6.6 — Séparation stricte des deux applications (2026-10-24)
+
+- **Plus d'import depuis l'application Python** : `migrate_old_data()` relisait
+  `~/.local/share/zer0` à chaque lancement et recopiait conversation, mémoire, personas et
+  archives manquants. Conséquences : la conversation Python revenait après chaque `/new`
+  (33 copies du même fichier), et les personas supprimées réapparaissaient.
+- La migration depuis notre propre checkout (`<projet>/data`, `knowledge.db`) est conservée.
+  L'application Python garde ses données, sa config (`~/.config/zer0cod`) et ses personas
+  (`whoami/`) : chaque produit reste chez lui.
+
 ## v0.6.5 — Quotas observables et bascule raisonnée (2026-10-24)
 
 - **`/quota` persiste** : cumul par jour et par endpoint dans
