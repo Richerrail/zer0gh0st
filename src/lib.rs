@@ -108,8 +108,13 @@ pub async fn knowledge_block(query: &str) -> Option<(String, Vec<String>)> {
     if query.trim().is_empty() {
         return None;
     }
-    let (mut hits, _) = knowledge::search(query, 6).await;
+    // Aucun mot significatif (« salut », « merci », « ok »…) : inutile
+    // d'interroger la base, et surtout inutile d'injecter du bruit.
     let toks = knowledge::tokens(query);
+    if toks.is_empty() {
+        return None;
+    }
+    let (mut hits, _) = knowledge::search(query, 6).await;
     hits.retain(|h| {
         let hay = format!("{} {}", h.sujet, h.contenu).to_lowercase();
         toks.iter().any(|t| hay.contains(t.as_str()))

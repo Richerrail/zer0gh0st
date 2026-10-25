@@ -272,7 +272,9 @@ pub async fn run(
     let ctx_override = config::load_global().context_window;
     let ctx_win = ctx_override
         .or_else(|| known_context(&settings.model))
-        .unwrap_or(200_000);
+        // Inconnu : on suppose 32 k plutôt que 200 k. Surestimer la fenêtre
+        // fait envoyer un historique trop long, que le provider refuse (400).
+        .unwrap_or(32_768);
 
     let mut app = App {
         messages: vec![ChatMessage::notice(
@@ -1722,10 +1724,21 @@ fn handle_context(app: &mut App) {
         .map(|c| c.chars().count())
         .sum();
     let tokens = chars / 4;
+    // Même règle que `start_turn` : 60 % de la fenêtre, minimum 4 000.
+    let budget = ((app.context_window as f64 * 0.6) as usize).max(4_000);
+    let pct = if app.context_window > 0 {
+        (tokens as f64 / app.context_window as f64 * 100.0).round() as u64
+    } else {
+        0
+    };
     let s = format!(
-        "Contexte :\n  messages : {n}\n  ~tokens : {tokens}\n  compaction auto à : 6000 tokens\n\
+        "Contexte :\n  messages : {n}\n  fenêtre du modèle : {} tokens\n\
+         historique estimé : ~{tokens} tokens ({pct} % de la fenêtre)\n\
+         prompt système : ~1 000 tokens (fixe : base + persona + environnement + outils)\n\
+         compaction auto à : {budget} tokens\n\
          rôle : {}\n  endpoint : {}\n  think : {}\n\
-         commandes : /context · /clear · /compact",
+         commandes : /context · /clear · /compact · /ctx <N>",
+        app.context_window,
         app.forced_role
             .clone()
             .unwrap_or_else(|| format!("auto/{}", app.last_role)),

@@ -286,6 +286,20 @@ fn blob_to_f32(b: &[u8]) -> Vec<f32> {
 
 /// Mots vides ignorés dans la requête FTS (FR + EN).
 const STOPWORDS: &[&str] = &[
+    // Salutations et politesses : une conversation qui commence par « salut »
+    // n'a aucune raison de déclencher une recherche dans la base.
+    "salut",
+    "bonjour",
+    "bonsoir",
+    "coucou",
+    "hello",
+    "hey",
+    "allo",
+    "slt",
+    "bjr",
+    "merci",
+    "oui",
+    "non",
     "le",
     "la",
     "les",
@@ -826,6 +840,16 @@ mod tests {
         assert_eq!(out.len(), 2);
         assert_eq!(out[0].id, 1);
         assert_eq!(out[1].id, 3);
+    }
+
+    #[test]
+    fn greetings_produce_no_tokens() {
+        // « salut » ne doit déclencher aucune recherche dans la base.
+        assert!(tokens("salut").is_empty());
+        assert!(tokens("bonjour").is_empty());
+        assert!(tokens("merci beaucoup").iter().all(|t| t != "merci"));
+        // … mais un vrai mot reste un mot.
+        assert_eq!(tokens("salut rust"), vec!["rust".to_string()]);
     }
 
     #[test]
