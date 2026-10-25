@@ -25,6 +25,15 @@ use crate::route;
 use crate::select;
 use crate::tools::ToolSpec;
 
+/// Assemble le prompt système de base et, si elle existe, le texte du persona.
+/// (fonction pure : testable sans App ni disque)
+fn compose_system(base: &str, persona: Option<(&str, &str)>) -> String {
+    match persona {
+        Some((name, content)) => format!("{base}\n\n## Persona : {name}\n{content}"),
+        None => base.to_string(),
+    }
+}
+
 /// Aide par défaut : uniquement ce dont un nouvel utilisateur a besoin.
 /// Le reste est derrière `/help all` (le pouvoir reste, le bruit part).
 const HELP_SHORT: &str =
@@ -231,13 +240,14 @@ impl App {
 
     /// Recompute the effective system prompt from base + active persona.
     fn refresh_system(&mut self) {
-        self.system = match &self.persona {
-            Some(name) => match crate::personas::get(name) {
-                Some(content) => format!("{}\n\n## Persona : {name}\n{content}", self.base_system),
-                None => self.base_system.clone(),
-            },
-            None => self.base_system.clone(),
-        };
+        let persona = self
+            .persona
+            .as_ref()
+            .and_then(|name| crate::personas::get(name).map(|c| (name.clone(), c)));
+        self.system = compose_system(
+            &self.base_system,
+            persona.as_ref().map(|(n, c)| (n.as_str(), c.as_str())),
+        );
     }
 }
 
@@ -363,6 +373,18 @@ pub async fn run(
     if let Some(msg) = config::corruption() {
         app.messages
             .push(ChatMessage::notice(format!("⚠ configuration : {msg}")));
+    }
+
+    // Persona persistée : on la restaure au démarrage (elle l'était pas avant,
+    // donc `/whoami` semblait ne pas agir après un relancement).
+    if let Some(name) = config::load_global().persona.clone() {
+        if crate::personas::get(&name).is_some() {
+            app.persona = Some(name.clone());
+            app.refresh_system();
+            app.messages.push(ChatMessage::notice(format!(
+                "🎭 persona restaurée : {name}"
+            )));
+        }
     }
 
     // Première connexion (ou assistant interrompu) : on prend l'utilisateur par
@@ -922,6 +944,24 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
         "/help" if args.first().copied() != Some("all") => {
             app.messages.push(ChatMessage::notice(HELP_SHORT))
         }
+        "/system" => {
+            let persona = app
+                .persona
+                .clone()
+                .unwrap_or_else(|| "(aucune)".to_string());
+            let injected = app
+                .persona
+                .as_ref()
+                .and_then(|n| crate::personas::get(n))
+                .map(|c| app.system.contains(&c))
+                .unwrap_or(false);
+            let preview: String = app.system.chars().take(600).collect();
+            app.messages.push(ChatMessage::notice(format!(
+                "Prompt système : {} caractères\nPersona : {persona}\nTexte du persona présent : {injected}\n\
+                 --- début ---\n{preview}\n…",
+                app.system.chars().count()
+            )));
+        }
         "/setup" => wizard::start(app, ui_tx, wizard::Step::Inference),
         "/login" => wizard::start(app, ui_tx, wizard::Step::Provider),
         "/logout" => match crate::commands::provider_remove(&app.provider_id) {
@@ -979,7 +1019,8 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
              /search <requête>           recherche web (DuckDuckGo)\n\
              /stop                       interrompt la génération en cours\n\
              /context                    état de la conversation\n\
-             /whoami [nom|off]           persona (prompt système alternatif)\n\
+             /whoami [nom|off]           persona (prompt système alternatif, persistée)\n\
+             /system                     prompt système effectif + persona injectée\n\
              /vault [status|lock]        coffre de clés (setup/unlock en CLI)\n\
              /pdf info|text|merge|split  outils PDF locaux\n\
              /jev <fichier>              score qualité code 0-3 (rôle review)\n\
@@ -1768,14 +1809,21 @@ fn handle_whoami(app: &mut App, args: &[&str]) {
         Some("off") | Some("none") => {
             app.persona = None;
             app.refresh_system();
+            let mut g = config::load_global();
+            g.persona = None;
+            let _ = config::save_global(&g);
             app.messages.push(ChatMessage::notice("Persona retirée."));
         }
         Some(name) => match crate::personas::get(name) {
             Some(_) => {
                 app.persona = Some(name.to_string());
                 app.refresh_system();
-                app.messages
-                    .push(ChatMessage::notice(format!("Persona '{name}' activée.")));
+                let mut g = config::load_global();
+                g.persona = Some(name.to_string());
+                let _ = config::save_global(&g);
+                app.messages.push(ChatMessage::notice(format!(
+                    "Persona '{name}' activée (persistante). /system pour vérifier."
+                )));
             }
             None => app.messages.push(ChatMessage::notice(format!(
                 "Persona '{name}' introuvable — whoami list"
@@ -4828,6 +4876,15 @@ mod tests {
         assert_eq!(ctx_window_label(200_000), "200k");
         assert_eq!(ctx_window_label(128_000), "128k");
         assert_eq!(ctx_window_label(500), "500");
+    }
+
+    #[test]
+    fn compose_system_appends_the_persona() {
+        assert_eq!(compose_system("BASE", None), "BASE");
+        let with = compose_system("BASE", Some(("zero-vamp", "Tu es un vampire.")));
+        assert!(with.starts_with("BASE"));
+        assert!(with.contains("## Persona : zero-vamp"));
+        assert!(with.contains("Tu es un vampire."));
     }
 
     #[test]

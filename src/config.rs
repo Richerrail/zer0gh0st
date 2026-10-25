@@ -67,6 +67,10 @@ pub struct GlobalConfig {
     /// L'utilisateur a déjà vu l'invitation de connexion GitHub.
     #[serde(default)]
     pub github_prompted: bool,
+    /// Persona active (`/whoami <nom>`), None = aucune. Persistée : sinon elle
+    /// disparaissait à chaque redémarrage, sans le dire.
+    #[serde(default)]
+    pub persona: Option<String>,
     /// Raisonnement (`think`) activé au démarrage (choix de l'assistant).
     #[serde(default)]
     pub thinking: bool,
@@ -115,6 +119,7 @@ impl Default for GlobalConfig {
             github_client_id: None,
             github_prompt_count: 0,
             github_prompted: false,
+            persona: None,
             thinking: false,
             code_exec: false,
             setup_done: false,
