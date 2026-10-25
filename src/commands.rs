@@ -794,6 +794,25 @@ pub async fn kb_ingest(dir: Option<std::path::PathBuf>, embed: bool) -> Result<V
     Ok(out)
 }
 
+/// Supprime de l'index les sources dont le fichier n'existe plus.
+pub fn kb_purge() -> Result<Vec<String>> {
+    let n = crate::knowledge::purge_missing()?;
+    Ok(vec![format!(
+        "Fantômes purgés : {n} source(s) dont le fichier n'existe plus. Index FTS reconstruit."
+    )])
+}
+
+/// Retire de l'index les sources dont le chemin contient `pattern`.
+pub fn kb_drop(pattern: &str) -> Result<Vec<String>> {
+    if pattern.trim().is_empty() {
+        return Err(anyhow!("usage: kb drop <motif de source>"));
+    }
+    let n = crate::knowledge::drop_source(pattern)?;
+    Ok(vec![format!(
+        "Source(s) retirée(s) de l'index : {n} chunk(s) dont le chemin contient `{pattern}`."
+    )])
+}
+
 pub fn kb_rebuild() -> Result<Vec<String>> {
     crate::knowledge::rebuild_fts()?;
     Ok(vec!["Index FTS5 reconstruit.".to_string()])

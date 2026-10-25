@@ -52,6 +52,79 @@ pub struct Hit {
 /// Version du schéma SQLite (`PRAGMA user_version`).
 const KB_SCHEMA_VERSION: i64 = 1;
 
+/// Un fichier source existe-t-il encore ? Les anciens index peuvent contenir
+/// des chemins **relatifs** : on les résout depuis le cwd puis la racine projet.
+pub fn source_exists(src: &str) -> bool {
+    let p = Path::new(src);
+    if p.is_absolute() {
+        return p.exists();
+    }
+    p.exists() || crate::mods::project_root().join(p).exists()
+}
+
+/// Supprime les chunks dont la source n'existe plus, puis reconstruit le FTS.
+/// `exists` est injecté pour être testable sans disque réel.
+pub fn purge_missing_on<F: Fn(&str) -> bool>(c: &Connection, exists: F) -> Result<usize> {
+    let mut stmt = c.prepare("SELECT DISTINCT source FROM knowledge")?;
+    let sources: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, String>(0))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    let missing: Vec<String> = sources.into_iter().filter(|s| !exists(s)).collect();
+    for src in &missing {
+        c.execute("DELETE FROM knowledge WHERE source = ?1", params![src])?;
+    }
+    if !missing.is_empty() {
+        c.execute(
+            "INSERT INTO knowledge_fts(knowledge_fts) VALUES('rebuild')",
+            [],
+        )?;
+    }
+    Ok(missing.len())
+}
+
+pub fn purge_missing() -> Result<usize> {
+    let c = open()?;
+    purge_missing_on(&c, source_exists)
+}
+
+/// Retire toutes les sources dont le chemin **contient** `pattern`.
+pub fn drop_source_on(c: &Connection, pattern: &str) -> Result<usize> {
+    let pat = format!("%{}%", pattern.trim());
+    let n = c.execute("DELETE FROM knowledge WHERE source LIKE ?1", params![pat])?;
+    if n > 0 {
+        c.execute(
+            "INSERT INTO knowledge_fts(knowledge_fts) VALUES('rebuild')",
+            [],
+        )?;
+    }
+    Ok(n)
+}
+
+pub fn drop_source(pattern: &str) -> Result<usize> {
+    if pattern.trim().is_empty() {
+        return Err(anyhow!("source vide"));
+    }
+    let c = open()?;
+    drop_source_on(&c, pattern)
+}
+
+/// Garde **un seul chunk par source** (le premier, donc le mieux classé).
+///
+/// Sans ça, un livre volumineux peut fournir les 3 extraits injectés à lui seul
+/// et masquer tout le reste de la base.
+pub fn one_per_source(hits: Vec<Hit>) -> Vec<Hit> {
+    let mut seen: Vec<String> = Vec::new();
+    let mut out = Vec::with_capacity(hits.len());
+    for h in hits {
+        if seen.contains(&h.source) {
+            continue;
+        }
+        seen.push(h.source.clone());
+        out.push(h);
+    }
+    out
+}
+
 pub(crate) fn open() -> Result<Connection> {
     let path = db_path();
     let c = Connection::open(&path)?;
@@ -688,6 +761,72 @@ pub fn format_hits(hits: &[Hit], degraded: &Option<String>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn mem_db() -> Connection {
+        let c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        c
+    }
+
+    fn add(c: &Connection, sujet: &str, contenu: &str, source: &str) {
+        c.execute(
+            "INSERT INTO knowledge (sujet, contenu, source) VALUES (?1, ?2, ?3)",
+            params![sujet, contenu, source],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn purge_removes_only_missing_sources() {
+        let c = mem_db();
+        add(&c, "a", "contenu a", "/existe/a.txt");
+        add(&c, "b", "contenu b", "/absent/b.txt");
+        add(&c, "b2", "contenu b2", "/absent/b.txt");
+        let removed = purge_missing_on(&c, |s| s.starts_with("/existe")).unwrap();
+        assert_eq!(removed, 1, "une source distincte absente");
+        let n: i64 = c
+            .query_row("SELECT COUNT(*) FROM knowledge", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 1);
+        // le FTS suit la suppression (reconstruit)
+        let fts: i64 = c
+            .query_row("SELECT COUNT(*) FROM knowledge_fts", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(fts, 1);
+    }
+
+    #[test]
+    fn drop_source_matches_a_substring() {
+        let c = mem_db();
+        add(&c, "a", "x", "/kb/livre_pirate.txt");
+        add(&c, "b", "y", "/kb/autre.txt");
+        assert_eq!(drop_source_on(&c, "pirate").unwrap(), 1);
+        let n: i64 = c
+            .query_row("SELECT COUNT(*) FROM knowledge", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn one_chunk_per_source_keeps_the_best_one() {
+        let mk = |id: i64, src: &str, score: f32| Hit {
+            id,
+            sujet: "s".into(),
+            contenu: "c".into(),
+            source: src.into(),
+            score,
+        };
+        let hits = vec![
+            mk(1, "/livre", 0.9),
+            mk(2, "/livre", 0.8),
+            mk(3, "/autre", 0.7),
+            mk(4, "/livre", 0.6),
+        ];
+        let out = one_per_source(hits);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].id, 1);
+        assert_eq!(out[1].id, 3);
+    }
 
     #[test]
     fn tokens_filters_short_and_stopwords() {

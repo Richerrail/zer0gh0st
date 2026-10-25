@@ -12,7 +12,7 @@
 ![CLI only](https://img.shields.io/badge/interface-CLI%20%2F%20TUI-black.svg)
 ![CI](https://github.com/Richerrail/zer0gh0st/actions/workflows/ci.yml/badge.svg)
 
-**Version** : 0.6.6 · **Licence** : MIT · **Interface** : terminal uniquement (pas de GUI web).
+**Version** : 0.6.7 · **Licence** : MIT · **Interface** : terminal uniquement (pas de GUI web).
 
 ![Aperçu de ZER0│GH0ST](./screenshot.png)
 
@@ -335,9 +335,9 @@ c'est `cargo build --release` qui fait foi (`--force` pour passer outre).
 
 | OS | À supprimer |
 |---|---|
-| 🐧 Linux | `rm -rf ~/.config/zer0 ~/.local/share/zer0` |
-| 🍎 macOS | `rm -rf ~/Library/Application\ Support/zer0` |
-| 🪟 Windows | `%APPDATA%\zer0` et `%LOCALAPPDATA%\zer0` |
+| 🐧 Linux | `rm -rf ~/.config/zer0 ~/.local/share/zer0gh0st` |
+| 🍎 macOS | `rm -rf ~/Library/Application\ Support/zer0 ~/Library/Application\ Support/zer0gh0st` |
+| 🪟 Windows | `%APPDATA%\zer0` et `%LOCALAPPDATA%\zer0gh0st` |
 | 🐧🍎🪟 `cargo install` | le binaire est dans `~/.cargo/bin/zer0` (`cargo uninstall zer0`) |
 
 > `zer0` (ou `zer0.exe`) est un **binaire autonome** : le supprimer ne laisse rien derrière,

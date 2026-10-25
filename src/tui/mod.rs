@@ -2468,6 +2468,21 @@ fn handle_kb(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
                 "Injection connaissance : {state}"
             )));
         }
+        Some("purge") => match crate::commands::kb_purge() {
+            Ok(lines) => app.messages.push(ChatMessage::notice(lines.join("\n"))),
+            Err(e) => app
+                .messages
+                .push(ChatMessage::notice(format!("Erreur: {e}"))),
+        },
+        Some("drop") => {
+            let motif = args.get(1..).map(|a| a.join(" ")).unwrap_or_default();
+            match crate::commands::kb_drop(&motif) {
+                Ok(lines) => app.messages.push(ChatMessage::notice(lines.join("\n"))),
+                Err(e) => app
+                    .messages
+                    .push(ChatMessage::notice(format!("{e}"))),
+            }
+        }
         Some("rebuild") => match crate::commands::kb_rebuild() {
             Ok(lines) => app.messages.push(ChatMessage::notice(lines.join("\n"))),
             Err(e) => app
@@ -2475,7 +2490,7 @@ fn handle_kb(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
                 .push(ChatMessage::notice(format!("Erreur: {e}"))),
         },
         _ => app.messages.push(ChatMessage::notice(
-            "usage: /kb [stats|search <q>|ingest [dir] [--embed]|auto|log [n]|rebuild]",
+            "usage: /kb [stats|search <q>|ingest [dir] [--embed]|auto|log [n]|rebuild|purge|drop <motif>]",
         )),
     }
 }

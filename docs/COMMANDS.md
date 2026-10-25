@@ -515,6 +515,18 @@ Index a directory (default: <ZER0v1>/base_connaissance)
 
 Rebuild the FTS5 index
 
+#### `zer0 kb purge`
+
+Retire de l'index les sources dont le fichier n'existe plus
+
+#### `zer0 kb drop`
+
+Retire de l'index les sources dont le chemin contient ce motif
+
+| Option | Description |
+|---|---|
+| ` <SOURCE>` |  |
+
 #### `zer0 kb log`
 
 Show the knowledge-injection log
