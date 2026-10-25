@@ -1,3 +1,13 @@
+## v0.6.8 — Recherche web : quatre moteurs au lieu d'un (2026-10-24)
+
+- **Chaîne de repli** : DuckDuckGo HTML (POST + en-têtes de navigateur) → DuckDuckGo Lite →
+  Mojeek → DDG Lite/Mojeek via `curl` → Instant Answer. Le premier qui répond gagne, et
+  `/search` indique le moteur utilisé.
+- Cause du « aucun résultat » : un seul backend en GET, un UA qui déclenchait l'anti-bot, et
+  une API Instant Answer presque toujours vide sur une requête générale.
+- Parseur commun aux trois markups (attributs dans n'importe quel ordre), déduplication par
+  URL, avance correcte entre résultats. 5 tests sur fixtures HTML.
+
 ## v0.6.7 — Base de connaissance : fantômes, poids et retrait (2026-10-24)
 
 - **Purge des sources fantômes** (`/kb purge`, `zer0 kb purge`) : la base indexait 104 sources
