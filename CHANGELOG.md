@@ -1,3 +1,13 @@
+## v0.6.7 — Base de connaissance : fantômes, poids et retrait (2026-10-24)
+
+- **Purge des sources fantômes** (`/kb purge`, `zer0 kb purge`) : la base indexait 104 sources
+  dont **aucune** n'existait encore sur disque — un livre fournissait à lui seul 68 % des
+  chunks. La commande supprime les chunks dont le fichier a disparu et reconstruit le FTS.
+- **Un seul chunk par source** dans l'injection automatique : un document volumineux ne peut
+  plus occuper les trois extraits à lui seul.
+- **`/kb drop <motif>`** (`zer0 kb drop`) : retirer de l'index les sources dont le chemin
+  contient le motif, sans tout réindexer.
+
 ## v0.6.6 — Séparation stricte des deux applications (2026-10-24)
 
 - **Plus d'import depuis l'application Python** : `migrate_old_data()` relisait
