@@ -297,9 +297,9 @@ c'est `cargo build --release` qui fait foi (`--force` pour passer outre).
 
 | OS | À supprimer |
 |---|---|
-| 🐧 Linux | `rm -rf ~/.config/zer0 ~/.local/share/zer0` |
-| 🍎 macOS | `rm -rf ~/Library/Application\ Support/zer0` |
-| 🪟 Windows | `%APPDATA%\zer0` et `%LOCALAPPDATA%\zer0` |
+| 🐧 Linux | `rm -rf ~/.config/zer0 ~/.local/share/zer0gh0st` |
+| 🍎 macOS | `rm -rf ~/Library/Application\ Support/zer0 ~/Library/Application\ Support/zer0gh0st` |
+| 🪟 Windows | `%APPDATA%\zer0` et `%LOCALAPPDATA%\zer0gh0st` |
 | 🐧🍎🪟 `cargo install` | le binaire est dans `~/.cargo/bin/zer0` (`cargo uninstall zer0`) |
 
 > `zer0` (ou `zer0.exe`) est un **binaire autonome** : le supprimer ne laisse rien derrière,

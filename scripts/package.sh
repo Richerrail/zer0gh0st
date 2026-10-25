@@ -103,8 +103,10 @@ Les modules **natifs** (`/radio`, `/bintime`, `/pong`) sont en Rust dans `src/fu
 EOF
 
 # Genericise les chemins personnels dans la doc
-sed -i 's#/home/[A-Za-z0-9_]*/\.local/share/zerochan#~/zerochan#g' "$OUT"/*.md || true
-sed -i 's#/home/[A-Za-z0-9_]*/\.local/share/zer0#~/zer0#g' "$OUT"/*.md || true
+# ZER0|GH0ST vit dans son propre dossier de données (`zer0gh0st`), pas dans
+# celui de l'ancienne application Python (`zer0`) : on ne réécrit que le nôtre.
+sed -i 's#/home/[A-Za-z0-9_]*/\.local/share/zer0gh0st#~/.local/share/zer0gh0st#g' "$OUT"/*.md || true
+sed -i 's#/home/[A-Za-z0-9_]*/ZER0v1#~/ZER0v1#g' "$OUT"/*.md || true
 
 echo "✅ gh0st/ régénéré : $OUT"
 du -sh "$OUT"

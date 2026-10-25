@@ -411,6 +411,10 @@ enum KbAction {
     },
     /// Rebuild the FTS5 index.
     Rebuild,
+    /// Retire de l'index les sources dont le fichier n'existe plus.
+    Purge,
+    /// Retire de l'index les sources dont le chemin contient ce motif.
+    Drop { source: String },
     /// Show the knowledge-injection log.
     Log {
         #[arg(long, default_value_t = 15)]
@@ -853,6 +857,8 @@ async fn kb_cmd(action: KbAction) -> Result<()> {
             commands::kb_ingest(dir.map(std::path::PathBuf::from), embed).await?
         }
         KbAction::Rebuild => commands::kb_rebuild()?,
+        KbAction::Purge => commands::kb_purge()?,
+        KbAction::Drop { source } => commands::kb_drop(&source)?,
         KbAction::Log { lines } => commands::kb_log(lines),
     };
     for line in lines {

@@ -114,6 +114,9 @@ pub async fn knowledge_block(query: &str) -> Option<(String, Vec<String>)> {
         let hay = format!("{} {}", h.sujet, h.contenu).to_lowercase();
         toks.iter().any(|t| hay.contains(t.as_str()))
     });
+    // Un seul extrait par source : un livre volumineux ne doit pas occuper les
+    // 3 places à lui seul (c'était le cas : 68 % du corpus = un seul fichier).
+    let mut hits = knowledge::one_per_source(hits);
     hits.truncate(3);
     if hits.is_empty() {
         return None;
