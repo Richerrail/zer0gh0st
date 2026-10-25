@@ -121,6 +121,8 @@ pub struct App {
     pub secret_mode: bool,
     /// Cible à appliquer quand la liste de modèles arrivera (ex. rôle à définir).
     pub pending_picker_target: Option<String>,
+    /// Liste de tâches animée : (index du message, tâches chargées).
+    pub task_view: Option<(usize, Vec<crate::tasks::Task>)>,
     /// Image en attente, jointe au prochain message envoyé (data URL).
     pub pending_image: Option<String>,
     pub pending_image_name: Option<String>,
@@ -321,6 +323,7 @@ pub async fn run(
         wizard: None,
         secret_mode: false,
         pending_picker_target: None,
+        task_view: None,
         pending_image: None,
         pending_image_name: None,
         vision_models: Vec::new(),
@@ -483,9 +486,32 @@ async fn event_loop(
             _ = ticker.tick(), if app.streaming
                 || app.mode != crate::fun::Mode::Chat
                 || app.side_mode.is_some()
-                || app.zc.on =>
+                || app.zc.on
+                || app.task_view.is_some() =>
             {
                 app.anim_phase = app.anim_phase.wrapping_add(6);
+                // Animation des tâches en cours (un pas toutes les ~480 ms).
+                if let Some((idx, tasks)) = app.task_view.clone() {
+                    let still_there = app
+                        .messages
+                        .get(idx)
+                        .map(|m| {
+                            m.role == "notice"
+                                && m.content
+                                    .as_deref()
+                                    .map(|c| c.starts_with("Tâches ("))
+                                    .unwrap_or(false)
+                        })
+                        .unwrap_or(false);
+                    if still_there {
+                        app.messages[idx].content = Some(crate::tasks::format_tasks(
+                            &tasks,
+                            Some((app.anim_phase / 6) as usize),
+                        ));
+                    } else {
+                        app.task_view = None;
+                    }
+                }
                 if app.zc.on {
                     app.zc.tick();
                     // Arrêt automatique de l'écoute après MAX_REC_SECS.
@@ -1594,6 +1620,17 @@ fn handle_task(app: &mut App, args: &[&str]) {
             return;
         }
     };
+    // Liste : vue animée (le marqueur « en cours » cycle). Les tâches sont
+    // chargées une fois et re-rendues à chaque frame — pas d'I/O par tick.
+    if matches!(cmd, crate::commands::TaskCmd::List) {
+        let tasks = crate::tasks::load();
+        let text = crate::tasks::format_tasks(&tasks, Some(0));
+        app.messages.push(ChatMessage::notice(text));
+        app.task_view = Some((app.messages.len() - 1, tasks));
+        return;
+    }
+    // Toute autre opération invalide la vue animée (statuts changés).
+    app.task_view = None;
     match crate::commands::task(cmd) {
         Ok(lines) => {
             let text = lines.join("\n");
@@ -4741,6 +4778,7 @@ mod tests {
             wizard: None,
             secret_mode: false,
             pending_picker_target: None,
+            task_view: None,
             pending_image: None,
             pending_image_name: None,
             vision_models: vec![],

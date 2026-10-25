@@ -320,13 +320,25 @@ pub fn next_pending() -> Option<Task> {
     load().into_iter().find(|t| t.status == Status::Pending)
 }
 
-pub fn format_list() -> String {
-    let tasks = load();
+/// Animation des tâches **en cours** : le marqueur `[~]` devient un cycle
+/// `* ¤ o O 0 O o ¤`, pour distinguer « en cours » de « en attente » d'un coup
+/// d'œil, même en monochrome.
+pub const SPINNER: &[char] = &['*', '¤', 'o', 'O', '0', 'O', 'o', '¤'];
+
+fn mark_for(status: Status, phase: Option<usize>) -> String {
+    match (status, phase) {
+        (Status::Claimed, Some(p)) => format!("[{}]", SPINNER[p % SPINNER.len()]),
+        _ => status.mark().to_string(),
+    }
+}
+
+/// Rendu pur (testable) ; `phase = None` = marqueur statique `[~]`.
+pub fn format_tasks(tasks: &[Task], phase: Option<usize>) -> String {
     if tasks.is_empty() {
         return "Aucune tâche. `/task add <texte>` pour en créer.".to_string();
     }
     let mut s = format!("Tâches ({}):\n", tasks.len());
-    for t in &tasks {
+    for t in tasks {
         let role = t
             .role
             .as_deref()
@@ -334,7 +346,7 @@ pub fn format_list() -> String {
             .unwrap_or_default();
         s.push_str(&format!(
             "  {} {} {}{}\n",
-            t.status.mark(),
+            mark_for(t.status, phase),
             t.id,
             t.text,
             role
@@ -343,9 +355,59 @@ pub fn format_list() -> String {
     s
 }
 
+pub fn format_list() -> String {
+    format_tasks(&load(), None)
+}
+
+/// Variante animée (TUI) : relit le fichier — l'appelant préfère en général
+/// `format_tasks` sur une liste déjà chargée.
+pub fn format_list_animated(phase: usize) -> String {
+    format_tasks(&load(), Some(phase))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn in_progress_task_animates_between_brackets() {
+        let tasks = vec![
+            Task {
+                id: "t1".into(),
+                text: "faite".into(),
+                status: Status::Done,
+                role: None,
+            },
+            Task {
+                id: "t2".into(),
+                text: "en cours".into(),
+                status: Status::Claimed,
+                role: None,
+            },
+            Task {
+                id: "t3".into(),
+                text: "à faire".into(),
+                status: Status::Pending,
+                role: None,
+            },
+        ];
+        // sans animation : marqueur statique
+        let plain = format_tasks(&tasks, None);
+        assert!(plain.contains("[x] t1"));
+        assert!(plain.contains("[~] t2"));
+        assert!(plain.contains("[ ] t3"));
+
+        // avec animation : seul le marqueur « en cours » change, et il cycle
+        let a = format_tasks(&tasks, Some(0));
+        let b = format_tasks(&tasks, Some(1));
+        assert!(a.contains(&format!("[{}] t2", SPINNER[0])));
+        assert!(b.contains(&format!("[{}] t2", SPINNER[1])));
+        assert!(a.contains("[x] t1"));
+        assert!(a.contains("[ ] t3"));
+        // le cycle boucle proprement
+        let wrapped = format_tasks(&tasks, Some(SPINNER.len() + 2));
+        assert!(wrapped.contains(&format!("[{}] t2", SPINNER[2])));
+    }
 
     #[test]
     fn task_file_resolution_is_explicit() {
