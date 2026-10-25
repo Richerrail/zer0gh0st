@@ -2,7 +2,7 @@
 
 > Complément du README ; décrit la structure technique sans la visite guidée.
 
-**Version** : 1.1 · **Projet** : 0.6.12
+**Version** : 1.1 · **Projet** : 0.6.13
 
 ---
 

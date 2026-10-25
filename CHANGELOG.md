@@ -1,3 +1,13 @@
+## v0.6.13 — Installer Zero-chan : choisir un Python compatible (2026-10-25)
+
+- Sur une machine où un shim `mise`/`pyenv` expose `python3` en **3.15**, l'installeur prenait
+  le premier `python3` venu puis refusait (garde `< 3.13`) : il était inutilisable alors que le
+  Python système 3.14 fonctionne. Il teste désormais chaque candidat (3.12, 3.13, 3.14, 3.11,
+  3, python) et retient le premier compatible (3.9–3.14).
+- Cause du message `ModuleNotFoundError: No module named 'faster_whisper'` : sans venv
+  `~/.venvs/zer0-whisper`, `platform::python()` retombait sur `python3` (le shim 3.15), dépourvu
+  du module. Le venv créé avec le Python système est détecté automatiquement.
+
 ## v0.6.12 — Micro Windows et installation des prérequis (2026-10-25)
 
 Contribution de **darkdober4** (PR #5) :
