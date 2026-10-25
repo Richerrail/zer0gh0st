@@ -154,18 +154,21 @@ Prérequis : **Rust** (cargo) + un **compilateur C** (`cc`) — `rusqlite` est c
 rien à installer côté SQLite. `llama-server` (llama.cpp) seulement pour le mode **local**.
 
 **Portabilité** : presse-papier via `wl-copy` (Wayland) → `xclip`/`xsel` (X11) → OSC 52 ;
-micro via `pw-record` (PipeWire) → `parecord` (PulseAudio) → `arecord` (ALSA).
+micro via `pw-record` (PipeWire) → `parecord` (PulseAudio) → `arecord` (ALSA) → `sox_ng`/`sox`
+(macOS et Windows).
 
 ### Depuis GitHub
 
 > 💡 **Installation automatique** Linux/macOS (dépendances selon la distro —
-> Debian/Ubuntu/**Kali**/Fedora/Arch/openSUSE) : `./scripts/install.sh`
-> (ou `--minimal` pour compiler seulement). Sous Windows, voir juste en dessous.
+> Debian/Ubuntu/**Kali**/Fedora/Arch/openSUSE) : `./scripts/install.sh`.
+> Sous Windows : `.\scripts\install.cmd`. Les deux installent aussi les
+> prérequis **Zero-chan** (micro + Whisper local), sauf en mode minimal
+> (`--minimal` sous Unix, `-Minimal` sous Windows).
 
 ```bash
 git clone https://github.com/Richerrail/zer0gh0st.git
 cd zer0gh0st
-./scripts/install.sh         # dépendances + build (ou : cargo build --release)
+./scripts/install.sh         # dépendances + Zero-chan + build (ou : cargo build --release)
 ./target/release/zer0        # ou : ./scripts/run.sh
 ```
 
@@ -187,16 +190,41 @@ Puis, dans **PowerShell** (pour voir la sortie) :
 > Windows SmartScreen peut avertir (exe non signé) : *Informations complémentaires →
 > Exécuter quand même*. Sur Windows 10+, la commande `tar -xzf …` marche aussi.
 
-**Option 2 — depuis les sources** (PowerShell) :
+**Option 2 — depuis les sources, installation automatique** (PowerShell) :
 
 ```powershell
-winget install Rustlang.Rustup          # Rust
-winget install Git.Git                  # git
-# Compilateur C++ requis pour rusqlite :
-winget install Microsoft.VisualStudio.2022.BuildTools
-
+winget install Git.Git                  # requis pour cloner le dépôt
 git clone https://github.com/Richerrail/zer0gh0st.git
 cd zer0gh0st
+.\scripts\install.cmd
+```
+
+`install.cmd` installe et vérifie :
+
+- Rust/Cargo, Git et Visual Studio Build Tools (compilateur C++ de `rusqlite`) ;
+- FFmpeg et **SoX_ng** pour l'enregistrement du micro Windows ;
+- Python 3.12 dans un venv `~\.venvs\zer0-whisper` ;
+- `faster-whisper` + une version compatible de PyAV (`av<16`) ;
+- la variable utilisateur `ZER0_PYTHON`, puis le binaire release.
+
+Options utiles :
+
+```powershell
+.\scripts\install.cmd -VoiceOnly  # uniquement micro + Whisper (installation déjà faite)
+.\scripts\install.cmd -Minimal    # outils de compilation seulement, sans voix/média
+.\scripts\install.cmd -SkipBuild  # installe les dépendances sans compiler
+```
+
+Si l'automatisation n'est pas Possible, équivalent manuel :
+
+```powershell
+winget install Rustlang.Rustup
+winget install Microsoft.VisualStudio.2022.BuildTools
+winget install Gyan.FFmpeg
+winget install sox_ng.sox_ng
+winget install Python.Python.3.12
+py -3.12 -m venv "$env:USERPROFILE\.venvs\zer0-whisper"
+& "$env:USERPROFILE\.venvs\zer0-whisper\Scripts\python.exe" -m pip install "faster-whisper" "av<16"
 cargo build --release
 .\target\release\zer0.exe
 ```
@@ -205,7 +233,17 @@ cargo build --release
 >   (`bash scripts/install.sh`) ou **WSL**.
 > - `code_exec` utilise **`cmd /C`** : installe **Git Bash** ou **WSL** pour disposer
 >   des commandes bash.
-> - Optionnel (voix/média) : `choco install sox ffmpeg` (Chocolatey) ou installe-les séparément.
+> - Installation **manuelle** de la voix (si `install.cmd` n'est pas utilisé) :
+>   ```powershell
+>   winget install Gyan.FFmpeg
+>   winget install sox_ng.sox_ng
+>   winget install Python.Python.3.12
+>   py -3.12 -m venv "$env:USERPROFILE\.venvs\zer0-whisper"
+>   & "$env:USERPROFILE\.venvs\zer0-whisper\Scripts\python.exe" -m pip install "faster-whisper" "av<16"
+>   [Environment]::SetEnvironmentVariable("ZER0_PYTHON", "$env:USERPROFILE\.venvs\zer0-whisper\Scripts\python.exe", "User")
+>   ```
+>   Redémarre ensuite le terminal. Zer0 détecte aussi automatiquement le venv
+>   `~/.venvs/zer0-whisper`, même si `ZER0_PYTHON` n'est pas encore exporté.
 
 ### Binaires précompilés
 
@@ -218,7 +256,7 @@ Silicon)** et **Windows (x86_64)** dans [Releases](https://github.com/Richerrail
 |---|---|---|
 | 🐧 **Linux** | `build-essential pkg-config` · audio `pipewire`/`pulseaudio-utils` · `wl-clipboard`\|`xclip` · `mpv`/`ffmpeg` | cible principale (testé) |
 | 🍎 **macOS** | Xcode CLT · `brew install sox mpv ffmpeg` | via `pbcopy`, micro via `sox` |
-| 🪟 **Windows** | **Visual Studio Build Tools (C++)** · `choco install sox ffmpeg` | `code_exec` = `cmd /C` → Git Bash/WSL conseillé |
+| 🪟 **Windows** | **Visual Studio Build Tools (C++)** · `winget install Gyan.FFmpeg` + `winget install sox_ng.sox_ng` | micro via `sox_ng` ; `code_exec` = `cmd /C` → Git Bash/WSL conseillé |
 
 ### Mode 100 % local (aucune clé API)
 
@@ -358,8 +396,10 @@ Assistante vocale intégrée, **sans boîte chat ni barre dédiée** :
   (`en veille` / `écoute…` / `réfléchit…` / `parle…`), mini-visualiseur animé.
 - **Deux boutons** à droite de la barre de saisie : `0chan:ON/off` et `MIC:REC/off`
   — cliquables à la souris, ou **`F8`** (0chan) / **`F10`** (micro).
-- Le **micro** enregistre (`pw-record`, 16 kHz) puis transcrit (`faster-whisper`) ; le texte
-  reconnu est envoyé **dans la chat de l'agent**, comme un message tapé.
+- Le **micro** enregistre en WAV mono 16 kHz (`pw-record`, `parecord`, `arecord`,
+  `sox_ng`/`sox`) puis transcrit (`faster-whisper`) ; le texte reconnu est envoyé
+  **dans la chat de l'agent**, comme un message tapé. Sous Windows, `sox_ng` est
+  recommandé : l'ancien SoX 14.4 ne sait pas toujours ouvrir le micro par défaut.
 - L'avatar et la voix ne dupliquent **pas** l'UI : ils réutilisent chat + input de l'agent.
 
 Roadmap et détails : [`BRAINSTORM_ZEROCHAN.md`](./BRAINSTORM_ZEROCHAN.md).

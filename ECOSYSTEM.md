@@ -40,7 +40,7 @@ dépendance Python pour le noyau.
 | `llama-server` (llama.cpp) | inférence locale |
 | `ffplay` / `mpv` / `paplay` | `/radio` |
 | `taskset` (Linux) | limite 2 cœurs du serveur local |
-| `sox` | enregistrement micro (macOS/Windows, et Linux sans PipeWire/Pulse) |
+| `sox_ng` / `sox` | enregistrement micro (Windows/macOS, et Linux sans PipeWire/Pulse) |
 | `pbcopy` / `clip` | presse-papier macOS / Windows |
 
 ---
@@ -66,7 +66,7 @@ Formats : `mp3 wav ogg flac m4a opus aac wma`. Lecture en **playlist** (enchaîn
 | Ouvrir un fichier | `xdg-open`/`gio` | `open` | `cmd start` |
 | Python | `python3`/`python` | `python3` | `python` |
 | Horodatage (`/bintime`, logs) | `date` | `date` | **PowerShell** |
-| Micro (zero-chan) | pw-record / parecord / arecord | **sox** | **sox** |
+| Micro (zero-chan) | pw-record / parecord / arecord | **sox** | **sox_ng** / sox |
 | `/radio` | ✅ | ✅ (ffplay/mpv) | ✅ (ffplay/mpv) |
 | `scripts/serve.sh` (`taskset`) | ✅ | ❌ (llama-server direct) | ❌ |
 
@@ -74,7 +74,11 @@ Formats : `mp3 wav ogg flac m4a opus aac wma`. Lecture en **playlist** (enchaîn
 - **Linux (Debian/Ubuntu/Kali)** : `build-essential pkg-config` ; audio
   `pipewire` / `pulseaudio-utils` / `alsa-utils` ; `wl-clipboard` **ou** `xclip` ; `mpv`/`ffmpeg`.
 - **macOS** : Xcode Command Line Tools (`xcode-select --install`) ; `brew install sox mpv ffmpeg`.
-- **Windows** : **Visual Studio Build Tools (C++)** ; `choco install sox ffmpeg`.
+- **Windows** : **Visual Studio Build Tools (C++)** ;
+  `winget install Gyan.FFmpeg` puis `winget install sox_ng.sox_ng`.
+  Le paquet Chocolatey `sox` n'est plus publié ; `sox_ng` sait ouvrir le
+  périphérique d'enregistrement Windows alors que SoX 14.4 peut annoncer
+  « no default audio device ».
 
 ### Passerelle `zer0-gw`
 Le binaire `zer0-gw` est **autonome** (hors noyau) : il fait transiter le trafic vers un dossier
@@ -84,12 +88,22 @@ passphrase exigée à chaque lancement). Il n'est **pas** prévu pour être lanc
 
 ### Limites connues (Windows)
 - `code_exec` utilise **`cmd /C`** : installe **Git Bash** ou **WSL** pour les commandes bash.
+- Le micro Zero-chan dépend de **SoX_ng** (recommandé) ou d'un SoX capable
+  d'ouvrir le périphérique d'enregistrement Windows ; l'arrêt brutal du
+  processus est compensé par une réparation de l'en-tête WAV.
 - **Pas de `taskset`** → lance `llama-server` sans limite de cœurs.
 - Les modules `mods/` (Qt6, torrent) ne sont **pas prévus** pour Windows.
 
 ### Installation automatique
-`./scripts/install.sh` détecte la distribution Linux (Debian/Ubuntu/Kali, Fedora, Arch,
-openSUSE) et installe les dépendances ; `--minimal` ne prend que le nécessaire à la compilation.
+
+- **Linux/macOS** : `./scripts/install.sh` détecte la distribution (Debian/Ubuntu/Kali,
+  Fedora, Arch, openSUSE, macOS/Homebrew), installe les dépendances audio/média,
+  crée le venv `~/.venvs/zer0-whisper` avec `faster-whisper`, puis compile.
+  `--minimal` exclut la voix et les médias.
+- **Windows** : `.\scripts\install.cmd` installe Rust, Git, Visual Studio Build Tools,
+  FFmpeg, SoX_ng, Python 3.12 et le venv Whisper, puis compile. `-VoiceOnly`
+  limite l'opération à Zero-chan ; `-Minimal` exclut la voix ; `-SkipBuild`
+  saute la compilation.
 
 ---
 

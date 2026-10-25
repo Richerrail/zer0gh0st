@@ -1,3 +1,26 @@
+## v0.6.12 — Micro Windows et installation des prérequis (2026-10-25)
+
+Contribution de **darkdober4** (PR #5) :
+
+- **Zero-chan sous Windows** : prise en charge de `sox_ng`, qui ouvre réellement le périphérique
+  d'enregistrement (l'ancien SoX 14.4 peut répondre « no default audio device »). L'arrêt est
+  suivi d'une réparation des tailles RIFF du WAV pour que `faster-whisper` puisse le lire.
+- Le message « micro indisponible » affiche la **cause réelle** et la commande d'installation
+  adaptée au système.
+- Le venv STT `~/.venvs/zer0-whisper` est détecté automatiquement (`ZER0_PYTHON` reste prioritaire).
+- **Installation des prérequis** : `scripts/install.sh` (Linux/macOS) installe l'enregistreur et
+  le venv Whisper ; `scripts/install-windows.ps1` + `install.cmd` font de même sous Windows
+  (Rust, Build Tools, FFmpeg, SoX_ng, Python 3.12, `faster-whisper` + `av<16`). Les scripts sont
+  validés en CI (`bash -n`, parseur PowerShell).
+
+Suites apportées après la revue :
+
+- `repair_wav()` ne réécrit plus un WAV **déjà cohérent** : il n'intervient que si la taille du
+  chunk `data` est provisoire (0 ou supérieure aux octets disponibles), donc il ne peut pas
+  gonfler un fichier qui contient des chunks annexes après `data`.
+- Le `stderr` de l'enregistreur est **drainé en continu** dans un thread : un enregistreur
+  bavard ne peut plus bloquer sur un tube plein (enregistrement vide sans message).
+
 ## v0.6.11 — Tâches en cours animées (2026-10-24)
 
 - Dans la TUI, le marqueur d'une tâche `en cours` cycle `* ¤ o O 0 O o ¤` (~480 ms par pas)
