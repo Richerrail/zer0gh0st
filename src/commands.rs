@@ -1017,9 +1017,9 @@ pub async fn search(query: &str, max: usize) -> Result<Vec<String>> {
         return Err(anyhow!("usage: search <requête>"));
     }
     let max = max.clamp(1, 20);
-    let hits = crate::search::web_search(q, max).await?;
+    let (hits, backend) = crate::search::web_search_with_backend(q, max).await?;
     Ok(vec![format!(
-        "🔎 {q}\n{}",
+        "🔎 {q}  (moteur : {backend})\n{}",
         crate::search::format_hits(&hits)
     )])
 }
