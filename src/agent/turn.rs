@@ -36,6 +36,21 @@ fn should_failover(status: Option<u16>, err: &str) -> bool {
     }
 }
 
+/// Message final quand aucun endpoint n'a répond, jamais vide.
+fn failure_message(last_err: &str, skipped: &[String]) -> String {
+    if !last_err.trim().is_empty() {
+        return format!("tous les endpoints ont échoué — dernier : {last_err}");
+    }
+    if skipped.is_empty() {
+        return "aucun endpoint n'a répondu (chaîne vide ?)".to_string();
+    }
+    format!(
+        "aucun endpoint disponible : {} marqué(s) en échec récent (nouvel essai dans ≤ 120 s). \
+         Vérifie que le serveur local tourne (`scripts/serve.sh`) ou change de provider.",
+        skipped.join(", ")
+    )
+}
+
 pub async fn run_turn(
     endpoints: Vec<Endpoint>,
     system: String,
@@ -100,9 +115,13 @@ pub async fn run_turn_budgeted(
         Option<String>,
     )> = None;
     let mut last_err = String::new();
+    // Endpoints sautés parce qu'ils sont marqués en échec récent : sans cette
+    // liste, si TOUS sont sautés, le message final était vide.
+    let mut skipped: Vec<String> = Vec::new();
 
     'endpoints: for ep in endpoints.iter() {
         if route::is_failed(&ep.label) {
+            skipped.push(ep.label.clone());
             let _ = ui.send(UiEvent::Info(format!(
                 "⏭ {} ignoré (échec récent)",
                 ep.label
@@ -196,9 +215,7 @@ pub async fn run_turn_budgeted(
     }
 
     let Some((client, mut content, mut calls, mut finish)) = chosen else {
-        let _ = ui.send(UiEvent::Error(format!(
-            "tous les endpoints ont échoué. dernier: {last_err}"
-        )));
+        let _ = ui.send(UiEvent::Error(failure_message(&last_err, &skipped)));
         return;
     };
 
@@ -298,7 +315,17 @@ pub async fn run_turn_budgeted(
 
 #[cfg(test)]
 mod tests {
-    use super::should_failover;
+    use super::{failure_message, should_failover};
+
+    #[test]
+    fn failure_message_is_never_empty() {
+        let msg = failure_message("", &["local/qwen".to_string()]);
+        assert!(msg.contains("local/qwen"));
+        assert!(msg.contains("aucun endpoint"));
+        assert!(!failure_message("", &[]).trim().is_empty());
+        let with_err = failure_message("connexion refusée", &[]);
+        assert!(with_err.contains("connexion refusée"));
+    }
 
     #[test]
     fn failover_is_selective() {

@@ -1260,6 +1260,12 @@ async fn run_once(
                 print!("{t}");
                 std::io::stdout().flush().ok();
             }
+            // Sans ce bras, un modèle qui ne produit que du raisonnement
+            // affichait **rien** en headless (cas d'un llama-server « thinking »).
+            UiEvent::Reasoning(t) => {
+                print!("{t}");
+                std::io::stdout().flush().ok();
+            }
             UiEvent::ToolCall { name, args } => println!("\n\n⚙ {name} {args}"),
             UiEvent::ToolResult(r) => {
                 println!("⚙ → {}", r.lines().next().unwrap_or(""));

@@ -84,14 +84,23 @@ pub async fn list(
     if let Some(k) = key {
         req = req.bearer_auth(k);
     }
-    // Erreurs de construction (base_url invalide — ex. une clé en base_url)
-    // explicites : on affiche l'URL au lieu d'un nu « builder error ».
+    // Distinguer trois cas, sinon un serveur éteint était annoncé « URL invalide » :
+    // 1) URL mal formée (builder) ; 2) injoignable (connect/timeout) ; 3) autre.
     let resp = req.send().await.map_err(|e| {
-        if e.is_builder() || e.is_request() {
+        if e.is_builder() {
             anyhow!(
                 "URL invalide : {url} — vérifie la base_url du provider « {} » (/provider list)",
                 provider.id
             )
+        } else if e.is_connect() || e.is_timeout() {
+            if provider.id == "local" {
+                anyhow!(
+                    "provider « local » injoignable sur {url} — lance le serveur : \
+                     `cd ZER0v1 && scripts/serve.sh` (puis /model)"
+                )
+            } else {
+                anyhow!("provider « {} » injoignable ({url}) : {e}", provider.id)
+            }
         } else {
             anyhow!("{url} : {e}")
         }
