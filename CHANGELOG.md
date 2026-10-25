@@ -1,3 +1,11 @@
+## v0.6.11 — Tâches en cours animées (2026-10-24)
+
+- Dans la TUI, le marqueur d'une tâche `en cours` cycle `* ¤ o O 0 O o ¤` (~480 ms par pas)
+  au lieu de rester `[~]` : on voit immédiatement ce qui tourne, même sans couleur.
+- Liste chargée une fois puis re-rendue depuis un cache (`App::task_view`) : aucun accès
+  disque par frame. Toute autre commande `task` invalide la vue.
+- `format_tasks()` pur et `SPINNER` testés (cycle, bouclage, marqueurs `[ ]`/`[x]` intacts).
+
 ## v0.6.10 — Persona persistante et diagnostic (2026-10-24)
 
 - **La persona active est persistée** (`config.toml`, champ `persona`) et restaurée au
