@@ -1,3 +1,13 @@
+## v0.6.9 — Contexte : chiffres exacts, salutations silencieuses (2026-10-24)
+
+- **`/context` ne ment plus** : il affichait « compaction auto à : 6000 tokens » (valeur codée
+  en dur) ; il affiche la fenêtre réelle du modèle, l'historique estimé, le pourcentage
+  utilisé et le vrai seuil (60 % de la fenêtre, min 4 000).
+- **Fenêtre inconnue = 32 768** par défaut (au lieu de 200 000) : surestimer la fenêtre
+  faisait envoyer un historique trop long, refusé par le provider (400).
+- **Salutations ignorées par la base de connaissance** : « salut », « bonjour », « merci »…
+  ne produisent plus de tokens significatifs, donc aucune requête SQLite et aucune injection.
+
 ## v0.6.8 — Recherche web : quatre moteurs au lieu d'un (2026-10-24)
 
 - **Chaîne de repli** : DuckDuckGo HTML (POST + en-têtes de navigateur) → DuckDuckGo Lite →
