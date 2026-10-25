@@ -1,3 +1,16 @@
+## v0.6.14 — Mode local : diagnostics honnêtes (2026-10-25)
+
+- **« aucun modèle » / « /model use ne marche pas »** : `models::list` annonçait « URL invalide »
+  pour une simple connexion refusée. Il distingue désormais URL invalide (builder) et provider
+  injoignable (connect/timeout), avec la commande à lancer pour `local` (`scripts/serve.sh`).
+- **Message d'échec vide** : quand tous les endpoints étaient sautés (marqués en échec récent),
+  l'erreur affichait « dernier: » sans rien. Elle liste maintenant les endpoints concernés et
+  le délai d'attente.
+- **`--once` imprime le raisonnement** : un modèle « thinking » qui ne remplit que
+  `reasoning_content` n'affichait rien du tout en headless.
+- **`scripts/serve.sh`** : `--reasoning off` retiré — sur llama-server b10809 ce drapeau fige le
+  serveur (vérifié avec des prompts minuscules).
+
 ## v0.6.13 — Installer Zero-chan : choisir un Python compatible (2026-10-25)
 
 - Sur une machine où un shim `mise`/`pyenv` expose `python3` en **3.15**, l'installeur prenait
