@@ -124,6 +124,22 @@ fn stderr_text(mut stderr: Option<ChildStderr>) -> String {
     s.trim().chars().take(400).collect()
 }
 
+/// Drains `stderr` **pendant** l'enregistrement, dans un thread.
+///
+/// Sans ça, le tube (64 Ko) peut se remplir si l'enregistreur écrit beaucoup :
+/// le processus se bloque, l'enregistrement s'arrête sans le dire. Le thread
+/// se termine à la fermeture du tube (processus tué), et `stop_rec` récupère le
+/// texte avec `join`.
+fn drain_stderr(stderr: Option<ChildStderr>) -> Option<std::thread::JoinHandle<String>> {
+    stderr.map(|mut e| {
+        std::thread::spawn(move || {
+            let mut s = String::new();
+            let _ = e.read_to_string(&mut s);
+            s
+        })
+    })
+}
+
 /// Répare les tailles RIFF/data d'un WAV interrompu brutalement.
 ///
 /// Windows ne permet pas d'envoyer SIGINT comme Unix. L'arrêt du processus
@@ -152,7 +168,7 @@ fn repair_wav(path: &Path) -> std::io::Result<()> {
             bytes[pos + 7],
         ]) as usize;
         if chunk_id == b"data" {
-            data_pos = Some(pos);
+            data_pos = Some((pos, chunk_size));
             break;
         }
         let payload = pos + 8;
@@ -168,10 +184,21 @@ fn repair_wav(path: &Path) -> std::io::Result<()> {
         pos = next;
     }
 
-    let data_pos = data_pos
+    let (data_pos, declared) = data_pos
         .ok_or_else(|| Error::new(ErrorKind::InvalidData, "chunk WAV « data » introuvable"))?;
     let payload = data_pos + 8;
-    let mut data_len = bytes.len().saturating_sub(payload);
+    let available = bytes.len().saturating_sub(payload);
+    // Fichier déjà cohérent (SoX l'a finalisé sous Unix) : ne rien réécrire.
+    if declared == available {
+        return Ok(());
+    }
+    // Taille manifestement provisoire ? Sinon ce sont des chunks annexes
+    // (`LIST`, `INFO`…) qui suivent `data` : la taille déclarée est fiable.
+    let provisional = declared == 0 || declared > available || declared % 2 != 0;
+    if !provisional {
+        return Ok(());
+    }
+    let mut data_len = available;
     // Un échantillon PCM 16 bits fait 2 octets : ignore un éventuel octet
     // partial écrit juste avant l'arrêt du processus.
     data_len -= data_len % 2;
@@ -191,7 +218,7 @@ pub struct ZeroChan {
     pub frame: u32,
     pub last: String,
     rec: Option<Child>,
-    rec_stderr: Option<ChildStderr>,
+    rec_stderr: Option<std::thread::JoinHandle<String>>,
     rec_started: Option<std::time::Instant>,
 }
 
@@ -268,7 +295,7 @@ impl ZeroChan {
             return false;
         }
 
-        self.rec_stderr = child.stderr.take();
+        self.rec_stderr = drain_stderr(child.stderr.take());
         self.rec = Some(child);
         self.rec_started = Some(std::time::Instant::now());
         self.state = State::Listening;
@@ -305,7 +332,15 @@ impl ZeroChan {
             let _ = c.wait();
         }
 
-        let detail = stderr_text(self.rec_stderr.take());
+        let detail = self
+            .rec_stderr
+            .take()
+            .and_then(|h| h.join().ok())
+            .unwrap_or_default()
+            .trim()
+            .chars()
+            .take(400)
+            .collect::<String>();
         let path = rec_path();
         if !path.exists() {
             self.last = if detail.is_empty() {
@@ -617,6 +652,33 @@ mod tests {
         assert_eq!(&header[0..4], b"RIFF");
         assert_eq!(&header[8..12], b"WAVE");
         assert_eq!(&header[36..40], b"data");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn repair_wav_leaves_a_coherent_file_untouched() {
+        let path = temp_wav("coherent");
+        let mut wav = vec![0u8; 44];
+        wav[0..4].copy_from_slice(b"RIFF");
+        wav[8..12].copy_from_slice(b"WAVE");
+        wav[12..16].copy_from_slice(b"fmt ");
+        wav[16..20].copy_from_slice(&16u32.to_le_bytes());
+        wav[36..40].copy_from_slice(b"data");
+        wav.extend_from_slice(&[1u8; 100]);
+        // tailles exactes, comme les écrit SoX à la finalisation
+        let riff_size = (wav.len() - 8) as u32;
+        let data_size = (wav.len() - 44) as u32;
+        wav[4..8].copy_from_slice(&riff_size.to_le_bytes());
+        wav[40..44].copy_from_slice(&data_size.to_le_bytes());
+        std::fs::write(&path, &wav).unwrap();
+
+        let before = std::fs::read(&path).unwrap();
+        repair_wav(&path).unwrap();
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            before,
+            "fichier modifié inutilement"
+        );
         let _ = std::fs::remove_file(path);
     }
 
