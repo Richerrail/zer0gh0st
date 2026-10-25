@@ -1,3 +1,12 @@
+## v0.6.10 — Persona persistante et diagnostic (2026-10-24)
+
+- **La persona active est persistée** (`config.toml`, champ `persona`) et restaurée au
+  démarrage. Avant, `/whoami zero-vamp` puis un relancement perdait le persona sans le dire —
+  ce qui donnait l'impression que le persona n'agissait pas.
+- **`/system`** : affiche la persona active, si son texte est réellement dans le prompt, la
+  longueur du prompt système et son début. Vérifier au lieu de supposer.
+- `compose_system()` testé (base + persona), pour garantir le câblage.
+
 ## v0.6.9 — Contexte : chiffres exacts, salutations silencieuses (2026-10-24)
 
 - **`/context` ne ment plus** : il affichait « compaction auto à : 6000 tokens » (valeur codée
