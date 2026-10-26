@@ -463,6 +463,22 @@ pub fn resolve() -> Settings {
     // Un seul identifiant par provider : si la passerelle tourne (ou si
     // `gateway = true`), les providers intégrés passent par elle — la clé
     // reste dans zer0-gw et n'est jamais résolue dans l'agent.
+    // Mode local : un ancien sélecteur a pu enregistrer le **chemin absolu**
+    // renvoyé par `/v1/models`. On le ramène au nom de fichier sans extension.
+    let model = if provider.id == "local" {
+        let path = std::path::Path::new(&model);
+        if path.is_absolute() {
+            path.file_stem()
+                .and_then(|s| s.to_str())
+                .map(str::to_string)
+                .unwrap_or(model)
+        } else {
+            model
+        }
+    } else {
+        model
+    };
+
     let (base_url, api_key) = endpoint_for(&provider);
 
     Settings {

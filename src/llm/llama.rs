@@ -31,12 +31,24 @@ fn effective_max_tokens(model: &str, requested: u32) -> u32 {
     }
 }
 
+/// Comment les outils sont exposés au modèle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum ToolsMode {
+    /// API OpenAI `tools` + `tool_choice` (cloud, llama.cpp récent).
+    #[default]
+    Native,
+    /// Protocole texte `<tool_call>{…}</tool_call>` : nécessaire quand le
+    /// serveur local ne sait pas (ou plus) construire la grammaire des outils.
+    Prompt,
+}
+
 /// Per-request generation options.
 #[derive(Clone, Debug)]
 pub struct ChatOptions {
     pub max_tokens: u32,
     pub thinking: bool,
     pub temperature: f32,
+    pub tools_mode: ToolsMode,
 }
 
 impl Default for ChatOptions {
@@ -45,6 +57,7 @@ impl Default for ChatOptions {
             max_tokens: 2048,
             thinking: false,
             temperature: 0.3,
+            tools_mode: ToolsMode::Native,
         }
     }
 }
@@ -136,7 +149,7 @@ impl ApiClient {
             body["reasoning"] = json!({ "enabled": options.thinking });
         }
 
-        if !tools.is_empty() {
+        if options.tools_mode == ToolsMode::Native && !tools.is_empty() {
             let specs: Vec<serde_json::Value> = tools.iter().map(ToolSpec::to_openai).collect();
             body["tools"] = json!(specs);
             body["tool_choice"] = json!("auto");
@@ -415,7 +428,16 @@ impl ApiClient {
 
         content = sanitize_content(&content);
 
-        let calls = partial
+        // Mode « prompt » : le modèle écrit <tool_call>{…}</tool_call> dans sa
+        // réponse. On retire le bloc du texte et on synthétise les appels.
+        let mut prompt_calls = Vec::new();
+        if options.tools_mode == ToolsMode::Prompt {
+            let (clean, parsed) = parse_prompt_tool_calls(&content);
+            content = clean;
+            prompt_calls = parsed;
+        }
+
+        let mut calls: Vec<ToolCall> = partial
             .into_iter()
             .filter(|c| !c.name.is_empty())
             .map(|c| ToolCall {
@@ -435,6 +457,7 @@ impl ApiClient {
                 },
             })
             .collect();
+        calls.extend(prompt_calls);
 
         Ok((content, calls, finish_reason))
     }
@@ -458,6 +481,64 @@ fn definitive_quota(body: &str) -> Option<String> {
     }
     let msg: String = body.chars().filter(|c| !c.is_control()).take(220).collect();
     Some(msg.trim().to_string())
+}
+
+/// Extrait les appels d'outils d'un texte au format `<tool_call>…</tool_call>`.
+///
+/// Tolérant sur la forme : `{"name":…,"arguments":{…}}` ou
+/// `{"tool":…,"args":{…}}`, et arguments en chaîne JSON ou en objet.
+/// Retourne le texte nettoyé et les appels (ids synthétiques `local_N`).
+pub fn parse_prompt_tool_calls(content: &str) -> (String, Vec<ToolCall>) {
+    let mut clean = String::with_capacity(content.len());
+    let mut calls = Vec::new();
+    let mut rest = content;
+    loop {
+        let Some(start) = rest.find("<tool_call>") else {
+            clean.push_str(rest);
+            break;
+        };
+        clean.push_str(&rest[..start]);
+        let after = &rest[start + "<tool_call>".len()..];
+        let Some(end) = after.find("</tool_call>") else {
+            // Bloc non fermé : on garde le texte tel quel (le modèle a été coupé).
+            clean.push_str(&rest[start..]);
+            break;
+        };
+        let block = after[..end].trim();
+        let json = block
+            .trim_start_matches("```json")
+            .trim_start_matches("```")
+            .trim_end_matches("```")
+            .trim();
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(json) {
+            let name = v
+                .get("name")
+                .or_else(|| v.get("tool"))
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            let args = v
+                .get("arguments")
+                .or_else(|| v.get("args"))
+                .or_else(|| v.get("parameters"))
+                .cloned()
+                .unwrap_or_else(|| json!({}));
+            if !name.is_empty() {
+                let arguments = match args {
+                    serde_json::Value::String(s) => s,
+                    other => other.to_string(),
+                };
+                calls.push(ToolCall {
+                    id: format!("local_{}", calls.len() + 1),
+                    kind: "function".into(),
+                    function: FunctionCall { name, arguments },
+                });
+            }
+        }
+        rest = &after[end + "</tool_call>".len()..];
+    }
+    (clean.trim().to_string(), calls)
 }
 
 /// En-têtes d'attribution envoyés à OpenRouter (tableau de bord + `HTTP-Referer`).
@@ -562,6 +643,32 @@ fn merge_call(partial: &mut Vec<PartialCall>, delta: ToolCallDelta) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prompt_tool_calls_are_parsed_and_removed_from_text() {
+        let text = "Je vérifie.\n<tool_call>{\"name\":\"code_exec\",\"arguments\":{\"command\":\"ls\"}}</tool_call>";
+        let (clean, calls) = parse_prompt_tool_calls(text);
+        assert_eq!(clean, "Je vérifie.");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function.name, "code_exec");
+        assert_eq!(calls[0].function.arguments, r#"{"command":"ls"}"#);
+    }
+
+    #[test]
+    fn prompt_tool_calls_accept_string_args_and_fences() {
+        let text = "<tool_call>```json\n{\"tool\":\"task_add\",\"args\":\"{\\\"text\\\":\\\"x\\\"}\"}\n```</tool_call>";
+        let (clean, calls) = parse_prompt_tool_calls(text);
+        assert!(clean.is_empty());
+        assert_eq!(calls[0].function.name, "task_add");
+        assert!(calls[0].function.arguments.contains("text"));
+    }
+
+    #[test]
+    fn unterminated_prompt_tool_call_is_left_as_text() {
+        let (clean, calls) = parse_prompt_tool_calls("avant <tool_call>{\"name\":\"x\"");
+        assert!(calls.is_empty());
+        assert!(clean.contains("avant"));
+    }
 
     #[test]
     fn free_models_get_a_lower_output_cap() {

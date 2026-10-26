@@ -2,7 +2,7 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::agent::history::ChatMessage;
 use crate::event::UiEvent;
-use crate::llm::llama::{ApiClient, ChatError, ChatOptions};
+use crate::llm::llama::{ApiClient, ChatError, ChatOptions, ToolsMode};
 use crate::route::{self, Endpoint};
 use crate::tools::{self, ToolSpec};
 
@@ -224,7 +224,19 @@ pub async fn run_turn_budgeted(
     let mut continuations: u32 = 0;
 
     for _ in 0..max_iterations {
-        let assistant = ChatMessage::assistant(content.clone(), calls.clone());
+        let assistant = if options.tools_mode == ToolsMode::Prompt && !calls.is_empty() {
+            // Sans API `tools`, on garde la trace de l'appel dans le texte.
+            let mut text = content.clone();
+            for c in &calls {
+                text.push_str(&format!(
+                    "\n<tool_call>{{\"name\":\"{}\",\"arguments\":{}}}</tool_call>",
+                    c.function.name, c.function.arguments
+                ));
+            }
+            ChatMessage::assistant(text, Vec::new())
+        } else {
+            ChatMessage::assistant(content.clone(), calls.clone())
+        };
         messages.push(assistant.clone());
 
         if calls.is_empty() {
@@ -289,7 +301,15 @@ pub async fn run_turn_budgeted(
             // async (l'outil `0box` → débat → sous-agent → outils → …).
             let result = tools::execute_boxed(&call.function.name, &call.function.arguments).await;
             let _ = ui.send(UiEvent::ToolResult(result.clone()));
-            let tool_msg = ChatMessage::tool_result(call.id.clone(), result);
+            let tool_msg = if options.tools_mode == ToolsMode::Prompt {
+                // Pas de rôle `tool` sans `tool_calls` : on répond en `user`.
+                ChatMessage::user(format!(
+                    "Résultat de l'outil `{}` :\n{}",
+                    call.function.name, result
+                ))
+            } else {
+                ChatMessage::tool_result(call.id.clone(), result)
+            };
             messages.push(tool_msg);
         }
 

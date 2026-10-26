@@ -22,6 +22,7 @@ pub mod http_client;
 pub mod jimmy;
 pub mod knowledge;
 pub mod llm;
+pub mod local;
 pub mod memory;
 pub mod models;
 pub mod mods;

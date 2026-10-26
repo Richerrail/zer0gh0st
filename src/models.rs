@@ -70,6 +70,25 @@ pub async fn list(
 ) -> Result<Vec<ModelEntry>> {
     let url = format!("{}/models", provider.base_url.trim_end_matches('/'));
 
+    // Mode local : le serveur n'expose que le modèle chargé. On liste les GGUF
+    // du dossier, sinon `/model` n'affiche rien ou un seul nom de chemin.
+    if provider.id == "local" {
+        let models = crate::local::scan_models();
+        if !models.is_empty() {
+            return Ok(models
+                .into_iter()
+                .map(|(id, path)| ModelEntry {
+                    id,
+                    name: Some(path.display().to_string()),
+                    context_length: None,
+                    pricing: None,
+                    benchmarks: None,
+                    architecture: None,
+                })
+                .collect());
+        }
+    }
+
     // Google's OpenAI-compat endpoint has no usable /models; use the native one.
     if provider.id == "google" {
         return list_google(http, key).await;

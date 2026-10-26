@@ -733,7 +733,18 @@ pub fn provider_use(id: &str) -> Result<Vec<String>> {
         g.model = Some(d.to_string());
     }
     crate::config::save_global(&g)?;
-    Ok(vec![format!("Provider actif: {}", p.name)])
+    let mut out = vec![format!("Provider actif: {}", p.name)];
+    if p.id == "local" {
+        out.push("⚠ Mode local : un seul modèle chargé.".to_string());
+        for l in crate::local::limitations() {
+            out.push(format!("  · {l}"));
+        }
+        out.push(
+            "  · llama-server est démarré automatiquement au premier message (port 8080)."
+                .to_string(),
+        );
+    }
+    Ok(out)
 }
 
 pub fn provider_remove(id: &str) -> Result<Vec<String>> {

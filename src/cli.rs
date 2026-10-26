@@ -547,6 +547,7 @@ pub async fn entry() -> Result<()> {
         max_tokens: cli.max_tokens,
         thinking: cli.think,
         temperature: 0.3,
+        tools_mode: crate::llm::llama::ToolsMode::Native,
     };
 
     let mut settings = config::resolve();
@@ -752,6 +753,7 @@ async fn provoke_cmd(role: String, task: Vec<String>) -> Result<()> {
         max_tokens: 2048,
         thinking: false,
         temperature: 0.3,
+        tools_mode: crate::llm::llama::ToolsMode::Native,
     };
     let prompt = format!(
         "Le cancre Jimmy devait « {t} » et a seulement répondu : « {jab} ». \
@@ -784,6 +786,12 @@ async fn zerobox_cmd(topic: Vec<String>, perspectives: Vec<String>) -> Result<()
     };
 
     let settings = config::resolve();
+    if settings.provider_id == "local" {
+        anyhow::bail!(
+            "0box n'est pas disponible en mode local : le débat multi-agents suppose \
+             plusieurs modèles (roles). Utilise un provider cloud, ou /ask en local."
+        );
+    }
     let system = config::system_prompt_override().unwrap_or_else(|| DEFAULT_SYSTEM.to_string());
     // Même enrichissement que la TUI (tui:172) et --once : sans le bloc Environnement
     // (OS, dossiers), les modèles croyaient être sous Linux et perdaient leurs
@@ -793,6 +801,7 @@ async fn zerobox_cmd(topic: Vec<String>, perspectives: Vec<String>) -> Result<()
         max_tokens: 8192,
         thinking: false,
         temperature: 0.3,
+        tools_mode: crate::llm::llama::ToolsMode::Native,
     };
 
     // En headless, tous les outils sont armés (même politique que --once).
@@ -913,6 +922,7 @@ async fn jev_cmd(file: String) -> Result<()> {
         max_tokens: 512,
         thinking: false,
         temperature: 0.2,
+        tools_mode: crate::llm::llama::ToolsMode::Native,
     };
     let nchars = content.chars().count();
     eprintln!("📊 jev : {file} ({nchars} caractères)…");
@@ -1223,6 +1233,14 @@ async fn run_once(
     use std::io::Write;
 
     let mut system = enrich_system(system);
+    let prompt_tools = settings.provider_id == "local"
+        && std::env::var("ZER0_LOCAL_TOOLS")
+            .map(|v| v.eq_ignore_ascii_case("prompt"))
+            .unwrap_or(false);
+    let mut options = options;
+    if prompt_tools {
+        options.tools_mode = crate::llm::llama::ToolsMode::Prompt;
+    }
 
     // Liste explicite des outils disponibles dans le prompt.
     if !all_tools.is_empty() {
@@ -1232,12 +1250,21 @@ async fn run_once(
         for t in &all_tools {
             system.push_str(&format!("- {} : {}\n", t.name, t.description));
         }
+        if prompt_tools {
+            system.push_str("\n\n## Appel d'outils (mode local)\nLe serveur local n'expose pas l'API `tools`. Pour appeler un outil, écris UNIQUEMENT :\n<tool_call>{\"name\":\"code_exec\",\"arguments\":{\"command\":\"ls\"}}</tool_call>\nUn seul appel par réponse, puis arrête-toi : le résultat te sera renvoyé. N'invente jamais un résultat.\n");
+        }
     }
 
     // Connaissance locale : même bloc que la TUI (`crate::knowledge_block`).
     if let Some((block, srcs)) = crate::knowledge_block(&prompt).await {
         system.push_str(&block);
         eprintln!("📚 connaissance injectée : {}", srcs.join(", "));
+    }
+
+    // Mode local : démarrer llama-server si besoin (sinon tout échoue).
+    if settings.provider_id == "local" {
+        eprintln!("⏳ mode local : vérification de llama-server…");
+        crate::local::ensure(Some(&settings.model)).await?;
     }
 
     let role = route::auto_role(&prompt);

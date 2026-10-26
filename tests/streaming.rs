@@ -298,6 +298,46 @@ async fn run_turn_fails_over_to_the_next_endpoint() {
 
 /// Les outils déclarés partent bien dans le corps de la requête (sinon le
 /// modèle n'a aucun moyen de les appeler).
+/// Mode prompt : le modèle écrit `<tool_call>…</tool_call>` dans le contenu.
+/// On doit extraire l'appel, retirer le bloc du texte, et **ne pas** envoyer
+/// le paramètre `tools` (c'est tout l'intérêt pour un serveur local bridé).
+#[tokio::test]
+async fn prompt_mode_parses_text_tool_calls() {
+    let mock = Mock::start(vec![sse(&[
+        r#"{"choices":[{"delta":{"content":"Je regarde. <tool_call>{\"name\":\"code_exec\",\"arguments\":{\"command\":\"ls\"}}</tool_call>"}}]}"#,
+        r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+        "[DONE]",
+    ])])
+    .await;
+    let client = ApiClient::new(&mock.base, "local", None);
+    let (tx, _rx) = unbounded_channel::<UiEvent>();
+    let opts = ChatOptions {
+        tools_mode: zer0::llm::llama::ToolsMode::Prompt,
+        ..ChatOptions::default()
+    };
+    let (content, calls, _) = client
+        .stream_chat(
+            "s",
+            &[ChatMessage::user("x")],
+            &zer0::tools::all(),
+            &opts,
+            &tx,
+        )
+        .await
+        .unwrap();
+    assert!(
+        !content.contains("<tool_call>"),
+        "bloc non retiré: {content}"
+    );
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].function.name, "code_exec");
+    let body = mock.requests()[0]
+        .split_once("\r\n\r\n")
+        .map(|(_, b)| b.to_string())
+        .unwrap_or_default();
+    assert!(!body.contains("\"tools\":"), "tools envoyés en mode prompt");
+}
+
 #[tokio::test]
 async fn tool_specs_are_sent_to_the_provider() {
     let mock = Mock::start(vec![sse(&[

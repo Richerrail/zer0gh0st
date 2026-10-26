@@ -58,10 +58,24 @@ git clone https://github.com/Richerrail/zer0gh0st.git && cd zer0gh0st
 Mode **100 % local** (aucune clé API) :
 
 ```bash
-export ZER0_MODEL=/chemin/vers/mon-modele.Q4_0.gguf
-./scripts/serve.sh             # llama-server sur :8080
-./target/release/zer0          # puis, dans la TUI : /provider local
+# 1. dépose un GGUF (format llama.cpp, template de chat inclus) ici :
+#    ~/ZER0v1/models/ollama_models/mon-modele.gguf
+# 2. dans la TUI :
+/provider use local      # llama-server est démarré automatiquement (port 8080)
+/model                   # menu : tous les .gguf du dossier sont listés
 ```
+
+`scripts/serve.sh` reste disponible pour lancer le serveur à la main
+(`ZER0_MODEL=…`, 2 cœurs par défaut). **Le mode local est limité** : un seul
+modèle chargé, donc `/role`, `/route`, `0box` et `/select` ne s'appliquent pas
+(rappelé au démarrage). Le modèle doit contenir son **template de chat** dans le
+GGUF : un blob extrait d'ollama ne suffit pas (ollama garde le template et le
+parseur d'outils dans son manifeste). Les fichiers `mmproj` sont ignorés (ce sont
+des projecteurs multimodaux).
+
+Les tool calls utilisent l'API `tools` native (llama.cpp ≥ 0.6) ; avec un
+serveur plus ancien, `ZER0_LOCAL_TOOLS=prompt` bascule sur le protocole
+texte `<tool_call>{…}</tool_call>`.
 
 Mode **cloud** (clé optionnelle) :
 
