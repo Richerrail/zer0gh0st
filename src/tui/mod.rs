@@ -97,6 +97,8 @@ pub struct App {
     pub base_system: String,
     /// Prompt dédié au mode local (court, sans les fonctions cloud).
     pub system_local: String,
+    /// Streaming réseau (`/stream off` = réponse en un bloc).
+    pub stream_enabled: bool,
     /// Active persona name, if any.
     pub persona: Option<String>,
     pub all_tools: Vec<ToolSpec>,
@@ -221,6 +223,7 @@ impl App {
                 thinking: self.thinking,
                 temperature: self.temperature,
                 tools_mode: crate::llm::llama::ToolsMode::Native,
+                stream: true,
             },
             all_tools: self.all_tools.clone(),
             read_write: self.read_write,
@@ -310,6 +313,7 @@ pub async fn run(
         system: system.clone(),
         base_system: system.clone(),
         system_local: crate::config::local_system_prompt(),
+        stream_enabled: crate::config::stream_enabled(),
         persona: None,
         all_tools,
         read_write: true,
@@ -650,6 +654,7 @@ fn start_turn(app: &mut App, text: String, ui_tx: &UnboundedSender<UiEvent>) {
         } else {
             crate::llm::llama::ToolsMode::Native
         },
+        stream: app.stream_enabled,
     };
     let messages = app.conversation.clone();
     let kb_auto = app.kb_auto;
@@ -977,6 +982,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
                     thinking: app.thinking,
                     temperature: app.temperature,
                     tools_mode: crate::llm::llama::ToolsMode::Native,
+                    stream: true,
                 };
                 let ui = ui_tx.clone();
                 tokio::spawn(async move {
@@ -1021,7 +1027,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
         "/system" => {
             let local = args.first().copied() == Some("local");
             let cloud = args.first().copied() == Some("cloud");
-            let text = args[1..].join(" ");
+            let text = args.get(1..).map(|a| a.join(" ")).unwrap_or_default();
             let text = text.trim();
             if local || cloud {
                 match text {
@@ -1124,6 +1130,32 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
                 app.system.chars().count(),
             )));
         }
+        "/stream" => {
+            let wanted = match args.first().copied() {
+                Some("on") => true,
+                Some("off") => false,
+                None => !app.stream_enabled,
+                Some(other) => {
+                    app.messages.push(ChatMessage::notice(format!(
+                        "usage: /stream [on|off] (reçu: {other})"
+                    )));
+                    return;
+                }
+            };
+            app.stream_enabled = wanted;
+            let mut g = crate::config::load_global();
+            g.stream = Some(wanted);
+            match crate::config::save_global(&g) {
+                Ok(()) => app.messages.push(ChatMessage::notice(if wanted {
+                    "Streaming activé : réponse affichée au fil de l'eau.".to_string()
+                } else {
+                    "Non-streaming activé : réponse complète en un bloc (utile si le flux local se bloque).".to_string()
+                })),
+                Err(e) => app
+                    .messages
+                    .push(ChatMessage::notice(format!("Réglage non enregistré: {e}"))),
+            }
+        }
         "/setup" => wizard::start(app, ui_tx, wizard::Step::Inference),
         "/login" => wizard::start(app, ui_tx, wizard::Step::Provider),
         "/logout" => match crate::commands::provider_remove(&app.provider_id) {
@@ -1184,6 +1216,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
              /whoami [nom|off]           persona (prompt système alternatif, persistée)\n\
              /system                     prompt actif (local/cloud) + persona\n\
              /system local|cloud <texte> prompt dédié (… reset = défaut)\n\
+             /stream [on|off]            streaming réseau (off = réponse en bloc)\n\
              /vault [status|lock]        coffre de clés (setup/unlock en CLI)\n\
              /pdf info|text|merge|split  outils PDF locaux\n\
              /jev <fichier>              score qualité code 0-3 (rôle review)\n\
@@ -1806,6 +1839,7 @@ fn cmd_ask(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
         thinking: app.thinking,
         temperature: app.temperature,
         tools_mode: crate::llm::llama::ToolsMode::Native,
+        stream: true,
     };
     let ui = ui_tx.clone();
     let role_s = role.to_string();
@@ -1855,6 +1889,7 @@ fn cmd_review(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
         thinking: app.thinking,
         temperature: app.temperature,
         tools_mode: crate::llm::llama::ToolsMode::Native,
+        stream: true,
     };
     let ui = ui_tx.clone();
     let path_s = path.to_string();
@@ -1900,6 +1935,7 @@ fn cmd_work(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
         thinking: app.thinking,
         temperature: app.temperature,
         tools_mode: crate::llm::llama::ToolsMode::Native,
+        stream: true,
     };
     let ui = ui_tx.clone();
     let id = task.id.clone();
@@ -2062,6 +2098,7 @@ fn cmd_jev(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
         thinking: false,
         temperature: 0.2,
         tools_mode: crate::llm::llama::ToolsMode::Native,
+        stream: true,
     };
     let ui = ui_tx.clone();
     let path_s = path.to_string();
@@ -2133,6 +2170,7 @@ pub fn cmd_0box(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) 
         thinking: app.thinking,
         temperature: app.temperature,
         tools_mode: crate::llm::llama::ToolsMode::Native,
+        stream: true,
     };
     let read_write = app.read_write;
     let code_exec = app.code_exec;
@@ -4920,6 +4958,7 @@ mod tests {
             system: String::new(),
             base_system: String::new(),
             system_local: String::new(),
+            stream_enabled: true,
             persona: None,
             all_tools: vec![],
             read_write: false,

@@ -80,6 +80,7 @@ pub async fn compact_now(
         thinking: false,
         temperature: 0.3,
         tools_mode: crate::llm::llama::ToolsMode::Native,
+        stream: true,
     };
 
     // Quiet channel: compaction tokens never reach the chat.

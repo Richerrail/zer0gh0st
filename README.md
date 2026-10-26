@@ -81,7 +81,9 @@ Les tool calls utilisent l'API `tools` native (llama.cpp ≥ 0.6) ; avec un
 serveur plus ancien, `ZER0_LOCAL_TOOLS=prompt` bascule sur le protocole
 texte `<tool_call>{…}</tool_call>`. Le silence maximal entre deux tokens est de
 240 s (`ZER0_STREAM_IDLE_SECS` pour l'ajuster, un modèle local sur 2 cœurs
-pouvant passer plus de 2 min en préfill).
+pouvant passer plus de 2 min en préfill). Si un serveur local laisse de
+longs silences malgré tout, `/stream off` force une réponse en un bloc
+(`stream: false`), sans coupure de flux.
 
 Mode **cloud** (clé optionnelle) :
 

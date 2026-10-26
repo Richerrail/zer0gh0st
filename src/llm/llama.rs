@@ -62,6 +62,9 @@ pub struct ChatOptions {
     pub thinking: bool,
     pub temperature: f32,
     pub tools_mode: ToolsMode,
+    /// `false` = réponse complète en un bloc (`stream: false`). Utile quand un
+    /// serveur local laisse de longs silences pendant le préfill.
+    pub stream: bool,
 }
 
 impl Default for ChatOptions {
@@ -71,6 +74,7 @@ impl Default for ChatOptions {
             thinking: false,
             temperature: 0.3,
             tools_mode: ToolsMode::Native,
+            stream: true,
         }
     }
 }
@@ -147,7 +151,7 @@ impl ApiClient {
         let mut body = json!({
             "model": self.model,
             "messages": msgs,
-            "stream": true,
+            "stream": options.stream,
             "temperature": options.temperature,
             "max_tokens": effective_max_tokens(&self.model, options.max_tokens),
         });
@@ -244,6 +248,11 @@ impl ApiClient {
             crate::quota::record_success(&quota_label);
             break resp;
         };
+
+        if !options.stream {
+            let raw = resp.text().await.map_err(|e| ChatError::Mid(e.into()))?;
+            return parse_completion(&raw, options, ui);
+        }
 
         let mut stream = resp.bytes_stream().eventsource();
         let mut content = String::new();
@@ -440,16 +449,8 @@ impl ApiClient {
             content = reasoning.clone();
         }
 
-        content = sanitize_content(&content);
-
-        // Mode « prompt » : le modèle écrit <tool_call>{…}</tool_call> dans sa
-        // réponse. On retire le bloc du texte et on synthétise les appels.
-        let mut prompt_calls = Vec::new();
-        if options.tools_mode == ToolsMode::Prompt {
-            let (clean, parsed) = parse_prompt_tool_calls(&content);
-            content = clean;
-            prompt_calls = parsed;
-        }
+        let (clean, prompt_calls) = finalize_content(content, options);
+        content = clean;
 
         let mut calls: Vec<ToolCall> = partial
             .into_iter()
@@ -495,6 +496,86 @@ fn definitive_quota(body: &str) -> Option<String> {
     }
     let msg: String = body.chars().filter(|c| !c.is_control()).take(220).collect();
     Some(msg.trim().to_string())
+}
+
+/// Nettoyage commun streaming / non-streaming : retire le bruit du modèle et,
+/// en mode « prompt », extrait les appels `<tool_call>` du texte.
+fn finalize_content(raw: String, options: &ChatOptions) -> (String, Vec<ToolCall>) {
+    let content = sanitize_content(&raw);
+    if options.tools_mode == ToolsMode::Prompt {
+        parse_prompt_tool_calls(&content)
+    } else {
+        (content, Vec::new())
+    }
+}
+
+/// Réponse complète (`stream: false`).
+#[derive(serde::Deserialize)]
+struct ChatCompletion {
+    #[serde(default)]
+    choices: Vec<CompletionChoice>,
+}
+
+#[derive(serde::Deserialize)]
+struct CompletionChoice {
+    message: CompletionMessage,
+    #[serde(default)]
+    finish_reason: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct CompletionMessage {
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    reasoning_content: Option<String>,
+    #[serde(default)]
+    tool_calls: Option<Vec<ToolCall>>,
+}
+
+/// Affiche un texte déjà complet par petits morceaux : la TUI garde un
+/// rendu progressif même sans flux réseau.
+fn emit_in_chunks(text: &str, ui: &UnboundedSender<UiEvent>, reasoning: bool) {
+    let chars: Vec<char> = text.chars().collect();
+    for part in chars.chunks(64) {
+        let s: String = part.iter().collect();
+        let _ = if reasoning {
+            ui.send(UiEvent::Reasoning(s))
+        } else {
+            ui.send(UiEvent::Token(s))
+        };
+    }
+}
+
+fn parse_completion(
+    raw: &str,
+    options: &ChatOptions,
+    ui: &UnboundedSender<UiEvent>,
+) -> Result<(String, Vec<ToolCall>, Option<String>), ChatError> {
+    let parsed: ChatCompletion = serde_json::from_str(raw).map_err(|e| {
+        ChatError::Mid(anyhow!(
+            "réponse JSON invalide ({e}) : {}",
+            raw.chars().take(200).collect::<String>()
+        ))
+    })?;
+    let Some(choice) = parsed.choices.into_iter().next() else {
+        return Err(ChatError::Mid(anyhow!(
+            "réponse vide du serveur : {}",
+            raw.chars().take(200).collect::<String>()
+        )));
+    };
+    if let Some(r) = choice.message.reasoning_content.as_deref() {
+        if !r.is_empty() {
+            emit_in_chunks(r, ui, true);
+        }
+    }
+    let raw_content = choice.message.content.unwrap_or_default();
+    if !raw_content.is_empty() {
+        emit_in_chunks(&raw_content, ui, false);
+    }
+    let (content, mut calls) = finalize_content(raw_content, options);
+    calls.extend(choice.message.tool_calls.unwrap_or_default());
+    Ok((content, calls, choice.finish_reason))
 }
 
 /// Extrait les appels d'outils d'un texte au format `<tool_call>…</tool_call>`.

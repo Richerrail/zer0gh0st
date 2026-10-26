@@ -553,6 +553,7 @@ pub async fn entry() -> Result<()> {
         thinking: cli.think,
         temperature: 0.3,
         tools_mode: crate::llm::llama::ToolsMode::Native,
+        stream: true,
     };
 
     let mut settings = config::resolve();
@@ -759,6 +760,7 @@ async fn provoke_cmd(role: String, task: Vec<String>) -> Result<()> {
         thinking: false,
         temperature: 0.3,
         tools_mode: crate::llm::llama::ToolsMode::Native,
+        stream: true,
     };
     let prompt = format!(
         "Le cancre Jimmy devait « {t} » et a seulement répondu : « {jab} ». \
@@ -807,6 +809,7 @@ async fn zerobox_cmd(topic: Vec<String>, perspectives: Vec<String>) -> Result<()
         thinking: false,
         temperature: 0.3,
         tools_mode: crate::llm::llama::ToolsMode::Native,
+        stream: true,
     };
 
     // En headless, tous les outils sont armés (même politique que --once).
@@ -928,6 +931,7 @@ async fn jev_cmd(file: String) -> Result<()> {
         thinking: false,
         temperature: 0.2,
         tools_mode: crate::llm::llama::ToolsMode::Native,
+        stream: true,
     };
     let nchars = content.chars().count();
     eprintln!("📊 jev : {file} ({nchars} caractères)…");

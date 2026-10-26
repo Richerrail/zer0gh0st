@@ -102,6 +102,11 @@ fn sse(events: &[&str]) -> String {
     s
 }
 
+/// Réponse JSON complète (`stream: false`), pas du SSE.
+fn json_body(body: &str) -> String {
+    format!("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\nconnection: close\r\n\r\n{body}")
+}
+
 fn status(code: &str, extra_headers: &str) -> String {
     format!("HTTP/1.1 {code}\r\n{extra_headers}content-length: 0\r\nconnection: close\r\n\r\n")
 }
@@ -336,6 +341,43 @@ async fn prompt_mode_parses_text_tool_calls() {
         .map(|(_, b)| b.to_string())
         .unwrap_or_default();
     assert!(!body.contains("\"tools\":"), "tools envoyés en mode prompt");
+}
+
+/// Non-streaming : une seule réponse JSON, le contenu et les tool calls sont
+/// extraits, et la requête doit bien demander `"stream": false`.
+#[tokio::test]
+async fn non_stream_mode_parses_full_response() {
+    let mock = Mock::start(vec![json_body(
+        r#"{"choices":[{"message":{"content":"Voilà.","tool_calls":[{"id":"call_1","type":"function","function":{"name":"code_exec","arguments":"{\"command\":\"ls\"}"}}]},"finish_reason":"tool_calls"}]}"#,
+    )])
+    .await;
+    let client = ApiClient::new(&mock.base, "local", None);
+    let (tx, mut rx) = unbounded_channel::<UiEvent>();
+    let opts = ChatOptions {
+        stream: false,
+        ..ChatOptions::default()
+    };
+    let (content, calls, finish) = client
+        .stream_chat("s", &[ChatMessage::user("x")], &[], &opts, &tx)
+        .await
+        .unwrap();
+    assert_eq!(content, "Voilà.");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].function.name, "code_exec");
+    assert_eq!(finish.as_deref(), Some("tool_calls"));
+    // les tokens ont bien été poussés vers l'UI
+    let mut seen = String::new();
+    while let Ok(ev) = rx.try_recv() {
+        if let UiEvent::Token(t) = ev {
+            seen.push_str(&t);
+        }
+    }
+    assert_eq!(seen, "Voilà.");
+    let body = mock.requests()[0]
+        .split_once("\r\n\r\n")
+        .map(|(_, b)| b.to_string())
+        .unwrap_or_default();
+    assert!(body.contains("\"stream\":false"), "corps: {body}");
 }
 
 #[tokio::test]

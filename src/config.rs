@@ -59,6 +59,9 @@ pub struct GlobalConfig {
     /// Prompt système dédié au mode local (modèle CPU) : court par défaut.
     #[serde(default)]
     pub system_prompt_local: Option<String>,
+    /// Streaming des réponses (`/stream`) : `None`/`true` = au fil de l'eau.
+    #[serde(default)]
+    pub stream: Option<bool>,
     /// Modèles de fallback spécifiques pour /0box (ajoutés en tête de chaîne).
     #[serde(default)]
     pub zero_box_fallbacks: Option<Vec<String>>,
@@ -124,6 +127,7 @@ impl Default for GlobalConfig {
             zero_box_fallbacks: None,
             system_prompt: None,
             system_prompt_local: None,
+            stream: None,
             github_client_id: None,
             github_prompt_count: 0,
             github_prompted: false,
@@ -629,6 +633,11 @@ pub fn system_prompt_override() -> Option<String> {
         return fs::read_to_string(f).ok();
     }
     load_global().system_prompt.filter(|s| !s.trim().is_empty())
+}
+
+/// Streaming activé ? (défaut : oui)
+pub fn stream_enabled() -> bool {
+    load_global().stream.unwrap_or(true)
 }
 
 /// Prompt du mode local : override global, sinon [`crate::local::LOCAL_SYSTEM`].
