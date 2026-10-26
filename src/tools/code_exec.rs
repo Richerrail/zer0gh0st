@@ -13,17 +13,27 @@ const MAX_CAPTURE_BYTES: usize = 256 * 1024;
 /// Octets réellement renvoyés au modèle (le contexte n'est pas gratuit).
 const MAX_RETURN_BYTES: usize = 16_000;
 /// Délai par défaut, et plafond dur : une commande ne peut pas figer l'agent.
-const DEFAULT_TIMEOUT_SECS: u64 = 120;
+const DEFAULT_TIMEOUT_SECS: u64 = 300;
 const MAX_TIMEOUT_SECS: u64 = 3600;
 /// Fréquence de scrutation du drapeau `/stop`.
 const CANCEL_POLL: Duration = Duration::from_millis(150);
+
+/// Délai par défaut effectif : `ZER0_EXEC_TIMEOUT` (secondes), borné.
+fn default_timeout() -> u64 {
+    std::env::var("ZER0_EXEC_TIMEOUT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .map(|v| v.min(MAX_TIMEOUT_SECS))
+        .unwrap_or(DEFAULT_TIMEOUT_SECS)
+}
 
 pub fn spec() -> ToolSpec {
     ToolSpec {
         name: "code_exec",
         description: "Run a bash command on the host and return stdout/stderr. \
                       Use for shell, compilers, tests, git, listing files, etc. \
-                      The command is killed if it exceeds `timeout_secs` (default 120, max 3600).",
+                      The command is killed if it exceeds `timeout_secs` (default 300, max 3600).",
         parameters: json!({
             "type": "object",
             "properties": {
@@ -31,7 +41,7 @@ pub fn spec() -> ToolSpec {
                 "cwd": { "type": "string", "description": "Optional working directory." },
                 "timeout_secs": {
                     "type": "integer",
-                    "description": "Timeout in seconds (default 120, max 3600). The command is killed when exceeded."
+                    "description": "Timeout in seconds (default 300, max 3600). The command is killed when exceeded."
                 }
             },
             "required": ["command"]
@@ -54,7 +64,7 @@ pub async fn run(args: &str) -> String {
     let timeout = v
         .get("timeout_secs")
         .and_then(|x| x.as_u64())
-        .unwrap_or(DEFAULT_TIMEOUT_SECS)
+        .unwrap_or_else(default_timeout)
         .clamp(1, MAX_TIMEOUT_SECS);
     let mut cmd = tokio::process::Command::from(crate::platform::shell_command(command));
     if let Some(dir) = v.get("cwd").and_then(|x| x.as_str()) {

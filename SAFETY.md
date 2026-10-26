@@ -66,7 +66,7 @@ Le document n'impose pas C ; il exige que vous le sachiez et le décidiez.
   processus local peut remplacer ou supprimer une clé : l'avertissement est journalisé
   au démarrage, et l'exemple `deploy/gw.example.toml` documente la génération du jeton.
 - `text_editor create` **refuse** un contenu vide (pas de fichier fantôme).
-- Contrôle du raisonnement (`reasoning.enabled`) et plafonds de flux (1 Mo / 120 s) contre les boucles.
+- Contrôle du raisonnement (`reasoning.enabled`) et plafonds de flux (1 Mo / 240 s) contre les boucles.
 - Coffre (Argon2 + ChaCha20-Poly1305) : clés API **chiffrées au repos**, `chmod 600`.
 - Mémoire **non auto-injectée** dans le modèle (toutes les entrées `untrusted`).
 

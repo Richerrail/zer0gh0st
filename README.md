@@ -158,9 +158,12 @@ Détail complet du modèle de menace : [`SAFETY.md`](./SAFETY.md).
 |---|---|
 | **TUI** | banner `ZER0│GH0ST` (`ghost in the shell`) animé, statut, **palette `/` filtrante**, **sélection navigable** `/model` et `/provider`, **molette** (conversation / panneaux), raisonnement affiché, **panneau latéral**, **saisie style Pi**, **historique ↑↓** |
 | **Boucle d'agent** | appels d'outils, streaming SSE, max 8 itérations, budget 24 outils/tour, détection de boucle |
-| **Containment** | réponse coupée à 1 Mo, timeout d'inactivité 120 s, `/stop` |
+| **Containment** | réponse coupée à 1 Mo, timeout d'inactivité 240 s, `/stop` |
 | **Multi-provider** | 10 providers intégrés + personnalisés, **transport automatique** via `zer0-gw` (clés hors de l'agent) ou direct, failover |
 | **Résilience** | bascule d'endpoints, backoff 429, blacklist d'échecs 120 s, messages par code HTTP |
+
+`code_exec` a un timeout par défaut de 300 s (max 3600), réglable globalement
+par `ZER0_EXEC_TIMEOUT` ou par appel (`timeout_secs`).
 | **Gratuit** | découverte des modèles `:free` (OpenRouter public), `select` par **benchmarks réels** |
 | **Rôles** | `main/code/reasoning/writing/vision/fast/utility/review`, sélection auto par catégorie · `/role off` = un seul modèle, sans bascule |
 | **Mémoire** | store JSONL, recherche sémantique optionnelle, **enveloppe d'honnêteté** |

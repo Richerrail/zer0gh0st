@@ -1059,7 +1059,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
                         match res {
                             Ok(()) => {
                                 if local {
-                                    app.system_local = crate::local::LOCAL_SYSTEM.to_string();
+                                    app.system_local = crate::local::system_local();
                                 } else {
                                     app.base_system = crate::DEFAULT_SYSTEM.to_string();
                                     app.refresh_system();

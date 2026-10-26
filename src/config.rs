@@ -651,7 +651,7 @@ pub fn local_system_prompt() -> String {
     load_global()
         .system_prompt_local
         .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| crate::local::LOCAL_SYSTEM.to_string())
+        .unwrap_or_else(crate::local::system_local)
 }
 
 /// Enregistre (ou efface avec `None`) le prompt local global.

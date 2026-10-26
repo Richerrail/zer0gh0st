@@ -220,7 +220,7 @@ pub async fn ensure(wanted: Option<&str>) -> Result<String> {
         let _ = std::fs::write(pid_path(), format!("{pid}\n"));
     }
 
-    // Attente de disponibilité : 4B Q4 met ~30 s à charger sur 2 cœurs.
+    // Attente de disponibilité : un 4B Q4 met ~30 s à charger sur ce CPU.
     let deadline = std::time::Instant::now() + Duration::from_secs(120);
     while std::time::Instant::now() < deadline {
         if is_up().await {
@@ -285,7 +285,7 @@ pub async fn restart_if_owned(wanted: &str) -> Option<String> {
 /// Volontairement **court** : sur CPU, chaque centaine de tokens de préfixe
 /// coûte plusieurs secondes de préfill. Il dit l'essentiel (agir, vérifier,
 /// ne pas inventer) et tait les fonctions cloud indisponibles.
-pub const LOCAL_SYSTEM: &str = "Tu es ZER0|GH0ST, agent local (llama.cpp, CPU 2 cœurs).\n\
+pub const LOCAL_SYSTEM: &str = "Tu es ZER0|GH0ST, agent local (llama.cpp, CPU seul).\n\
 Réponds en français, court et direct : pas de plan inutile, pas de répétition.\n\
 Agis avec les outils (fichiers, commandes, recherche) au lieu d'expliquer ce qu'il faudrait faire.\n\
 Après un outil, lis son résultat et continue ; si ça échoue, cite l'erreur exacte.\n\
@@ -306,6 +306,14 @@ fn all_cores() -> u64 {
     std::thread::available_parallelism()
         .map(|n| n.get() as u64)
         .unwrap_or(4)
+}
+
+/// Prompt local effectif, avec les caractéristiques **réelles** de la machine.
+pub fn system_local() -> String {
+    format!(
+        "{LOCAL_SYSTEM}\nMachine : {} cœurs logiques, CPU seul (pas de GPU utilisable).",
+        all_cores()
+    )
 }
 
 pub fn limitations() -> &'static [&'static str] {
@@ -383,6 +391,13 @@ mod tests {
     fn pick_system_routes_local_and_cloud() {
         assert_eq!(pick_system("local", "cloud!", "local!"), "local!");
         assert_eq!(pick_system("openrouter", "cloud!", "local!"), "cloud!");
+    }
+
+    #[test]
+    fn system_local_reports_real_cores() {
+        let s = system_local();
+        assert!(s.contains(&format!("{} cœurs logiques", all_cores())));
+        assert!(!s.contains("2 cœurs"), "compte de cœurs codé en dur");
     }
 
     #[test]
