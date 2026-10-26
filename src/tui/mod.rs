@@ -224,6 +224,7 @@ impl App {
                 temperature: self.temperature,
                 tools_mode: crate::llm::llama::ToolsMode::Native,
                 stream: true,
+                local: false,
             },
             all_tools: self.all_tools.clone(),
             read_write: self.read_write,
@@ -636,28 +637,30 @@ fn start_turn(app: &mut App, text: String, ui_tx: &UnboundedSender<UiEvent>) {
         })
         .cloned()
         .collect();
-    // `ZER0_LOCAL_TOOLS=minimal` : noyau seulement (préfill réduit).
-    let tools = crate::local::filter_tools(&app.provider_id, tools);
+    // Local = chat conversationnel : aucun outil (l'agent outillé est cloud).
+    let tools = if app.provider_id == "local" {
+        Vec::new()
+    } else {
+        tools
+    };
 
     // Deux prompts distincts : court pour le local (CPU), complet pour le cloud.
     let system = crate::local::pick_system(&app.provider_id, &app.system, &app.system_local);
     // llama.cpp ≥ 0.6 gère les outils natifs. `ZER0_LOCAL_TOOLS=prompt` force
     // le protocole texte pour un serveur ancien (qui figeait dès 2 outils).
     let local_mode = app.provider_id == "local";
-    let prompt_tools = local_mode && crate::local::prompt_tools();
+    // Local : raisonnement coupé côté serveur, aucun outil envoyé.
     let options = ChatOptions {
         max_tokens: app.max_tokens,
         thinking: app.thinking,
         temperature: app.temperature,
-        tools_mode: if prompt_tools {
-            crate::llm::llama::ToolsMode::Prompt
-        } else {
-            crate::llm::llama::ToolsMode::Native
-        },
+        tools_mode: crate::llm::llama::ToolsMode::Native,
         stream: app.stream_enabled,
+        local: local_mode,
     };
     let messages = app.conversation.clone();
-    let kb_auto = app.kb_auto;
+    // Pas de base de connaissances en local : tokens de préfill inutiles.
+    let kb_auto = app.kb_auto && !local_mode;
     let ctx_window = app.context_window;
     let settings = app.settings();
     let ui = ui_tx.clone();
@@ -682,18 +685,12 @@ fn start_turn(app: &mut App, text: String, ui_tx: &UnboundedSender<UiEvent>) {
         let mut system = system;
         // Liste explicite des outils disponibles : ce modèle ignore souvent le
         // paramètre `tools` de l'API, il faut le lui dire dans le prompt.
-        // En local, le préfill coûte cher (~4 tok/s sur un 4B) : les specs
-        // d'outils sont déjà dans l'API `tools`, inutile de les recopier.
-        // On ne garde la liste que pour le protocole texte de secours.
-        if !tools.is_empty() && (!local_mode || prompt_tools) {
+        if !tools.is_empty() {
             system.push_str(
                 "\n\n## Outils disponibles (utilise-les pour AGIR — ne dis jamais « je ne peux pas exécuter » quand un outil le permet)\n",
             );
             for t in &tools {
                 system.push_str(&format!("- {} : {}\n", t.name, t.description));
-            }
-            if prompt_tools {
-                system.push_str("\n\n## Appel d'outils (mode local)\nLe serveur local n'expose pas l'API `tools`. Pour appeler un outil, écris UNIQUEMENT :\n<tool_call>{\"name\":\"code_exec\",\"arguments\":{\"command\":\"ls\"}}</tool_call>\nUn seul appel par réponse, puis arrête-toi : le résultat te sera renvoyé. N'invente jamais un résultat.\n");
             }
         }
         // Connaissance locale : bloc partagé avec `--once` (`crate::knowledge_block`).
@@ -986,6 +983,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
                     temperature: app.temperature,
                     tools_mode: crate::llm::llama::ToolsMode::Native,
                     stream: true,
+                    local: false,
                 };
                 let ui = ui_tx.clone();
                 tokio::spawn(async move {
@@ -1843,6 +1841,7 @@ fn cmd_ask(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
         temperature: app.temperature,
         tools_mode: crate::llm::llama::ToolsMode::Native,
         stream: true,
+        local: false,
     };
     let ui = ui_tx.clone();
     let role_s = role.to_string();
@@ -1893,6 +1892,7 @@ fn cmd_review(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
         temperature: app.temperature,
         tools_mode: crate::llm::llama::ToolsMode::Native,
         stream: true,
+        local: false,
     };
     let ui = ui_tx.clone();
     let path_s = path.to_string();
@@ -1939,6 +1939,7 @@ fn cmd_work(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
         temperature: app.temperature,
         tools_mode: crate::llm::llama::ToolsMode::Native,
         stream: true,
+        local: false,
     };
     let ui = ui_tx.clone();
     let id = task.id.clone();
@@ -2102,6 +2103,7 @@ fn cmd_jev(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
         temperature: 0.2,
         tools_mode: crate::llm::llama::ToolsMode::Native,
         stream: true,
+        local: false,
     };
     let ui = ui_tx.clone();
     let path_s = path.to_string();
@@ -2174,6 +2176,7 @@ pub fn cmd_0box(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) 
         temperature: app.temperature,
         tools_mode: crate::llm::llama::ToolsMode::Native,
         stream: true,
+        local: false,
     };
     let read_write = app.read_write;
     let code_exec = app.code_exec;

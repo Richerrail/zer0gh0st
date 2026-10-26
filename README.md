@@ -55,39 +55,48 @@ git clone https://github.com/Richerrail/zer0gh0st.git && cd zer0gh0st
 ./target/release/zer0          # ou : ./scripts/run.sh
 ```
 
-Mode **100 % local** (aucune clé API) :
+Mode **100 % local** : chat rapide, **sans outils** (aucune clé API).
 
 ```bash
 # 1. dépose un GGUF (format llama.cpp, template de chat inclus) ici :
 #    ~/ZER0v1/models/ollama_models/mon-modele.gguf
 # 2. dans la TUI :
-/provider use local      # llama-server est démarré automatiquement (port 8080)
+/provider use local      # llama-server démarre tout seul (port 8080)
 /model                   # menu : tous les .gguf du dossier sont listés
 ```
 
-`scripts/serve.sh` reste disponible pour lancer le serveur à la main
-(`ZER0_MODEL=…`, 2 cœurs par défaut). **Le mode local est limité** : un seul
-modèle chargé, donc `/role`, `/route`, `0box` et `/select` ne s'appliquent pas
-(rappelé au démarrage). Le modèle doit contenir son **template de chat** dans le
-GGUF : un blob extrait d'ollama ne suffit pas (ollama garde le template et le
-parseur d'outils dans son manifeste). Les fichiers `mmproj` sont ignorés (ce sont
-des projecteurs multimodaux).
+Le local est volontairement un **chat conversationnel** : aucun outil n'est
+envoyé au modèle, pas de base de connaissances, pas de prompt d'agent. C'est ce
+qui le rend rapide sur une petite machine. L'agent outillé (`code_exec`,
+fichiers, recherche, sous-agents) reste sur le **cloud** ; `/role`, `/route`,
+`0box`, `/select` et les embeddings ne s'appliquent pas en local (rappelé au
+démarrage).
+
+Réglages par défaut du serveur local :
+
+| Réglage | Valeur | Variable |
+|---|---|---|
+| Threads | **tous les cœurs** détectés | `ZER0_THREADS` |
+| Contexte | 2048 | `ZER0_CTX` |
+| Raisonnement | coupé (`--reasoning-budget 0`) | — |
+| Streaming | activé (`/stream off` pour le couper) | config |
+
+**Garde-fou thermique** (Linux) : la génération est interrompue à
+`ZER0_TEMP_STOP` (88 °C) et `llama-server` est arrêté à `ZER0_TEMP_KILL`
+(92 °C), avec un avertissement à `ZER0_TEMP_WARN` (80 °C). Sur macOS/Windows,
+les capteurs ne sont pas exposés de façon portable : le garde-fou est inactif.
+
+Le modèle doit contenir son **template de chat** dans le GGUF : un blob extrait
+d'ollama ne suffit pas (ollama garde le template et le parseur d'outils dans son
+manifeste). Les fichiers `mmproj` sont ignorés (projecteurs multimodaux).
 
 Deux prompts système distincts sont maintenus : un **court** pour le local
 (`/system local <texte>`, défaut adapté au CPU) et celui du cloud
-(`/system cloud <texte>`). `… reset` revient au défaut.
+(`/system cloud <texte>`). `… reset` revient au défaut. Le silence maximal entre
+deux tokens est de 240 s (`ZER0_STREAM_IDLE_SECS`) ; en non-streaming le délai
+total est de 600 s (`ZER0_HTTP_TIMEOUT_SECS`).
 
-Les tool calls utilisent l'API `tools` native (llama.cpp ≥ 0.6) ; avec un
-serveur plus ancien, `ZER0_LOCAL_TOOLS=prompt` bascule sur le protocole
-texte `<tool_call>{…}</tool_call>`. Le silence maximal entre deux tokens est de
-240 s (`ZER0_STREAM_IDLE_SECS` pour l'ajuster, un modèle local sur 2 cœurs
-pouvant passer plus de 2 min en préfill). Si un serveur local laisse de
-longs silences malgré tout, `/stream off` force une réponse en un bloc
-(`stream: false`), sans coupure de flux.
-
-Sur CPU, chaque schéma d'outil rendu dans le prompt coûte du préfill :
-`ZER0_LOCAL_TOOLS=minimal` n'en envoie que quatre (`code_exec`,
-`text_editor`, `search`, `task_add`).
+`scripts/serve.sh` reste disponible pour lancer le serveur à la main.
 
 Mode **cloud** (clé optionnelle) :
 

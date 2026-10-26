@@ -170,8 +170,13 @@ pub async fn ensure(wanted: Option<&str>) -> Result<String> {
     let model =
         resolve_model(&models, wanted).ok_or_else(|| anyhow!("aucun modèle local résolu"))?;
 
-    let threads = env_u64("ZER0_THREADS", 2);
-    let ctx = env_u64("ZER0_CTX", 8192);
+    // Tous les cœurs disponibles par défaut (4 ici, 16 ailleurs). Le
+    // garde-fou thermique (`thermal`) coupe avant la surchauffe ; `ZER0_THREADS`
+    // permet de brider manuellement.
+    let threads = env_u64("ZER0_THREADS", all_cores());
+    // Contexte volontairement petit : en chat, 2048 suffit et le préfill
+    // coûte proportionnellement moins cher.
+    let ctx = env_u64("ZER0_CTX", 2048);
 
     let log = std::fs::OpenOptions::new()
         .create(true)
@@ -287,44 +292,6 @@ Après un outil, lis son résultat et continue ; si ça échoue, cite l'erreur e
 N'annonce jamais une action non confirmée par un résultat d'outil.\n\
 Indisponible en local : 0box, /role, /route, /select, embeddings — n'en parle pas.";
 
-/// Outils gardés par `ZER0_LOCAL_TOOLS=minimal` : agir, lire/écrire, chercher,
-/// noter. Chaque schéma d'outil est rendu dans le prompt par le template
-/// (~60 tokens) : en garder 4 au lieu de 10 économise ~400 tokens de préfill.
-pub const CORE_TOOLS: [&str; 4] = ["code_exec", "text_editor", "search", "task_add"];
-
-/// Mode demandé par `ZER0_LOCAL_TOOLS` (`prompt`, `minimal`, …), en minuscules.
-pub fn tools_mode() -> Option<String> {
-    std::env::var("ZER0_LOCAL_TOOLS")
-        .ok()
-        .map(|v| v.trim().to_ascii_lowercase())
-        .filter(|v| !v.is_empty())
-}
-
-/// Protocole texte `<tool_call>` (serveur ancien qui fige avec l'API tools).
-pub fn prompt_tools() -> bool {
-    tools_mode().as_deref() == Some("prompt")
-}
-
-/// Restreint les outils envoyés au serveur local (`minimal`).
-pub fn filter_tools(
-    provider_id: &str,
-    tools: Vec<crate::tools::ToolSpec>,
-) -> Vec<crate::tools::ToolSpec> {
-    if provider_id == "local" && tools_mode().as_deref() == Some("minimal") {
-        filter_core(tools)
-    } else {
-        tools
-    }
-}
-
-/// Ne garde que le noyau (pur, testable sans variable d'environnement).
-pub fn filter_core(tools: Vec<crate::tools::ToolSpec>) -> Vec<crate::tools::ToolSpec> {
-    tools
-        .into_iter()
-        .filter(|t| CORE_TOOLS.contains(&t.name))
-        .collect()
-}
-
 /// Choisit le prompt de base selon le provider : local dédié, cloud inchangé.
 pub fn pick_system(provider_id: &str, cloud: &str, local: &str) -> String {
     if provider_id == "local" {
@@ -334,6 +301,13 @@ pub fn pick_system(provider_id: &str, cloud: &str, local: &str) -> String {
     }
 }
 
+/// Nombre de cœurs logiques disponibles.
+fn all_cores() -> u64 {
+    std::thread::available_parallelism()
+        .map(|n| n.get() as u64)
+        .unwrap_or(4)
+}
+
 pub fn limitations() -> &'static [&'static str] {
     &[
         "rôles (`/role`) : un seul modèle chargé, pas de sélection par catégorie",
@@ -341,7 +315,7 @@ pub fn limitations() -> &'static [&'static str] {
         "débat multi-agents (`0box`) : il faut plusieurs modèles",
         "recommandation de modèle (`/select`) : catalogue cloud",
         "embeddings (`/embeddings`) : requiert un provider d'embedding séparé",
-        "outils natifs : llama.cpp ≥ 0.6 ; `ZER0_LOCAL_TOOLS=prompt` pour un serveur ancien",
+        "outils : le local est un chat conversationnel ; l'agent outillé passe par le cloud",
     ]
 }
 
@@ -403,32 +377,6 @@ mod tests {
         // chemin absolu existant (le fichier de test courant)
         let me = std::env::current_exe().unwrap();
         assert_eq!(resolve_model(&models, me.to_str()), Some(me));
-    }
-
-    fn spec(name: &'static str) -> crate::tools::ToolSpec {
-        crate::tools::ToolSpec {
-            name,
-            description: "",
-            parameters: serde_json::json!({"type": "object"}),
-        }
-    }
-
-    #[test]
-    fn filter_tools_keeps_only_the_core_set() {
-        let specs = vec![
-            spec("code_exec"),
-            spec("text_editor"),
-            spec("search"),
-            spec("task_add"),
-            spec("img"),
-            spec("kb_search"),
-        ];
-        let kept = filter_core(specs);
-        assert_eq!(kept.len(), CORE_TOOLS.len());
-        assert!(kept.iter().all(|t| CORE_TOOLS.contains(&t.name)));
-        // cloud (ou local sans `minimal`) : jamais filtré
-        let all = vec![spec("code_exec"), spec("img")];
-        assert_eq!(filter_tools("openrouter", all).len(), 2);
     }
 
     #[test]

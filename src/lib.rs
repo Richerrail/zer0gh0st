@@ -36,6 +36,7 @@ pub mod search;
 pub mod select;
 pub mod tasks;
 pub mod telegram;
+pub mod thermal;
 pub mod tools;
 pub mod tui;
 pub mod update;

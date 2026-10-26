@@ -22,6 +22,32 @@ fn stream_idle_timeout() -> Duration {
     parse_idle_secs(std::env::var("ZER0_STREAM_IDLE_SECS").ok().as_deref())
 }
 
+/// Refuse de démarrer une génération locale si le CPU est déjà en surchauffe.
+fn thermal_gate(options: &ChatOptions) -> Result<(), ChatError> {
+    if !options.local {
+        return Ok(());
+    }
+    match crate::thermal::check() {
+        crate::thermal::Guard::Kill(t) => {
+            let _ = crate::local::stop_if_owned();
+            Err(ChatError::Setup {
+                err: anyhow!(
+                    "🌡 {t:.0} °C — surchauffe : serveur local arrêté (seuil ZER0_TEMP_KILL)"
+                ),
+                status: None,
+            })
+        }
+        crate::thermal::Guard::Stop(t) => Err(ChatError::Setup {
+            err: anyhow!(
+                "🌡 {t:.0} °C — génération refusée pour protéger la machine \
+                 (seuil ZER0_TEMP_STOP)"
+            ),
+            status: None,
+        }),
+        _ => Ok(()),
+    }
+}
+
 /// Délai **total** d'une requête non-streamée : un modèle local lent peut
 /// dépasser les 180 s du client partagé (préfill à ~4 tok/s). Réglable par
 /// `ZER0_HTTP_TIMEOUT_SECS` (défaut 600 s).
@@ -85,6 +111,8 @@ pub struct ChatOptions {
     /// `false` = réponse complète en un bloc (`stream: false`). Utile quand un
     /// serveur local laisse de longs silences pendant le préfill.
     pub stream: bool,
+    /// Provider local : active le garde-fou thermique pendant la génération.
+    pub local: bool,
 }
 
 impl Default for ChatOptions {
@@ -95,6 +123,7 @@ impl Default for ChatOptions {
             temperature: 0.3,
             tools_mode: ToolsMode::Native,
             stream: true,
+            local: false,
         }
     }
 }
@@ -192,6 +221,9 @@ impl ApiClient {
             body["tool_choice"] = json!("auto");
         }
 
+        // Refus immédiat si la machine est déjà trop chaude (local seulement).
+        thermal_gate(options)?;
+
         let url = format!("{}/chat/completions", self.base_url);
         // Étiquette d'usage (suivi 200/429, voir `quota`) — identique aux labels de `route`.
         let quota_label = crate::quota::label_for(&self.base_url, &self.model);
@@ -284,6 +316,8 @@ impl ApiClient {
         let mut partial: Vec<PartialCall> = Vec::new();
         let mut finish_reason: Option<String> = None;
         let mut emitted: usize = 0;
+        let mut last_thermal = std::time::Instant::now();
+        let mut warned_thermal = false;
         // Un flux n'est valide que s'il annonce sa fin (`[DONE]` ou `finish_reason`).
         // Sinon on a peut-être perdu la fin d'un `tool_call` (JSON tronqué) :
         // c'était jusqu'ici retourné comme un succès, en silence.
@@ -336,6 +370,33 @@ impl ApiClient {
                     for tc in calls {
                         merge_call(&mut partial, tc);
                     }
+                }
+            }
+            // Surveillance thermique toutes les 2 s : on coupe AVANT la
+            // surchauffe, au lieu de laisser le noyau redémarrer la machine.
+            if options.local && last_thermal.elapsed() >= Duration::from_secs(2) {
+                last_thermal = std::time::Instant::now();
+                match crate::thermal::check() {
+                    crate::thermal::Guard::Kill(t) => {
+                        let _ = crate::local::stop_if_owned();
+                        return Err(ChatError::Mid(anyhow!(
+                            "🌡 {t:.0} °C — surchauffe : génération coupée et serveur local arrêté \
+                             (seuil ZER0_TEMP_KILL)"
+                        )));
+                    }
+                    crate::thermal::Guard::Stop(t) => {
+                        return Err(ChatError::Mid(anyhow!(
+                            "🌡 {t:.0} °C — génération interrompue pour protéger la machine \
+                             (seuil ZER0_TEMP_STOP, réglable par ZER0_TEMP_STOP)"
+                        )));
+                    }
+                    crate::thermal::Guard::Warn(t) if !warned_thermal => {
+                        warned_thermal = true;
+                        let _ = ui.send(UiEvent::Info(format!(
+                            "🌡 {t:.0} °C — ça chauffe (seuil d'arrêt : ZER0_TEMP_STOP)"
+                        )));
+                    }
+                    _ => {}
                 }
             }
             if crate::cancel::is_cancelled() {

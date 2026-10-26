@@ -554,6 +554,7 @@ pub async fn entry() -> Result<()> {
         temperature: 0.3,
         tools_mode: crate::llm::llama::ToolsMode::Native,
         stream: true,
+        local: false,
     };
 
     let mut settings = config::resolve();
@@ -761,6 +762,7 @@ async fn provoke_cmd(role: String, task: Vec<String>) -> Result<()> {
         temperature: 0.3,
         tools_mode: crate::llm::llama::ToolsMode::Native,
         stream: true,
+        local: false,
     };
     let prompt = format!(
         "Le cancre Jimmy devait « {t} » et a seulement répondu : « {jab} ». \
@@ -810,6 +812,7 @@ async fn zerobox_cmd(topic: Vec<String>, perspectives: Vec<String>) -> Result<()
         temperature: 0.3,
         tools_mode: crate::llm::llama::ToolsMode::Native,
         stream: true,
+        local: false,
     };
 
     // En headless, tous les outils sont armés (même politique que --once).
@@ -932,6 +935,7 @@ async fn jev_cmd(file: String) -> Result<()> {
         temperature: 0.2,
         tools_mode: crate::llm::llama::ToolsMode::Native,
         stream: true,
+        local: false,
     };
     let nchars = content.chars().count();
     eprintln!("📊 jev : {file} ({nchars} caractères)…");
@@ -1242,34 +1246,31 @@ async fn run_once(
     use std::io::Write;
 
     let mut system = enrich_system(system);
-    let all_tools = crate::local::filter_tools(&settings.provider_id, all_tools);
     let local_mode = settings.provider_id == "local";
-    let prompt_tools = local_mode && crate::local::prompt_tools();
+    // Local = chat pur : aucun outil envoyé.
+    let all_tools = if local_mode { Vec::new() } else { all_tools };
     let mut options = options;
     // Le réglage `/stream` (config globale) vaut aussi pour `--once`.
     options.stream = crate::config::stream_enabled();
-    if prompt_tools {
-        options.tools_mode = crate::llm::llama::ToolsMode::Prompt;
-    }
+    options.local = local_mode;
 
     // Liste explicite des outils disponibles dans le prompt.
-    // Local : les specs sont déjà dans l'API `tools` (préfill coûteux).
-    if !all_tools.is_empty() && (!local_mode || prompt_tools) {
+    if !all_tools.is_empty() {
         system.push_str(
             "\n\n## Outils disponibles (utilise-les pour AGIR — ne dis jamais « je ne peux pas exécuter » quand un outil le permet)\n",
         );
         for t in &all_tools {
             system.push_str(&format!("- {} : {}\n", t.name, t.description));
         }
-        if prompt_tools {
-            system.push_str("\n\n## Appel d'outils (mode local)\nLe serveur local n'expose pas l'API `tools`. Pour appeler un outil, écris UNIQUEMENT :\n<tool_call>{\"name\":\"code_exec\",\"arguments\":{\"command\":\"ls\"}}</tool_call>\nUn seul appel par réponse, puis arrête-toi : le résultat te sera renvoyé. N'invente jamais un résultat.\n");
-        }
     }
 
     // Connaissance locale : même bloc que la TUI (`crate::knowledge_block`).
-    if let Some((block, srcs)) = crate::knowledge_block(&prompt).await {
-        system.push_str(&block);
-        eprintln!("📚 connaissance injectée : {}", srcs.join(", "));
+    // Pas en local : tokens de préfill inutiles pour un chat.
+    if !local_mode {
+        if let Some((block, srcs)) = crate::knowledge_block(&prompt).await {
+            system.push_str(&block);
+            eprintln!("📚 connaissance injectée : {}", srcs.join(", "));
+        }
     }
 
     // Mode local : démarrer llama-server si besoin (sinon tout échoue).

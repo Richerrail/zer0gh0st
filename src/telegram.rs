@@ -686,6 +686,7 @@ async fn run_loop(
             temperature: 0.3,
             tools_mode: crate::llm::llama::ToolsMode::Native,
             stream: true,
+            local: false,
         },
         chats: HashMap::new(),
         notify,
