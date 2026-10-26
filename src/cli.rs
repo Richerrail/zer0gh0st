@@ -534,10 +534,15 @@ pub async fn entry() -> Result<()> {
     }
     ensure_vault();
 
-    let system = cli
+    let explicit_system = cli.system_prompt.is_some();
+    let mut system = cli
         .system_prompt
         .unwrap_or_else(|| DEFAULT_SYSTEM.to_string());
-    let system = config::system_prompt_override().unwrap_or(system);
+    system = config::system_prompt_override().unwrap_or(system);
+    // Mode local : prompt court dédié, sauf si `--system` a été imposé.
+    if !explicit_system && config::resolve().provider_id == "local" {
+        system = config::local_system_prompt();
+    }
     let all_tools = if cli.no_tools {
         Vec::new()
     } else {

@@ -53,6 +53,12 @@ pub struct GlobalConfig {
     /// Bot Telegram : identifiants (user id) autorisés à parler au bot.
     #[serde(default)]
     pub telegram_allow: Vec<i64>,
+    /// Prompt système global « cloud » (priorité plus faible que le projet).
+    #[serde(default)]
+    pub system_prompt: Option<String>,
+    /// Prompt système dédié au mode local (modèle CPU) : court par défaut.
+    #[serde(default)]
+    pub system_prompt_local: Option<String>,
     /// Modèles de fallback spécifiques pour /0box (ajoutés en tête de chaîne).
     #[serde(default)]
     pub zero_box_fallbacks: Option<Vec<String>>,
@@ -116,6 +122,8 @@ impl Default for GlobalConfig {
             telegram_token: None,
             telegram_allow: Vec::new(),
             zero_box_fallbacks: None,
+            system_prompt: None,
+            system_prompt_local: None,
             github_client_id: None,
             github_prompt_count: 0,
             github_prompted: false,
@@ -620,7 +628,29 @@ pub fn system_prompt_override() -> Option<String> {
     if let Some(f) = p.prompt_file {
         return fs::read_to_string(f).ok();
     }
-    None
+    load_global().system_prompt.filter(|s| !s.trim().is_empty())
+}
+
+/// Prompt du mode local : override global, sinon [`crate::local::LOCAL_SYSTEM`].
+pub fn local_system_prompt() -> String {
+    load_global()
+        .system_prompt_local
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| crate::local::LOCAL_SYSTEM.to_string())
+}
+
+/// Enregistre (ou efface avec `None`) le prompt local global.
+pub fn set_system_prompt_local(text: Option<String>) -> Result<()> {
+    let mut g = load_global();
+    g.system_prompt_local = text.filter(|s| !s.trim().is_empty());
+    save_global(&g)
+}
+
+/// Enregistre (ou efface avec `None`) le prompt cloud global.
+pub fn set_system_prompt_cloud(text: Option<String>) -> Result<()> {
+    let mut g = load_global();
+    g.system_prompt = text.filter(|s| !s.trim().is_empty());
+    save_global(&g)
 }
 
 /// Dernière corruption détectée : (chemin, message, sauvegarde éventuelle).

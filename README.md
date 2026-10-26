@@ -73,6 +73,10 @@ GGUF : un blob extrait d'ollama ne suffit pas (ollama garde le template et le
 parseur d'outils dans son manifeste). Les fichiers `mmproj` sont ignorés (ce sont
 des projecteurs multimodaux).
 
+Deux prompts système distincts sont maintenus : un **court** pour le local
+(`/system local <texte>`, défaut adapté au CPU) et celui du cloud
+(`/system cloud <texte>`). `… reset` revient au défaut.
+
 Les tool calls utilisent l'API `tools` native (llama.cpp ≥ 0.6) ; avec un
 serveur plus ancien, `ZER0_LOCAL_TOOLS=prompt` bascule sur le protocole
 texte `<tool_call>{…}</tool_call>`.

@@ -95,6 +95,8 @@ pub struct App {
     pub system: String,
     /// Base system prompt without any persona applied.
     pub base_system: String,
+    /// Prompt dédié au mode local (court, sans les fonctions cloud).
+    pub system_local: String,
     /// Active persona name, if any.
     pub persona: Option<String>,
     pub all_tools: Vec<ToolSpec>,
@@ -307,6 +309,7 @@ pub async fn run(
         display_mark: 0,
         system: system.clone(),
         base_system: system.clone(),
+        system_local: crate::config::local_system_prompt(),
         persona: None,
         all_tools,
         read_write: true,
@@ -630,7 +633,8 @@ fn start_turn(app: &mut App, text: String, ui_tx: &UnboundedSender<UiEvent>) {
         .cloned()
         .collect();
 
-    let system = app.system.clone();
+    // Deux prompts distincts : court pour le local (CPU), complet pour le cloud.
+    let system = crate::local::pick_system(&app.provider_id, &app.system, &app.system_local);
     // llama.cpp ≥ 0.6 gère les outils natifs. `ZER0_LOCAL_TOOLS=prompt` force
     // le protocole texte pour un serveur ancien (qui figeait dès 2 outils).
     let prompt_tools = app.provider_id == "local"
@@ -1015,6 +1019,80 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
             app.messages.push(ChatMessage::notice(HELP_SHORT))
         }
         "/system" => {
+            let local = args.first().copied() == Some("local");
+            let cloud = args.first().copied() == Some("cloud");
+            let text = args[1..].join(" ");
+            let text = text.trim();
+            if local || cloud {
+                match text {
+                    "" => {
+                        let current = if local {
+                            &app.system_local
+                        } else {
+                            &app.base_system
+                        };
+                        app.messages.push(ChatMessage::notice(format!(
+                            "Prompt {} : {} caractères\n{}{}",
+                            if local { "local" } else { "cloud" },
+                            current.chars().count(),
+                            current.chars().take(800).collect::<String>(),
+                            if current.chars().count() > 800 {
+                                "\n…"
+                            } else {
+                                ""
+                            }
+                        )));
+                    }
+                    "reset" => {
+                        let res = if local {
+                            crate::config::set_system_prompt_local(None)
+                        } else {
+                            crate::config::set_system_prompt_cloud(None)
+                        };
+                        match res {
+                            Ok(()) => {
+                                if local {
+                                    app.system_local = crate::local::LOCAL_SYSTEM.to_string();
+                                } else {
+                                    app.base_system = crate::DEFAULT_SYSTEM.to_string();
+                                    app.refresh_system();
+                                }
+                                app.messages
+                                    .push(ChatMessage::notice("Prompt réinitialisé."));
+                            }
+                            Err(e) => app
+                                .messages
+                                .push(ChatMessage::notice(format!("Échec: {e}"))),
+                        }
+                    }
+                    _ => {
+                        let res = if local {
+                            crate::config::set_system_prompt_local(Some(text.to_string()))
+                        } else {
+                            crate::config::set_system_prompt_cloud(Some(text.to_string()))
+                        };
+                        match res {
+                            Ok(()) => {
+                                if local {
+                                    app.system_local = text.to_string();
+                                } else {
+                                    app.base_system = text.to_string();
+                                    app.refresh_system();
+                                }
+                                app.messages.push(ChatMessage::notice(format!(
+                                    "Prompt {} mis à jour ({} caractères).",
+                                    if local { "local" } else { "cloud" },
+                                    text.chars().count()
+                                )));
+                            }
+                            Err(e) => app
+                                .messages
+                                .push(ChatMessage::notice(format!("Échec: {e}"))),
+                        }
+                    }
+                }
+                return;
+            }
             let persona = app
                 .persona
                 .clone()
@@ -1027,9 +1105,23 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
                 .unwrap_or(false);
             let preview: String = app.system.chars().take(600).collect();
             app.messages.push(ChatMessage::notice(format!(
-                "Prompt système : {} caractères\nPersona : {persona}\nTexte du persona présent : {injected}\n\
-                 --- début ---\n{preview}\n…",
-                app.system.chars().count()
+                "Prompt système actif : {} ({} caractères)\nPersona : {persona}\n\
+                 Texte du persona présent : {injected}\n\
+                 Local : {} car. · Cloud : {} car.\n\
+                 --- début ---\n{preview}\n…\n\
+                 /system local <texte> | /system cloud <texte> | … reset",
+                if app.provider_id == "local" {
+                    "local"
+                } else {
+                    "cloud"
+                },
+                if app.provider_id == "local" {
+                    app.system_local.chars().count()
+                } else {
+                    app.system.chars().count()
+                },
+                app.system_local.chars().count(),
+                app.system.chars().count(),
             )));
         }
         "/setup" => wizard::start(app, ui_tx, wizard::Step::Inference),
@@ -1090,7 +1182,8 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
              /stop                       interrompt la génération en cours\n\
              /context                    état de la conversation\n\
              /whoami [nom|off]           persona (prompt système alternatif, persistée)\n\
-             /system                     prompt système effectif + persona injectée\n\
+             /system                     prompt actif (local/cloud) + persona\n\
+             /system local|cloud <texte> prompt dédié (… reset = défaut)\n\
              /vault [status|lock]        coffre de clés (setup/unlock en CLI)\n\
              /pdf info|text|merge|split  outils PDF locaux\n\
              /jev <fichier>              score qualité code 0-3 (rôle review)\n\
@@ -4826,6 +4919,7 @@ mod tests {
             display_mark: 0,
             system: String::new(),
             base_system: String::new(),
+            system_local: String::new(),
             persona: None,
             all_tools: vec![],
             read_write: false,

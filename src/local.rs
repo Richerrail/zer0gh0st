@@ -270,6 +270,27 @@ pub async fn restart_if_owned(wanted: &str) -> Option<String> {
 }
 
 /// Fonctionnalités qui supposent plusieurs modèles : inutilisables en local.
+/// Prompt système par défaut du mode local.
+///
+/// Volontairement **court** : sur CPU, chaque centaine de tokens de préfixe
+/// coûte plusieurs secondes de préfill. Il dit l'essentiel (agir, vérifier,
+/// ne pas inventer) et tait les fonctions cloud indisponibles.
+pub const LOCAL_SYSTEM: &str = "Tu es ZER0|GH0ST, agent local (llama.cpp, CPU 2 cœurs).\n\
+Réponds en français, court et direct : pas de plan inutile, pas de répétition.\n\
+Agis avec les outils (fichiers, commandes, recherche) au lieu d'expliquer ce qu'il faudrait faire.\n\
+Après un outil, lis son résultat et continue ; si ça échoue, cite l'erreur exacte.\n\
+N'annonce jamais une action non confirmée par un résultat d'outil.\n\
+Indisponible en local : 0box, /role, /route, /select, embeddings — n'en parle pas.";
+
+/// Choisit le prompt de base selon le provider : local dédié, cloud inchangé.
+pub fn pick_system(provider_id: &str, cloud: &str, local: &str) -> String {
+    if provider_id == "local" {
+        local.to_string()
+    } else {
+        cloud.to_string()
+    }
+}
+
 pub fn limitations() -> &'static [&'static str] {
     &[
         "rôles (`/role`) : un seul modèle chargé, pas de sélection par catégorie",
@@ -339,6 +360,20 @@ mod tests {
         // chemin absolu existant (le fichier de test courant)
         let me = std::env::current_exe().unwrap();
         assert_eq!(resolve_model(&models, me.to_str()), Some(me));
+    }
+
+    #[test]
+    fn pick_system_routes_local_and_cloud() {
+        assert_eq!(pick_system("local", "cloud!", "local!"), "local!");
+        assert_eq!(pick_system("openrouter", "cloud!", "local!"), "cloud!");
+    }
+
+    #[test]
+    fn default_local_system_is_short_and_action_oriented() {
+        assert!(LOCAL_SYSTEM.chars().count() < 900, "trop long pour du CPU");
+        for key in ["outil", "résultat", "0box"] {
+            assert!(LOCAL_SYSTEM.contains(key), "manque {key}");
+        }
     }
 
     #[test]
