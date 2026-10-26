@@ -641,7 +641,8 @@ fn start_turn(app: &mut App, text: String, ui_tx: &UnboundedSender<UiEvent>) {
     let system = crate::local::pick_system(&app.provider_id, &app.system, &app.system_local);
     // llama.cpp ≥ 0.6 gère les outils natifs. `ZER0_LOCAL_TOOLS=prompt` force
     // le protocole texte pour un serveur ancien (qui figeait dès 2 outils).
-    let prompt_tools = app.provider_id == "local"
+    let local_mode = app.provider_id == "local";
+    let prompt_tools = local_mode
         && std::env::var("ZER0_LOCAL_TOOLS")
             .map(|v| v.eq_ignore_ascii_case("prompt"))
             .unwrap_or(false);
@@ -682,7 +683,10 @@ fn start_turn(app: &mut App, text: String, ui_tx: &UnboundedSender<UiEvent>) {
         let mut system = system;
         // Liste explicite des outils disponibles : ce modèle ignore souvent le
         // paramètre `tools` de l'API, il faut le lui dire dans le prompt.
-        if !tools.is_empty() {
+        // En local, le préfill coûte cher (~4 tok/s sur un 4B) : les specs
+        // d'outils sont déjà dans l'API `tools`, inutile de les recopier.
+        // On ne garde la liste que pour le protocole texte de secours.
+        if !tools.is_empty() && (!local_mode || prompt_tools) {
             system.push_str(
                 "\n\n## Outils disponibles (utilise-les pour AGIR — ne dis jamais « je ne peux pas exécuter » quand un outil le permet)\n",
             );

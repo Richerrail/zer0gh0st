@@ -22,6 +22,26 @@ fn stream_idle_timeout() -> Duration {
     parse_idle_secs(std::env::var("ZER0_STREAM_IDLE_SECS").ok().as_deref())
 }
 
+/// Délai **total** d'une requête non-streamée : un modèle local lent peut
+/// dépasser les 180 s du client partagé (préfill à ~4 tok/s). Réglable par
+/// `ZER0_HTTP_TIMEOUT_SECS` (défaut 600 s).
+fn request_timeout(options: &ChatOptions) -> Duration {
+    if options.stream {
+        // En flux, le silence entre tokens est déjà surveillé : pas de plafond
+        // total, sinon une génération longue mais active serait coupée.
+        Duration::from_secs(24 * 3600)
+    } else {
+        parse_total_secs(std::env::var("ZER0_HTTP_TIMEOUT_SECS").ok().as_deref())
+    }
+}
+
+fn parse_total_secs(raw: Option<&str>) -> Duration {
+    raw.and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|s| *s > 0)
+        .map(Duration::from_secs)
+        .unwrap_or(Duration::from_secs(600))
+}
+
 /// Analyse `ZER0_STREAM_IDLE_SECS` (séparé pour être testable sans env).
 fn parse_idle_secs(raw: Option<&str>) -> Duration {
     raw.and_then(|v| v.trim().parse::<u64>().ok())
@@ -178,7 +198,11 @@ impl ApiClient {
 
         // Build request with proper headers
         let req_builder = || {
-            let mut req = self.http.post(&url).json(&body);
+            let mut req = self
+                .http
+                .post(&url)
+                .json(&body)
+                .timeout(request_timeout(options));
             if self.base_url.contains("openrouter.ai") {
                 req = attribution(req);
             }
@@ -738,6 +762,20 @@ fn merge_call(partial: &mut Vec<PartialCall>, delta: ToolCallDelta) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn non_stream_total_timeout_defaults_to_600s() {
+        assert_eq!(parse_total_secs(None).as_secs(), 600);
+        assert_eq!(parse_total_secs(Some("900")).as_secs(), 900);
+        assert_eq!(parse_total_secs(Some("-1")).as_secs(), 600);
+        let non_stream = ChatOptions {
+            stream: false,
+            ..ChatOptions::default()
+        };
+        assert_eq!(request_timeout(&non_stream).as_secs(), 600);
+        let streaming = ChatOptions::default();
+        assert!(request_timeout(&streaming).as_secs() > 600);
+    }
 
     #[test]
     fn stream_idle_defaults_to_240s_and_honours_env() {

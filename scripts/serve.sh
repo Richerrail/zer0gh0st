@@ -14,16 +14,11 @@ CTX="${ZER0_CTX:-16384}"
 THREADS="${ZER0_THREADS:-2}"
 CPUS="${ZER0_CPUS:-0-1}"   # lo-hi range, e.g. "2-3" or "0-3"
 
-# NB : ne PAS passer `--reasoning off` : sur llama-server b10809, ce drapeau
-# fige le serveur (aucune réponse, même pour un prompt minuscule). Le modèle
-# raisonne donc selon son template ; `zer0` affiche le raisonnement si le
-# `content` reste vide (et `--once` l'imprime).
-
 exec taskset -c "$CPUS" llama-server \
     -m "$MODEL" \
     -c "$CTX" \
     --port "$PORT" \
     --jinja \
-    "${REASONING_ARGS[@]}" \
+    --reasoning-budget 0 \
     -t "$THREADS" \
     -tb "$THREADS"

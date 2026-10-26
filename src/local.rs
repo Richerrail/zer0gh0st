@@ -188,6 +188,11 @@ pub async fn ensure(wanted: Option<&str>) -> Result<String> {
         .arg("--host")
         .arg("127.0.0.1")
         .arg("--jinja")
+        // Les modèles « reasoning » (qwen3.5, DeepSeek distill…) brûlaient tout
+        // `max_tokens` en `reasoning_content` : `content` vide, réponse perdue.
+        // Budget 0 = raisonnement immédiatement clos (llama.cpp ≥ 0.6).
+        .arg("--reasoning-budget")
+        .arg("0")
         .arg("-t")
         .arg(threads.to_string())
         .arg("-tb")

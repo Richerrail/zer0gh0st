@@ -1242,17 +1242,21 @@ async fn run_once(
     use std::io::Write;
 
     let mut system = enrich_system(system);
-    let prompt_tools = settings.provider_id == "local"
+    let local_mode = settings.provider_id == "local";
+    let prompt_tools = local_mode
         && std::env::var("ZER0_LOCAL_TOOLS")
             .map(|v| v.eq_ignore_ascii_case("prompt"))
             .unwrap_or(false);
     let mut options = options;
+    // Le réglage `/stream` (config globale) vaut aussi pour `--once`.
+    options.stream = crate::config::stream_enabled();
     if prompt_tools {
         options.tools_mode = crate::llm::llama::ToolsMode::Prompt;
     }
 
     // Liste explicite des outils disponibles dans le prompt.
-    if !all_tools.is_empty() {
+    // Local : les specs sont déjà dans l'API `tools` (préfill coûteux).
+    if !all_tools.is_empty() && (!local_mode || prompt_tools) {
         system.push_str(
             "\n\n## Outils disponibles (utilise-les pour AGIR — ne dis jamais « je ne peux pas exécuter » quand un outil le permet)\n",
         );
