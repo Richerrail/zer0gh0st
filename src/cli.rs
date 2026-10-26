@@ -1242,11 +1242,9 @@ async fn run_once(
     use std::io::Write;
 
     let mut system = enrich_system(system);
+    let all_tools = crate::local::filter_tools(&settings.provider_id, all_tools);
     let local_mode = settings.provider_id == "local";
-    let prompt_tools = local_mode
-        && std::env::var("ZER0_LOCAL_TOOLS")
-            .map(|v| v.eq_ignore_ascii_case("prompt"))
-            .unwrap_or(false);
+    let prompt_tools = local_mode && crate::local::prompt_tools();
     let mut options = options;
     // Le réglage `/stream` (config globale) vaut aussi pour `--once`.
     options.stream = crate::config::stream_enabled();

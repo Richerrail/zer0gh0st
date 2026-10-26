@@ -85,6 +85,10 @@ pouvant passer plus de 2 min en préfill). Si un serveur local laisse de
 longs silences malgré tout, `/stream off` force une réponse en un bloc
 (`stream: false`), sans coupure de flux.
 
+Sur CPU, chaque schéma d'outil rendu dans le prompt coûte du préfill :
+`ZER0_LOCAL_TOOLS=minimal` n'en envoie que quatre (`code_exec`,
+`text_editor`, `search`, `task_add`).
+
 Mode **cloud** (clé optionnelle) :
 
 ```bash

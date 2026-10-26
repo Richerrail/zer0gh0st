@@ -636,16 +636,15 @@ fn start_turn(app: &mut App, text: String, ui_tx: &UnboundedSender<UiEvent>) {
         })
         .cloned()
         .collect();
+    // `ZER0_LOCAL_TOOLS=minimal` : noyau seulement (préfill réduit).
+    let tools = crate::local::filter_tools(&app.provider_id, tools);
 
     // Deux prompts distincts : court pour le local (CPU), complet pour le cloud.
     let system = crate::local::pick_system(&app.provider_id, &app.system, &app.system_local);
     // llama.cpp ≥ 0.6 gère les outils natifs. `ZER0_LOCAL_TOOLS=prompt` force
     // le protocole texte pour un serveur ancien (qui figeait dès 2 outils).
     let local_mode = app.provider_id == "local";
-    let prompt_tools = local_mode
-        && std::env::var("ZER0_LOCAL_TOOLS")
-            .map(|v| v.eq_ignore_ascii_case("prompt"))
-            .unwrap_or(false);
+    let prompt_tools = local_mode && crate::local::prompt_tools();
     let options = ChatOptions {
         max_tokens: app.max_tokens,
         thinking: app.thinking,
