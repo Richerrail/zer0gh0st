@@ -15,7 +15,20 @@ use crate::tools::ToolSpec;
 /// Hard cap on a single streamed response (guards against runaway/looping models).
 const MAX_STREAM_CHARS: usize = 1_000_000;
 /// Abort a stream that sends nothing for this long.
-const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
+/// Silences tolérés entre deux tokens. Un modèle local sur 2 cœurs peut
+/// dépasser 2 min de préfill : 240 s par défaut, réglable par
+/// `ZER0_STREAM_IDLE_SECS` (secondes, > 0).
+fn stream_idle_timeout() -> Duration {
+    parse_idle_secs(std::env::var("ZER0_STREAM_IDLE_SECS").ok().as_deref())
+}
+
+/// Analyse `ZER0_STREAM_IDLE_SECS` (séparé pour être testable sans env).
+fn parse_idle_secs(raw: Option<&str>) -> Duration {
+    raw.and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|s| *s > 0)
+        .map(Duration::from_secs)
+        .unwrap_or(Duration::from_secs(240))
+}
 
 /// Plafond de sortie pour les modèles `:free` : les providers comptent souvent
 /// la sortie **réservée** contre le quota, et un `max_tokens` élevé rapproche
@@ -244,13 +257,14 @@ impl ApiClient {
         let mut terminal = false;
 
         loop {
-            let ev = match tokio::time::timeout(STREAM_IDLE_TIMEOUT, stream.next()).await {
+            let idle = stream_idle_timeout();
+            let ev = match tokio::time::timeout(idle, stream.next()).await {
                 Ok(Some(ev)) => ev.map_err(|e| ChatError::Mid(e.into()))?,
                 Ok(None) => break,
                 Err(_) => {
                     return Err(ChatError::Mid(anyhow!(
                         "flux inactif pendant {} s : connexion coupée en cours de réponse",
-                        STREAM_IDLE_TIMEOUT.as_secs()
+                        idle.as_secs()
                     )));
                 }
             };
@@ -643,6 +657,14 @@ fn merge_call(partial: &mut Vec<PartialCall>, delta: ToolCallDelta) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stream_idle_defaults_to_240s_and_honours_env() {
+        assert_eq!(parse_idle_secs(None).as_secs(), 240);
+        assert_eq!(parse_idle_secs(Some("600")).as_secs(), 600);
+        assert_eq!(parse_idle_secs(Some("0")).as_secs(), 240);
+        assert_eq!(parse_idle_secs(Some("nope")).as_secs(), 240);
+    }
 
     #[test]
     fn prompt_tool_calls_are_parsed_and_removed_from_text() {
