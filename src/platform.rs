@@ -297,9 +297,87 @@ pub fn now() -> String {
         .unwrap_or_default()
 }
 
+/// Carte graphique détectée : faits bruts du bus PCI, sans supposer l'usage.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Gpu {
+    pub vendor: String,
+    pub pci_id: String,
+    pub driver: Option<String>,
+}
+
+/// Cartes DRM présentes (Linux). Ailleurs : liste vide (pas d'API portable).
+pub fn gpus() -> Vec<Gpu> {
+    #[cfg(target_os = "linux")]
+    {
+        let mut out: Vec<Gpu> = Vec::new();
+        let Ok(dir) = std::fs::read_dir("/sys/class/drm") else {
+            return out;
+        };
+        for entry in dir.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            // `card0`, `card1`… mais pas les connecteurs `card0-DP-1`.
+            if !name.starts_with("card") || name.contains('-') {
+                continue;
+            }
+            let Ok(txt) = std::fs::read_to_string(entry.path().join("device/uevent")) else {
+                continue;
+            };
+            if let Some(g) = parse_uevent(&txt) {
+                if !out.iter().any(|x| x.pci_id == g.pci_id) {
+                    out.push(g);
+                }
+            }
+        }
+        out.sort_by(|a, b| a.pci_id.cmp(&b.pci_id));
+        out
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Vec::new()
+    }
+}
+
+/// Extrait vendeur / id PCI / pilote d'un `uevent` de carte DRM.
+pub fn parse_uevent(text: &str) -> Option<Gpu> {
+    let mut driver = None;
+    let mut pci = None;
+    for line in text.lines() {
+        if let Some(v) = line.strip_prefix("DRIVER=") {
+            driver = Some(v.trim().to_string());
+        }
+        if let Some(v) = line.strip_prefix("PCI_ID=") {
+            pci = Some(v.trim().to_ascii_uppercase());
+        }
+    }
+    let pci_id = pci?;
+    let vendor = match pci_id.split(':').next().unwrap_or("") {
+        "1002" => "AMD/ATI",
+        "10DE" => "NVIDIA",
+        "8086" => "Intel",
+        "1AF4" => "virtio",
+        _ => "inconnu",
+    }
+    .to_string();
+    Some(Gpu {
+        vendor,
+        pci_id,
+        driver,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_uevent_extracts_vendor_and_driver() {
+        let g = parse_uevent("DRIVER=radeon\nPCI_ID=1002:6779\n").unwrap();
+        assert_eq!(g.vendor, "AMD/ATI");
+        assert_eq!(g.pci_id, "1002:6779");
+        assert_eq!(g.driver.as_deref(), Some("radeon"));
+        assert!(parse_uevent("DRIVER=amdgpu\n").is_none());
+    }
 
     #[test]
     fn secret_like_matches_keys() {

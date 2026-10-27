@@ -86,6 +86,26 @@ pub fn environment_block() -> String {
     } else {
         "non"
     };
+    let cores = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(0);
+    let detected = crate::platform::gpus();
+    let gpu = if detected.is_empty() {
+        "aucun détecté — calcul CPU uniquement".to_string()
+    } else {
+        detected
+            .iter()
+            .map(|g| {
+                format!(
+                    "{} {} ({})",
+                    g.vendor,
+                    g.pci_id,
+                    g.driver.as_deref().unwrap_or("sans pilote")
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" ; ")
+    };
     format!(
         "\n\n## Environnement (réel — ne devine pas, n'invente pas de chemins)\n\
          - Date : {now}\n\
@@ -93,6 +113,8 @@ pub fn environment_block() -> String {
          - Dossier courant (pwd) : {cwd}\n\
          - Racine du projet : {root}\n\
          - Données : `{}` (base `{}`, mémoire, conversations, tâches `{}`)\n\
+         - Matériel : CPU {cores} cœurs logiques ; GPU {gpu}\n\
+         - Le calcul GPU n'est pas garanti (pas de CUDA/ROCm par défaut) : ne le suppose pas.\n\
          - Dépôt git dans le dossier courant : {git}\n\
          - Pour connaître autre chose (fichiers, processus…), utilise `code_exec` (`ls`, `ps`, `uname`…).",
         data.display(),
@@ -156,4 +178,18 @@ pub async fn knowledge_block(query: &str) -> Option<(String, Vec<String>)> {
         .map(|h| format!("{} ({:.2})", h.sujet, h.score))
         .collect();
     Some((block, srcs))
+}
+
+#[cfg(test)]
+mod env_tests {
+    use super::*;
+
+    #[test]
+    fn environment_block_reports_real_hardware() {
+        let b = environment_block();
+        assert!(b.contains("Matériel : CPU"), "bloc: {b}");
+        assert!(b.contains("cœurs logiques"));
+        assert!(b.contains("GPU"));
+        assert!(b.contains("Calcul GPU") || b.contains("calcul GPU"));
+    }
 }
