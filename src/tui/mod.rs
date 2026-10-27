@@ -393,8 +393,29 @@ pub async fn run(
         for l in crate::local::limitations() {
             msg.push_str(&format!("  · {l}\n"));
         }
-        msg.push_str("  · llama-server sera lancé au premier message (port 8080).");
+        msg.push_str("  · llama-server est préchargé en arrière-plan (port 8080).");
         app.messages.push(ChatMessage::notice(msg));
+
+        // Préchargement : on paie les ~4 s de démarrage pendant que
+        // l'utilisateur lit l'écran, au lieu de les payer au premier message.
+        let ui = ui_tx.clone();
+        let model = app.model.clone();
+        tokio::spawn(async move {
+            if crate::local::is_up().await {
+                return;
+            }
+            let _ = ui.send(UiEvent::Info(
+                "⏳ mode local : préchargement du modèle…".into(),
+            ));
+            match crate::local::ensure(Some(&model)).await {
+                Ok(msg) => {
+                    let _ = ui.send(UiEvent::Info(format!("🖥 {msg}")));
+                }
+                Err(e) => {
+                    let _ = ui.send(UiEvent::Info(format!("⚠ mode local : {e}")));
+                }
+            }
+        });
     }
 
     // Persona persistée : on la restaure au démarrage (elle l'était pas avant,

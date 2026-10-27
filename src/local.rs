@@ -151,6 +151,10 @@ pub async fn is_up() -> bool {
 /// `wanted` est le modèle demandé (config) ; les GGUF du dossier servent à le
 /// résoudre. Échoue avec une consigne claire si aucun binaire/modèle.
 pub async fn ensure(wanted: Option<&str>) -> Result<String> {
+    // Pré-démarrage en tâche de fond + premier message peuvent arriver en
+    // même temps : sans verrou, on lançait deux serveurs.
+    static ENSURE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _guard = ENSURE_LOCK.lock().await;
     if is_up().await {
         return Ok("serveur local déjà actif".to_string());
     }
@@ -174,6 +178,10 @@ pub async fn ensure(wanted: Option<&str>) -> Result<String> {
     // garde-fou thermique (`thermal`) coupe avant la surchauffe ; `ZER0_THREADS`
     // permet de brider manuellement.
     let threads = env_u64("ZER0_THREADS", all_cores());
+    // Préfill à la moitié des cœurs : sur un CPU à FPU partagés (FX-4100),
+    // 4 threads de batch ont déjà crashé la machine ; 2 = 24 s au lieu de 33 s
+    // pour « salut ». `ZER0_THREADS_BATCH` permet d'ajuster.
+    let batch = env_u64("ZER0_THREADS_BATCH", (threads / 2).max(1));
     // Contexte volontairement petit : en chat, 2048 suffit et le préfill
     // coûte proportionnellement moins cher.
     let ctx = env_u64("ZER0_CTX", 2048);
@@ -198,10 +206,13 @@ pub async fn ensure(wanted: Option<&str>) -> Result<String> {
         // Budget 0 = raisonnement immédiatement clos (llama.cpp ≥ 0.6).
         .arg("--reasoning-budget")
         .arg("0")
+        // Sans warmup, le serveur est prêt en ~4 s au lieu de ~38 s : le
+        // warmup « à vide » préfillait tout le modèle pour rien.
+        .arg("--no-warmup")
         .arg("-t")
         .arg(threads.to_string())
         .arg("-tb")
-        .arg(threads.to_string())
+        .arg(batch.to_string())
         .stdin(Stdio::null())
         .stdout(Stdio::null());
     match log {

@@ -11,7 +11,8 @@ PORT="${ZER0_PORT:-8080}"
 CTX="${ZER0_CTX:-16384}"
 
 # CPU budget for inference: 2 cores by default (0-1). Override to use all 4.
-THREADS="${ZER0_THREADS:-2}"
+THREADS="${ZER0_THREADS:-$(nproc)}"
+THREADS_BATCH="${ZER0_THREADS_BATCH:-$(( THREADS / 2 > 0 ? THREADS / 2 : 1 ))}"
 CPUS="${ZER0_CPUS:-0-1}"   # lo-hi range, e.g. "2-3" or "0-3"
 
 exec taskset -c "$CPUS" llama-server \
@@ -20,5 +21,6 @@ exec taskset -c "$CPUS" llama-server \
     --port "$PORT" \
     --jinja \
     --reasoning-budget 0 \
+    --no-warmup \
     -t "$THREADS" \
-    -tb "$THREADS"
+    -tb "$THREADS_BATCH"
