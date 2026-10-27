@@ -301,15 +301,16 @@ pub async fn restart_if_owned(wanted: &str) -> Option<String> {
 /// Fonctionnalités qui supposent plusieurs modèles : inutilisables en local.
 /// Prompt système par défaut du mode local.
 ///
-/// Volontairement **court** : sur CPU, chaque centaine de tokens de préfixe
-/// coûte plusieurs secondes de préfill. Il dit l'essentiel (agir, vérifier,
-/// ne pas inventer) et tait les fonctions cloud indisponibles.
-pub const LOCAL_SYSTEM: &str = "Tu es ZER0|GH0ST, agent local (llama.cpp, CPU seul).\n\
-Réponds en français, court et direct : pas de plan inutile, pas de répétition.\n\
-Agis avec les outils (fichiers, commandes, recherche) au lieu d'expliquer ce qu'il faudrait faire.\n\
-Après un outil, lis son résultat et continue ; si ça échoue, cite l'erreur exacte.\n\
-N'annonce jamais une action non confirmée par un résultat d'outil.\n\
-Indisponible en local : 0box, /role, /route, /select, embeddings — n'en parle pas.";
+/// Une seule phrase : chaque token de préfixe coûte du préfill sur CPU, et un
+/// modèle de chat n'a pas besoin d'un mode d'emploi pour dire bonjour. Les
+/// consignes d'action (outils, vérification) ne concernent que le cloud, qui
+/// garde son prompt complet.
+pub const LOCAL_SYSTEM: &str = "Je suis Zer0, ton AI conversationnel ultra rapide.";
+
+/// Prompt local effectif (config `/system local` sinon le défaut).
+pub fn system_local() -> String {
+    LOCAL_SYSTEM.to_string()
+}
 
 /// Choisit le prompt de base selon le provider : local dédié, cloud inchangé.
 pub fn pick_system(provider_id: &str, cloud: &str, local: &str) -> String {
@@ -325,14 +326,6 @@ fn all_cores() -> u64 {
     std::thread::available_parallelism()
         .map(|n| n.get() as u64)
         .unwrap_or(4)
-}
-
-/// Prompt local effectif, avec les caractéristiques **réelles** de la machine.
-pub fn system_local() -> String {
-    format!(
-        "{LOCAL_SYSTEM}\nMachine : {} cœurs logiques, CPU seul (pas de GPU utilisable).",
-        all_cores()
-    )
 }
 
 pub fn limitations() -> &'static [&'static str] {
@@ -413,18 +406,10 @@ mod tests {
     }
 
     #[test]
-    fn system_local_reports_real_cores() {
-        let s = system_local();
-        assert!(s.contains(&format!("{} cœurs logiques", all_cores())));
-        assert!(!s.contains("2 cœurs"), "compte de cœurs codé en dur");
-    }
-
-    #[test]
-    fn default_local_system_is_short_and_action_oriented() {
-        assert!(LOCAL_SYSTEM.chars().count() < 900, "trop long pour du CPU");
-        for key in ["outil", "résultat", "0box"] {
-            assert!(LOCAL_SYSTEM.contains(key), "manque {key}");
-        }
+    fn default_local_system_is_a_single_short_phrase() {
+        assert!(LOCAL_SYSTEM.chars().count() <= 60, "trop long pour du CPU");
+        assert!(LOCAL_SYSTEM.contains("Zer0"));
+        assert_eq!(system_local(), LOCAL_SYSTEM);
     }
 
     #[test]
