@@ -209,6 +209,14 @@ pub async fn ensure(wanted: Option<&str>) -> Result<String> {
         // Sans warmup, le serveur est prêt en ~4 s au lieu de ~38 s : le
         // warmup « à vide » préfillait tout le modèle pour rien.
         .arg("--no-warmup")
+        // Un seul slot (chat mono-utilisateur) et buffers dimensionnés pour
+        // nos prompts courts : 3 s au lieu de 4,4 s au démarrage.
+        .arg("-np")
+        .arg("1")
+        .arg("-b")
+        .arg("512")
+        .arg("-ub")
+        .arg("256")
         .arg("-t")
         .arg(threads.to_string())
         .arg("-tb")

@@ -22,5 +22,6 @@ exec taskset -c "$CPUS" llama-server \
     --jinja \
     --reasoning-budget 0 \
     --no-warmup \
+    -np 1 -b 512 -ub 256 \
     -t "$THREADS" \
     -tb "$THREADS_BATCH"
