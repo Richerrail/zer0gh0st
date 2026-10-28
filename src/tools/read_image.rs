@@ -77,7 +77,7 @@ pub async fn run(args: &str) -> String {
         }
     }
 
-    let cmd = {
+    let mut cmd = {
         let mut c = tokio::process::Command::new("tesseract");
         c.arg(path)
             .arg("stdout")
