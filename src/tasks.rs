@@ -33,6 +33,36 @@ pub struct Task {
     pub text: String,
     pub status: Status,
     pub role: Option<String>,
+    /// Échéance (epoch secondes) : déclenche un rappel dans la TUI.
+    pub due: Option<u64>,
+}
+
+/// Horodatage courant (epoch secondes).
+pub fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Analyse une échéance : epoch en secondes, ou relatif `+15m`, `+2h`, `+3d`.
+pub fn parse_due(raw: &str) -> Option<u64> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    if let Some(rest) = raw.strip_prefix('+') {
+        let (num, unit) = rest.split_at(rest.find(|c: char| !c.is_ascii_digit())?);
+        let n: u64 = num.parse().ok()?;
+        let secs = match unit.trim().to_ascii_lowercase().as_str() {
+            "m" | "min" | "mins" => n * 60,
+            "h" | "hr" | "hrs" => n * 3600,
+            "d" | "j" | "jour" | "jours" => n * 86_400,
+            _ => return None,
+        };
+        return Some(now_secs() + secs);
+    }
+    raw.parse::<u64>().ok().map(|v| v.max(now_secs()))
 }
 
 /// Fichier de la liste de tâches (Markdown), **global à l'utilisateur**.
@@ -119,10 +149,14 @@ pub fn load() -> Vec<Task> {
             _ => Status::Pending,
         };
         let rest = line.get(6..).unwrap_or("").trim();
-        let mut it = rest.splitn(3, '|').map(|x| x.trim());
+        let mut it = rest.splitn(4, '|').map(|x| x.trim());
         let id = it.next().unwrap_or("").to_string();
         let role = it.next().unwrap_or("-").to_string();
         let text = it.next().unwrap_or("").to_string();
+        let due = it
+            .next()
+            .and_then(|f| f.strip_prefix("due="))
+            .and_then(|v| v.parse::<u64>().ok());
         if id.is_empty() {
             continue;
         }
@@ -135,6 +169,7 @@ pub fn load() -> Vec<Task> {
             } else {
                 Some(role)
             },
+            due,
         });
     }
     out
@@ -148,18 +183,27 @@ pub fn save(tasks: &[Task]) -> Result<()> {
     let mut s = String::from("# Tâches Zer0\n\n");
     for t in tasks {
         s.push_str(&format!(
-            "- {} {} | {} | {}\n",
+            "- {} {} | {} | {}",
             t.status.mark(),
             t.id,
             t.role.clone().unwrap_or_else(|| "-".to_string()),
             t.text
         ));
+        if let Some(due) = t.due {
+            s.push_str(&format!(" | due={due}"));
+        }
+        s.push('\n');
     }
     fs::write(&p, s)?;
     Ok(())
 }
 
 pub fn add(text: &str, role: Option<String>) -> Result<Task> {
+    add_with_due(text, role, None)
+}
+
+/// Comme `add`, avec une échéance (epoch secondes).
+pub fn add_with_due(text: &str, role: Option<String>, due: Option<u64>) -> Result<Task> {
     let mut tasks = load();
     let n = tasks
         .iter()
@@ -172,6 +216,7 @@ pub fn add(text: &str, role: Option<String>) -> Result<Task> {
         text: text.trim().to_string(),
         status: Status::Pending,
         role: role.filter(|r| !r.trim().is_empty()),
+        due,
     };
     tasks.push(task.clone());
     save(&tasks)?;
@@ -370,6 +415,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn parse_due_accepts_offsets_and_epoch() {
+        let now = now_secs();
+        let h = parse_due("+2h").expect("+2h");
+        assert!(h >= now + 7000 && h <= now + 7500, "{h} vs {now}");
+        let m = parse_due("+30m").expect("+30m");
+        assert!(m >= now + 1700 && m <= now + 1900);
+        assert_eq!(parse_due("nope"), None);
+        assert_eq!(parse_due(""), None);
+        // epoch déjà passé → ramené à maintenant (rappel immédiat)
+        assert!(parse_due("1").unwrap() >= now);
+    }
+
+    #[test]
     fn in_progress_task_animates_between_brackets() {
         let tasks = vec![
             Task {
@@ -377,18 +435,21 @@ mod tests {
                 text: "faite".into(),
                 status: Status::Done,
                 role: None,
+                due: None,
             },
             Task {
                 id: "t2".into(),
                 text: "en cours".into(),
                 status: Status::Claimed,
                 role: None,
+                due: None,
             },
             Task {
                 id: "t3".into(),
                 text: "à faire".into(),
                 status: Status::Pending,
                 role: None,
+                due: None,
             },
         ];
         // sans animation : marqueur statique

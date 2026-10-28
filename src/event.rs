@@ -22,6 +22,8 @@ pub enum UiEvent {
     /// A local informational message.
     #[allow(dead_code)]
     Info(String),
+    /// Une tâche planifiée est arrivée à échéance.
+    TaskDue(String),
     /// Zero-chan a transcrit une commande vocale.
     Voice(String),
     /// Vote : compteur de stars GitHub + état du compte (jeton présent ou non).

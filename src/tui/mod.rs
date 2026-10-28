@@ -418,6 +418,30 @@ pub async fn run(
         });
     }
 
+    // Planificateur : rappelle les tâches arrivées à échéance (une fois par
+    // session et par tâche). Aucune exécution automatique : c'est un rappel.
+    {
+        let ui = ui_tx.clone();
+        tokio::spawn(async move {
+            let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(60));
+            loop {
+                tick.tick().await;
+                let now = crate::tasks::now_secs();
+                for t in crate::tasks::load() {
+                    if t.status == crate::tasks::Status::Done {
+                        continue;
+                    }
+                    if let Some(due) = t.due {
+                        if due <= now && seen.insert(t.id.clone()) {
+                            let _ = ui.send(UiEvent::TaskDue(format!("{} — {}", t.id, t.text)));
+                        }
+                    }
+                }
+            }
+        });
+    }
+
     // Persona persistée : on la restaure au démarrage (elle l'était pas avant,
     // donc `/whoami` semblait ne pas agir après un relancement).
     if let Some(name) = config::load_global().persona.clone() {
@@ -3798,6 +3822,9 @@ fn handle_ui(ev: UiEvent, app: &mut App) {
             app.vote_starred = starred;
         }
         UiEvent::Voice(_) => {}
+        UiEvent::TaskDue(t) => app
+            .messages
+            .push(ChatMessage::notice(format!("⏰ échéance : {t}"))),
         UiEvent::ContextWindow(c) => {
             if !app.ctx_manual {
                 app.context_window = c;
