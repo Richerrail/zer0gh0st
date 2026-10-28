@@ -1,5 +1,6 @@
 pub mod box0;
 pub mod code_exec;
+pub mod delegate;
 pub mod knowledge_add;
 pub mod knowledge_search;
 pub mod memory_delete;
@@ -11,6 +12,7 @@ pub mod task_delete;
 pub mod task_list;
 pub mod task_update;
 pub mod text_editor;
+pub mod web_read;
 pub mod web_search;
 
 use serde_json::json;
@@ -82,6 +84,7 @@ pub fn all() -> Vec<ToolSpec> {
     vec![
         box0::spec(),
         code_exec::spec(),
+        delegate::spec(),
         text_editor::spec(),
         memory_save::spec(),
         memory_search::spec(),
@@ -93,6 +96,7 @@ pub fn all() -> Vec<ToolSpec> {
         task_delete::spec(),
         task_list::spec(),
         task_update::spec(),
+        web_read::spec(),
         web_search::spec(),
     ]
 }
@@ -122,6 +126,8 @@ async fn dispatch(name: &str, args: &str) -> String {
     match name {
         "0box" => box0::run(args).await,
         "code_exec" => code_exec::run(args).await,
+        "delegate" => delegate::run(args).await,
+        "web_read" => web_read::run(args).await,
         "text_editor" => text_editor::run(args),
         "memory_save" => memory_save::run(args).await,
         "memory_search" => memory_search::run(args).await,

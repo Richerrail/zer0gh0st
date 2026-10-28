@@ -12,7 +12,8 @@ pub fn spec() -> ToolSpec {
             "type": "object",
             "properties": {
                 "text": { "type": "string", "description": "What needs to be done." },
-                "role": { "type": "string", "description": "Optional role for this task." }
+                "role": { "type": "string", "description": "Optional role for this task." },
+                "due": { "type": "string", "description": "Optional due date: `+15m`, `+2h`, `+3d` or epoch seconds. Triggers a reminder in the TUI." }
             },
             "required": ["text"]
         }),
@@ -32,8 +33,26 @@ pub fn run(args: &str) -> String {
         .get("role")
         .and_then(|x| x.as_str())
         .map(|s| s.to_string());
-    match tasks::add(text, role) {
-        Ok(t) => format!("Tâche {} ajoutée: {}", t.id, t.text),
+    let due = match v.get("due").and_then(|x| x.as_str()) {
+        Some(s) if !s.trim().is_empty() => match tasks::parse_due(s) {
+            Some(d) => Some(d),
+            None => {
+                return format!(
+                    "Erreur: échéance `{s}` invalide (formats : +15m, +2h, +3d, epoch)."
+                )
+            }
+        },
+        _ => None,
+    };
+    match tasks::add_with_due(text, role, due) {
+        Ok(t) => format!(
+            "Tâche {} ajoutée: {}{}",
+            t.id,
+            t.text,
+            t.due
+                .map(|d| format!(" (échéance epoch {d})"))
+                .unwrap_or_default()
+        ),
         Err(e) => format!("Erreur: {e}"),
     }
 }
