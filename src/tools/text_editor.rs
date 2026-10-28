@@ -20,6 +20,8 @@ pub fn spec() -> ToolSpec {
                     "description": "The action to perform."
                 },
                 "path": { "type": "string", "description": "Absolute file path." },
+                "offset": { "type": "integer", "description": "view: first line (1-based, default 1)." },
+                "limit": { "type": "integer", "description": "view: max lines (default 400, max 2000)." },
                 "file_text": { "type": "string", "description": "FULL content for `create` (required)." },
                 "content": { "type": "string", "description": "Alias for `file_text`." },
                 "old_str": { "type": "string", "description": "Text to replace for `str_replace`." },
@@ -53,7 +55,11 @@ pub fn run(args: &str) -> String {
         .unwrap_or("");
 
     match command {
-        "view" => view(path),
+        "view" => view(
+            path,
+            v.get("offset").and_then(|x| x.as_u64()).map(|n| n as usize),
+            v.get("limit").and_then(|x| x.as_u64()).map(|n| n as usize),
+        ),
         "create" => create(path, content),
         "str_replace" => str_replace(
             path,
@@ -108,16 +114,41 @@ fn stats(content: &str) -> String {
     )
 }
 
-fn view(path: &str) -> String {
+fn view(path: &str, offset: Option<usize>, limit: Option<usize>) -> String {
     match fs::read_to_string(path) {
         Ok(content) => {
-            let header = format!("{path} — {}\n", stats(&content));
-            let numbered: String = content
-                .lines()
+            let lines: Vec<&str> = content.lines().collect();
+            let total = lines.len();
+            let start = offset.unwrap_or(1).max(1);
+            // 400 lignes par défaut : un README de 600 lignes ne doit plus être
+            // avalé d'un coup (le modèle demande la suite avec `offset`).
+            let count = limit.unwrap_or(400).clamp(1, 2_000);
+            let from = (start - 1).min(total);
+            let to = (from + count).min(total);
+            let mut header = format!("{path} — {}", stats(&content));
+            if from > 0 || to < total {
+                header.push_str(&format!(
+                    " — lignes {}-{} sur {total} (offset={}, limit={})",
+                    from + 1,
+                    to,
+                    start,
+                    count
+                ));
+            }
+            let numbered: String = lines[from..to]
+                .iter()
                 .enumerate()
-                .map(|(i, l)| format!("{:>5}  {l}\n", i + 1))
+                .map(|(i, l)| format!("{:>5}  {l}\n", from + i + 1))
                 .collect();
-            truncate(format!("{header}{numbered}"), 16_000)
+            let mut out = truncate(format!("{header}\n{numbered}"), 16_000);
+            if to < total {
+                out.push_str(&format!(
+                    "… {} ligne(s) restante(s) — relance `view` avec offset={}",
+                    total - to,
+                    to + 1
+                ));
+            }
+            out
         }
         Err(e) => format!("Erreur de lecture: {e}"),
     }
@@ -256,9 +287,24 @@ mod tests {
         let p = tmp("ok.txt");
         let out = create(&p, "ligne 1\nligne 2\n");
         assert!(out.contains("Fichier écrit"));
-        let v = view(&p);
+        let v = view(&p, None, None);
         assert!(v.contains("ligne 2"));
         assert!(v.contains("    1  ligne 1"), "got: {v}");
+        let _ = fs::remove_file(&p);
+    }
+
+    #[test]
+    fn view_paginates_with_offset_and_limit() {
+        let p = tmp("pages.txt");
+        let body: String = (1..=10).map(|i| format!("l{i}\n")).collect();
+        create(&p, &body);
+        let v = view(&p, Some(3), Some(2));
+        assert!(v.contains("    3  l3"), "got: {v}");
+        assert!(v.contains("    4  l4"));
+        assert!(!v.contains("    2  l2"));
+        assert!(!v.contains("    5  l5"));
+        assert!(v.contains("lignes 3-4 sur 10"));
+        assert!(v.contains("offset=5"), "pied de page manquant: {v}");
         let _ = fs::remove_file(&p);
     }
 
@@ -296,7 +342,7 @@ mod tests {
         let mut content = String::from("a");
         content.push_str(&"é".repeat(20_000));
         fs::write(&p, &content).unwrap();
-        let v = view(&p);
+        let v = view(&p, None, None);
         assert!(v.contains("tronqué"));
         let _ = fs::remove_file(&p);
     }

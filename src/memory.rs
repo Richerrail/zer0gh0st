@@ -60,6 +60,77 @@ fn rewrite(entries: &[MemoryEntry]) -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct UpdateOutcome {
+    pub found: bool,
+    pub reembedded: bool,
+    pub degraded_reason: Option<String>,
+}
+
+/// Corrige une entrée existante. Ré-embedding seulement si le texte change.
+pub async fn update(
+    id: &str,
+    text: Option<String>,
+    trigger: Option<String>,
+    tags: Option<Vec<String>>,
+) -> Result<UpdateOutcome> {
+    let mut entries = load();
+    let Some(idx) = entries.iter().position(|e| e.id == id) else {
+        return Ok(UpdateOutcome {
+            found: false,
+            reembedded: false,
+            degraded_reason: None,
+        });
+    };
+
+    let mut reembedded = false;
+    let mut reason = None;
+    if let Some(t) = text {
+        let t = t.trim().to_string();
+        if t.is_empty() {
+            return Err(anyhow!("texte vide"));
+        }
+        if t != entries[idx].text {
+            entries[idx].text = t;
+            match embedder_id() {
+                Some(embedder) => match embed(&entries[idx].text).await {
+                    Ok(v) => {
+                        entries[idx].vector = Some(v);
+                        entries[idx].embedder = Some(embedder);
+                        reembedded = true;
+                    }
+                    Err(e) => {
+                        entries[idx].vector = None;
+                        entries[idx].embedder = None;
+                        reason = Some(format!("embedding échoué: {e}"));
+                    }
+                },
+                None => {
+                    entries[idx].vector = None;
+                    entries[idx].embedder = None;
+                    reason = Some("aucun embedder configuré".into());
+                }
+            }
+        }
+    }
+    if let Some(t) = trigger {
+        entries[idx].trigger = if t.trim().is_empty() {
+            None
+        } else {
+            Some(t.trim().to_string())
+        };
+    }
+    if let Some(t) = tags {
+        entries[idx].tags = t;
+    }
+    rewrite(&entries)?;
+    Ok(UpdateOutcome {
+        found: true,
+        reembedded,
+        degraded_reason: reason,
+    })
+}
+
 /// Delete one entry. Returns true if it existed.
 pub fn forget(id: &str) -> Result<bool> {
     let entries = load();

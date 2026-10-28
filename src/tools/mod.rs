@@ -1,9 +1,12 @@
 pub mod box0;
 pub mod code_exec;
 pub mod knowledge_search;
+pub mod memory_delete;
 pub mod memory_save;
 pub mod memory_search;
+pub mod memory_update;
 pub mod task_add;
+pub mod task_delete;
 pub mod task_list;
 pub mod task_update;
 pub mod text_editor;
@@ -81,8 +84,11 @@ pub fn all() -> Vec<ToolSpec> {
         text_editor::spec(),
         memory_save::spec(),
         memory_search::spec(),
+        memory_update::spec(),
+        memory_delete::spec(),
         knowledge_search::spec(),
         task_add::spec(),
+        task_delete::spec(),
         task_list::spec(),
         task_update::spec(),
         web_search::spec(),
@@ -117,8 +123,11 @@ async fn dispatch(name: &str, args: &str) -> String {
         "text_editor" => text_editor::run(args),
         "memory_save" => memory_save::run(args).await,
         "memory_search" => memory_search::run(args).await,
+        "memory_update" => memory_update::run(args).await,
+        "memory_delete" => memory_delete::run(args),
         "knowledge_search" => knowledge_search::run(args).await,
         "task_add" => task_add::run(args),
+        "task_delete" => task_delete::run(args),
         "task_list" => task_list::run(args),
         "task_update" => task_update::run(args),
         "web_search" => web_search::run(args).await,
