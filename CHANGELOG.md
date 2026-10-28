@@ -1,3 +1,13 @@
+## v0.7.11 — `knowledge_delete`, OCR multilingue (2026-10-28)
+
+- **`knowledge_delete`** : supprime les chunks dont la source contient un motif
+  (l'API existait, l'outil manquait).
+- **`read_image`** : détecte les langues réellement installées, repli honnête
+  `fra` → `eng` avec la commande d'installation ; défaut `fra+eng`.
+- **Markdown** : liens `[texte](url)` → `texte (url)`, citations `> ` en barre,
+  fin du BUG 4 partiel.
+- CHANGELOG : 0.6.15 → 0.7.11 documentés (il s'arrêtait à 0.6.14).
+
 ## v0.7.10 — Lire le texte d'une image (2026-10-28)
 
 - **`read_image`** : OCR (tesseract) + métadonnées (dimensions/format) pour les
