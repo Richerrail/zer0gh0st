@@ -4081,7 +4081,18 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
             Style::default().fg(Color::Gray),
         ),
         Span::raw("  ·······  "),
-        Span::styled("O No project", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            match crate::mods::project_config_dir() {
+                Some(d) => format!(
+                    "O {}",
+                    d.file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default()
+                ),
+                None => "O No project".to_string(),
+            },
+            Style::default().fg(Color::DarkGray),
+        ),
         Span::raw("   "),
         Span::styled(
             format!("think:{}", if app.thinking { "on" } else { "off" }),
@@ -4410,13 +4421,35 @@ fn push_block(
             }
         };
         let mut used = indent;
-        if in_code {
-            used += seg.chars().count();
+        // Titres markdown : `### Titre` → titre gras, dièses retirés.
+        let trimmed = seg.trim_start();
+        let level = if in_code {
+            0
+        } else {
+            trimmed.chars().take_while(|c| *c == '#').count()
+        };
+        if level > 0 && trimmed.chars().nth(level) == Some(' ') {
+            let body = trimmed[level..].trim_start().to_string();
+            used += crate::tui::text_width(&body);
+            spans.push(Span::styled(
+                body,
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        } else if in_code {
+            used += text_width(&seg);
             spans.push(Span::styled(seg, base));
         } else {
+            // Puces : `- item` → `• item`.
+            let seg = if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
+                format!("• {}", &trimmed[2..])
+            } else {
+                seg
+            };
             let sp = inline_spans(&seg, base);
             for s in &sp {
-                used += s.content.chars().count();
+                used += text_width(&s.content);
             }
             spans.extend(sp);
         }
@@ -4607,7 +4640,13 @@ fn input_delete(app: &mut App) {
 
 fn ctx_label(app: &App) -> String {
     let t = estimate_tokens(app);
-    let pct = (t as u64 * 100 / app.context_window.max(1)).min(100);
+    // Division entière = « 0 % » sous 10 000 tokens sur une fenêtre de 1 M.
+    let pct = (t as f64 * 100.0 / app.context_window.max(1) as f64).clamp(0.0, 100.0);
+    let pct = if pct < 10.0 {
+        format!("{pct:.1}")
+    } else {
+        format!("{pct:.0}")
+    };
     format!("{pct}%/{} ", ctx_window_label(app.context_window))
         .trim_end()
         .to_string()
@@ -4894,6 +4933,18 @@ fn history_down(app: &mut App) {
 fn draw_footer(f: &mut Frame, area: Rect, app: &mut App) {
     let key = Style::default().fg(Color::Black).bg(Color::Cyan);
     let txt = Style::default().fg(Color::Gray);
+    // État visible : `code_exec` lance de vraies commandes, l'écran doit dire
+    // s'il est armé (c'était le trou de sécurité de l'audit).
+    let rw = if app.read_write {
+        Style::default().fg(Color::Black).bg(Color::Yellow)
+    } else {
+        txt
+    };
+    let exec = if app.code_exec {
+        Style::default().fg(Color::Black).bg(Color::Green)
+    } else {
+        txt
+    };
     let spans = vec![
         Span::styled(" F6 ", key),
         Span::styled(" Chats  ", txt),
@@ -4902,9 +4953,9 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &mut App) {
         Span::styled(" Ctrl+C ", key),
         Span::styled(" Exit  ", txt),
         Span::styled(" F3 ", key),
-        Span::styled(" Read&Write  ", txt),
+        Span::styled(" Read&Write  ", rw),
         Span::styled(" F4 ", key),
-        Span::styled(" Code-exec  ", txt),
+        Span::styled(" Code-exec  ", exec),
         Span::styled(" F5 ", key),
         Span::styled(" Aide  ", txt),
         Span::styled(" F8 ", key),
@@ -4936,6 +4987,36 @@ fn estimate_tokens(app: &App) -> usize {
     chars / 4
 }
 
+/// Largeur en colonnes d'un texte (emoji = 2, combinants = 0).
+fn text_width(s: &str) -> usize {
+    use unicode_width::UnicodeWidthChar;
+    s.chars()
+        .map(|c| UnicodeWidthChar::width(c).unwrap_or(0))
+        .sum()
+}
+
+/// Coupe un mot trop long pour la largeur, sans dépasser.
+fn hard_wrap(word: &str, width: usize) -> Vec<String> {
+    use unicode_width::UnicodeWidthChar;
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut w = 0;
+    for ch in word.chars() {
+        let cw = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if w + cw > width && !cur.is_empty() {
+            out.push(std::mem::take(&mut cur));
+            w = 0;
+        }
+        cur.push(ch);
+        w += cw;
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
+/// Découpe en lignes de largeur donnée, **aux espaces** quand c'est possible.
 fn wrap_text(s: &str, width: usize) -> Vec<String> {
     let width = width.max(1);
     let mut out = Vec::new();
@@ -4945,16 +5026,27 @@ fn wrap_text(s: &str, width: usize) -> Vec<String> {
             continue;
         }
         let mut cur = String::new();
-        let mut count = 0;
-        for ch in raw.chars() {
-            if count >= width {
-                out.push(std::mem::take(&mut cur));
-                count = 0;
+        let mut cur_w = 0usize;
+        for tok in raw.split_inclusive(' ') {
+            let tw = text_width(tok);
+            if cur_w + tw > width && cur_w > 0 {
+                out.push(cur.trim_end().to_string());
+                cur.clear();
+                cur_w = 0;
             }
-            cur.push(ch);
-            count += 1;
+            if tw > width && cur.is_empty() {
+                let mut parts = hard_wrap(tok, width);
+                if let Some(last) = parts.pop() {
+                    out.extend(parts);
+                    cur_w = text_width(&last);
+                    cur = last;
+                }
+            } else {
+                cur.push_str(tok);
+                cur_w += tw;
+            }
         }
-        out.push(cur);
+        out.push(cur.trim_end().to_string());
     }
     out
 }
@@ -4962,6 +5054,31 @@ fn wrap_text(s: &str, width: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wrap_breaks_on_spaces() {
+        let src = "Le manque est architectural, pas cosmétique.";
+        let lines = wrap_text(src, 20);
+        assert!(lines.iter().all(|l| text_width(l) <= 20), "{lines:?}");
+        // Aucun mot coupé : recoller les lignes rend le texte d'origine.
+        assert_eq!(lines.join(" "), src, "{lines:?}");
+    }
+
+    #[test]
+    fn wrap_counts_emoji_as_two_columns() {
+        let lines = wrap_text("### 🔴 4. Lecture de fichier non paginée", 20);
+        assert!(
+            lines.iter().all(|l| text_width(l) <= 20),
+            "débordement: {lines:?}"
+        );
+    }
+
+    #[test]
+    fn wrap_hard_splits_a_word_longer_than_width() {
+        let lines = wrap_text("aaaaaaaaaaaaaaaaaaaaaa", 8);
+        assert!(lines.iter().all(|l| text_width(l) <= 8));
+        assert!(lines.len() >= 3);
+    }
 
     /// App minimal pour les tests headless (rendu + clics).
     fn test_app() -> App {

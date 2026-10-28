@@ -72,6 +72,19 @@ pub const TREE: &[Node] = &[
     n("work", "/work"),
     n("stop", "/stop"),
     n("quit", "/quit"),
+    n("menu", "/menu"),
+    n("setup", "/setup"),
+    n("codeexec", "/codeexec"),
+    n("readwrite", "/readwrite"),
+    n("stream", "/stream"),
+    n("system", "/system"),
+    n("nudge", "/nudge"),
+    n("mic", "/mic"),
+    n("0chan", "/0chan"),
+    n("audit", "/audit"),
+    n("chats", "/chats"),
+    n("login", "/login"),
+    n("logout", "/logout"),
     // Visibles directement (sans déplier le groupe « model »).
     n("model use", "/model use "),
     n("free", "/free"),
@@ -317,6 +330,47 @@ pub fn draw(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Anti-dérive : toute commande gérée dans `mod.rs` doit être dans le menu.
+    /// C'est ce test qui aurait empêché `/codeexec` et `/readwrite` d'être
+    /// invisibles alors qu'ils arment les outils dangereux.
+    #[test]
+    fn every_tui_command_appears_in_the_menu() {
+        fn flatten(nodes: &[Node], out: &mut Vec<String>) {
+            for n in nodes {
+                if let Some(run) = n.run {
+                    if let Some(cmd) = run.split_whitespace().next() {
+                        if cmd.starts_with('/') {
+                            out.push(cmd.to_string());
+                        }
+                    }
+                }
+                flatten(n.children, out);
+            }
+        }
+        let mut listed = Vec::new();
+        flatten(TREE, &mut listed);
+
+        let src = include_str!("mod.rs");
+        let mut missing = Vec::new();
+        for line in src.lines() {
+            let t = line.trim_start();
+            if !t.starts_with('"') || !t.contains("\" =>") {
+                continue;
+            }
+            let Some(end) = t[1..].find('"') else {
+                continue;
+            };
+            let cmd = &t[1..1 + end];
+            if cmd.starts_with('/') && !listed.iter().any(|c| c == cmd) {
+                missing.push(cmd.to_string());
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "commandes absentes du menu : {missing:?}"
+        );
+    }
 
     #[test]
     fn flat_commands_is_non_empty_and_covers_model_provider_role() {
