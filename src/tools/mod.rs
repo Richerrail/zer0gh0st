@@ -7,6 +7,7 @@ pub mod memory_delete;
 pub mod memory_save;
 pub mod memory_search;
 pub mod memory_update;
+pub mod read_image;
 pub mod task_add;
 pub mod task_delete;
 pub mod task_list;
@@ -90,6 +91,7 @@ pub fn all() -> Vec<ToolSpec> {
         memory_search::spec(),
         memory_update::spec(),
         memory_delete::spec(),
+        read_image::spec(),
         knowledge_add::spec(),
         knowledge_search::spec(),
         task_add::spec(),
@@ -133,6 +135,7 @@ async fn dispatch(name: &str, args: &str) -> String {
         "memory_search" => memory_search::run(args).await,
         "memory_update" => memory_update::run(args).await,
         "memory_delete" => memory_delete::run(args),
+        "read_image" => read_image::run(args).await,
         "knowledge_add" => knowledge_add::run(args).await,
         "knowledge_search" => knowledge_search::run(args).await,
         "task_add" => task_add::run(args),
