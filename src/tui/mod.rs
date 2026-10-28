@@ -4468,11 +4468,16 @@ fn push_block(
             used += text_width(&seg);
             spans.push(Span::styled(seg, base));
         } else {
-            // Puces : `- item` → `• item`.
-            let seg = if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
-                format!("• {}", &trimmed[2..])
+            // Puces, citations, tableaux, liens markdown.
+            let seg = if let Some(rest) = trimmed
+                .strip_prefix("- ")
+                .or_else(|| trimmed.strip_prefix("* "))
+            {
+                format!("• {rest}")
+            } else if let Some(rest) = trimmed.strip_prefix("> ") {
+                format!("│ {rest}")
             } else {
-                seg
+                expand_links(&seg)
             };
             let sp = inline_spans(&seg, base);
             for s in &sp {
@@ -4486,6 +4491,35 @@ fn push_block(
         lines.push(Line::from(spans));
     }
     lines.push(Line::from(""));
+}
+
+/// `[texte](url)` → `texte (url)` : lisible sans rendu riche.
+pub fn expand_links(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'[' {
+            if let Some(close) = s[i + 1..].find(']') {
+                let close = i + 1 + close;
+                if s[close + 1..].starts_with('(') {
+                    if let Some(end) = s[close + 2..].find(')') {
+                        let url = &s[close + 2..close + 2 + end];
+                        out.push_str(&s[i + 1..close]);
+                        out.push_str(" (");
+                        out.push_str(url);
+                        out.push(')');
+                        i = close + 2 + end + 1;
+                        continue;
+                    }
+                }
+            }
+        }
+        let ch = s[i..].chars().next().unwrap_or(' ');
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
 }
 
 /// Découpe `\`code\`` et `**gras**` en spans stylés.
@@ -5098,6 +5132,15 @@ mod tests {
             lines.iter().all(|l| text_width(l) <= 20),
             "débordement: {lines:?}"
         );
+    }
+
+    #[test]
+    fn expand_links_keeps_text_and_url() {
+        assert_eq!(
+            expand_links("voir [docs](https://x.y/z) ici"),
+            "voir docs (https://x.y/z) ici"
+        );
+        assert_eq!(expand_links("pas de lien [x] ici"), "pas de lien [x] ici");
     }
 
     #[test]

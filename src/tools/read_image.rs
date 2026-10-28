@@ -19,11 +19,60 @@ pub fn spec() -> ToolSpec {
             "type": "object",
             "properties": {
                 "path": { "type": "string", "description": "Absolute path to a png/jpg/webp/bmp/gif/tiff image." },
-                "lang": { "type": "string", "description": "Tesseract language(s), e.g. `eng`, `fra+eng` (default: eng)." }
+                "lang": { "type": "string", "description": "Tesseract languages, e.g. `fra+eng` (default: fra+eng; missing ones fall back to eng)." }
             },
             "required": ["path"]
         }),
     }
+}
+
+/// Langues installées (best effort : `/usr/share/tessdata` ou `TESSDATA_PREFIX`).
+pub fn available_langs() -> Vec<String> {
+    let dir = std::env::var("TESSDATA_PREFIX")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from("/usr/share/tessdata"));
+    let mut out = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(&dir) {
+        for e in rd.flatten() {
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            if let Some(stem) = name.strip_suffix(".traineddata") {
+                out.push(stem.to_string());
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+/// Garde les langues demandées réellement installées ; repli sur `eng` (ou la
+/// première dispo) si aucune ne l'est. Retourne (utilisées, absentes).
+pub fn resolve_langs(requested: &str, available: &[String]) -> (String, Vec<String>) {
+    if available.is_empty() {
+        return (requested.to_string(), Vec::new());
+    }
+    let mut used = Vec::new();
+    let mut missing = Vec::new();
+    for want in requested
+        .split('+')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        if available.iter().any(|a| a == want) {
+            used.push(want.to_string());
+        } else {
+            missing.push(want.to_string());
+        }
+    }
+    if used.is_empty() {
+        let fallback = if available.iter().any(|a| a == "eng") {
+            "eng".to_string()
+        } else {
+            available[0].clone()
+        };
+        used.push(fallback);
+    }
+    (used.join("+"), missing)
 }
 
 /// Extensions acceptées (tesseract lit via Leptonica).
@@ -60,7 +109,7 @@ pub async fn run(args: &str) -> String {
         .and_then(|x| x.as_str())
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .unwrap_or("eng");
+        .unwrap_or("fra+eng");
 
     // Métadonnées (best effort) : dimensions + format, utile pour un screenshot.
     let mut meta = String::new();
@@ -77,12 +126,14 @@ pub async fn run(args: &str) -> String {
         }
     }
 
+    let available = available_langs();
+    let (lang, missing) = resolve_langs(lang, &available);
     let mut cmd = {
         let mut c = tokio::process::Command::new("tesseract");
         c.arg(path)
             .arg("stdout")
             .arg("-l")
-            .arg(lang)
+            .arg(&lang)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -117,7 +168,15 @@ pub async fn run(args: &str) -> String {
     } else {
         text.chars().take(MAX_CHARS).collect()
     };
-    format!("Image `{path}`{meta}\nOCR tesseract (lang={lang}) :\n{body}")
+    let mut out = format!("Image `{path}`{meta}\nOCR tesseract (lang={lang}) :\n{body}");
+    if !missing.is_empty() {
+        out.push_str(&format!(
+            "\nNote: langue(s) absente(s) : {} — repli sur {lang}. \
+             Installe-les : `sudo pacman -S tesseract-data-fra` (ou autre).",
+            missing.join(", ")
+        ));
+    }
+    out
 }
 
 #[cfg(test)]
@@ -132,6 +191,24 @@ mod tests {
         assert!(!is_image_path("notes.txt"));
         assert!(!is_image_path("archive.tar.gz"));
         assert!(!is_image_path("sans_extension"));
+    }
+
+    #[test]
+    fn resolve_langs_falls_back_and_reports_missing() {
+        let avail = vec!["eng".to_string(), "osd".to_string()];
+        assert_eq!(
+            resolve_langs("fra+eng", &avail),
+            ("eng".to_string(), vec!["fra".to_string()])
+        );
+        assert_eq!(
+            resolve_langs("eng", &avail),
+            ("eng".to_string(), Vec::new())
+        );
+        // aucune info sur les langues : on ne prétend rien
+        assert_eq!(
+            resolve_langs("fra+eng", &[]),
+            ("fra+eng".to_string(), Vec::new())
+        );
     }
 
     #[test]

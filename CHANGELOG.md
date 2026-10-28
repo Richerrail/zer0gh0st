@@ -1,3 +1,94 @@
+## v0.7.10 — Lire le texte d'une image (2026-10-28)
+
+- **`read_image`** : OCR (tesseract) + métadonnées (dimensions/format) pour les
+  captures d'écran et photos. Repli honnête quand une langue manque
+  (`fra` absent → `eng`, avec la commande d'installation).
+
+## v0.7.9 — Sous-agent isolé, lecture web, échéances (2026-10-28)
+
+- **`delegate`** : sous-agent à contexte isolé (outils moins `delegate`/`0box`,
+  donc pas de récursion), synthèse courte.
+- **`web_read`** : HTML → texte ; `render: true` passe par r.jina.ai pour les
+  pages qui exigent JavaScript.
+- **Échéances de tâches** : `task_add due="+2h"` (ou epoch), stockage
+  rétro-compatible, rappel TUI chaque minute, une fois par tâche.
+
+## v0.7.8 — Écrire dans la base de connaissances (2026-10-28)
+
+- **`knowledge_add`** : chunks + FTS5 + embeddings, même pipeline que
+  l'ingestion de fichiers, idempotent par `source`. Remplace le contournement
+  `sqlite3` qui cassait l'index hybride.
+
+## v0.7.7 — Mémoire corrigeable, lecture paginée (2026-10-28)
+
+- **`memory_update`** / **`memory_delete`** : une entrée fausse n'est plus
+  définitive ; le texte modifié est ré-embeddé.
+- **`task_delete`**, et **`text_editor view`** accepte `offset`/`limit`
+  (400 lignes par défaut) au lieu d'avaler le fichier entier.
+
+## v0.7.6 — Correctifs TUI de l'audit (2026-10-27)
+
+- ctx réel (`0,7 %` au lieu de `0 %`), état des interrupteurs dans le footer
+  (sécurité `code_exec`), `project_root()` depuis le dossier courant,
+  wrap aux espaces + largeur Unicode, titres markdown, 13 commandes
+  manquantes au menu + test anti-dérive.
+
+## v0.7.5 — Prompt local d'une phrase (2026-10-27)
+
+- Local : « Je suis Zer0, ton AI conversationnel ultra rapide. » — rien d'autre.
+
+## v0.7.4 — Démarrage local en 3 s (2026-10-27)
+
+- `-np 1 -b 512 -ub 256` en plus de `--no-warmup` : 37,8 s → 3,0 s.
+
+## v0.7.3 — Pas de warmup, préchargement (2026-10-27)
+
+- `--no-warmup` (37,8 → 4,4 s), génération sur tous les cœurs, préfill à
+  moitié, serveur préchargé au lancement de la TUI, verrou anti-double-démarrage.
+
+## v0.7.2 — Matériel réel dans le prompt (2026-10-27)
+
+- Bloc Environnement : nombre de cœurs réel + GPU lu sur le bus PCI (fini les
+  hallucinations `nvidia-smi`).
+
+## v0.7.1 — Cœurs réels, `code_exec` 300 s (2026-10-27)
+
+- Prompt local sans « 2 cœurs » codé en dur ; `code_exec` 300 s par défaut
+  (`ZER0_EXEC_TIMEOUT`), docs de flux à 240 s.
+
+## v0.7.0 — Local = chat rapide, garde-fou thermique (2026-10-27)
+
+- Le mode local n'est plus un agent : aucun outil, aucun KB, prompt court.
+- Tous les cœurs détectés, contexte 2048 ; coupure à 88 °C, serveur arrêté
+  à 92 °C (Linux).
+
+## v0.6.20 — Noyau d'outils local (2026-10-27)
+
+- `ZER0_LOCAL_TOOLS=minimal` (4 outils) — retiré en 0.7.0 avec le mode agent local.
+
+## v0.6.19 — Raisonnement, passerelle, timeout (2026-10-27)
+
+- `--reasoning-budget 0` (content vide sinon), `local` contourne zer0-gw,
+  timeout total adaptatif (600 s non-stream).
+
+## v0.6.18 — `/stream` et correctif `/system` (2026-10-26)
+
+- Bascule streaming/non-streaming persistée ; `/system` sans argument ne
+  ferme plus la TUI (panic `args[1..]`).
+
+## v0.6.17 — Timeout de flux 240 s (2026-10-26)
+
+- Un préfill local peut dépasser 2 min : `ZER0_STREAM_IDLE_SECS`.
+
+## v0.6.16 — Prompts local/cloud séparés (2026-10-26)
+
+- `/system local|cloud <texte>`, prompt local court, persistance.
+
+## v0.6.15 — Mode local : llama-server auto, GGUF, outils natifs (2026-10-26)
+
+- Démarrage automatique de llama-server, scan récursif des GGUF (`mmproj`
+  exclus), résolution de modèle, limitations annoncées, outils natifs.
+
 ## v0.6.14 — Mode local : diagnostics honnêtes (2026-10-25)
 
 - **« aucun modèle » / « /model use ne marche pas »** : `models::list` annonçait « URL invalide »
