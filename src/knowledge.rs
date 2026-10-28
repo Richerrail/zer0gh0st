@@ -683,6 +683,74 @@ pub async fn ingest_dir(dir: &Path, embed: bool) -> Result<(usize, usize)> {
     Ok((nfiles, nchunks))
 }
 
+/// Ajoute un texte libre à la base, avec **le même pipeline** que l'ingestion
+/// de fichiers (chunks + FTS5 + embeddings). `source` est l'identifiant :
+/// ré-ajouter la même source remplace ses anciens chunks (idempotent).
+///
+/// Les embeddings sont calculés **avant** d'ouvrir la connexion : on ne tient
+/// jamais un `Connection` (non-Send) à travers un `.await`.
+pub async fn add(source: &str, sujet: &str, text: &str, embed: bool) -> Result<(usize, bool)> {
+    if text.trim().is_empty() {
+        return Err(anyhow!("texte vide"));
+    }
+    let parts: Vec<String> = chunks(text, 1200)
+        .into_iter()
+        .filter(|c| !c.trim().is_empty())
+        .collect();
+    if parts.is_empty() {
+        return Err(anyhow!("aucun contenu à indexer"));
+    }
+
+    let embedder = if embed {
+        crate::memory::embedder_id()
+    } else {
+        None
+    };
+    let mut vectors: Vec<Option<Vec<f32>>> = vec![None; parts.len()];
+    if embedder.is_some() {
+        for (i, ch) in parts.iter().enumerate() {
+            if let Ok(v) = crate::memory::embed(ch).await {
+                vectors[i] = Some(v);
+            }
+        }
+    }
+    let embedded = vectors.iter().any(|v| v.is_some());
+
+    let source = source.to_string();
+    let sujet = sujet.to_string();
+    let n = parts.len();
+    let embedder = embedder.filter(|_| embedded);
+    tokio::task::spawn_blocking(move || -> Result<()> {
+        let c = open()?;
+        c.execute_batch("BEGIN")?;
+        c.execute("DELETE FROM knowledge WHERE source = ?1", params![source])?;
+        for (i, ch) in parts.iter().enumerate() {
+            c.execute(
+                "INSERT INTO knowledge(sujet, contenu, source) VALUES (?1, ?2, ?3)",
+                params![sujet, ch, source],
+            )?;
+            let id = c.last_insert_rowid();
+            c.execute(
+                "INSERT INTO knowledge_fts(rowid, sujet, contenu) VALUES (?1, ?2, ?3)",
+                params![id, sujet, ch],
+            )?;
+            if let (Some(e), Some(v)) = (&embedder, vectors.get(i).and_then(|v| v.as_ref())) {
+                c.execute(
+                    "INSERT OR REPLACE INTO embeddings(knowledge_id, embedder, vector) \
+                     VALUES (?1, ?2, ?3)",
+                    params![id, e, f32_to_blob(v)],
+                )?;
+            }
+        }
+        c.execute_batch("COMMIT")?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| anyhow!("écriture KB interrompue: {e}"))??;
+
+    Ok((n, embedded))
+}
+
 /// Reconstruit l'index FTS5.
 pub fn rebuild_fts() -> Result<()> {
     let c = open()?;
