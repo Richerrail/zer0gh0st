@@ -413,6 +413,11 @@ Zer0 agit : tu décris un but, il appelle les outils nécessaires.
 
 ---
 
+## 6bis. Suggestions d'amélioration
+
+Idées **non implémentées** (TTS/M8, vision multimodale, etc.), avec leurs
+contraintes : [docs/IMPROVEMENTS.md](docs/IMPROVEMENTS.md).
+
 ## 7. Commandes
 
 **TUI** (extrait) : `/help` `/think` `/provider` `/model` `/models` `/quota` `/vote` `/ctx` `/free` `/select` `/route` `/telegram` `/tg`
