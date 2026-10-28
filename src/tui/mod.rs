@@ -4469,10 +4469,13 @@ fn push_block(
             spans.push(Span::styled(seg, base));
         } else {
             // Puces, citations, tableaux, liens markdown.
-            let seg = if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
-                format!("• {}", &trimmed[2..])
-            } else if trimmed.starts_with("> ") {
-                format!("│ {}", &trimmed[2..])
+            let seg = if let Some(rest) = trimmed
+                .strip_prefix("- ")
+                .or_else(|| trimmed.strip_prefix("* "))
+            {
+                format!("• {rest}")
+            } else if let Some(rest) = trimmed.strip_prefix("> ") {
+                format!("│ {rest}")
             } else {
                 expand_links(&seg)
             };
