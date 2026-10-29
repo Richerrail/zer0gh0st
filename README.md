@@ -186,6 +186,22 @@ par `ZER0_EXEC_TIMEOUT` ou par appel (`timeout_secs`).
 
 ---
 
+## 4bis. Windows et macOS
+
+Les trois plateformes compilent en CI (Ubuntu, macOS, Windows). Points
+spécifiques :
+
+| Sujet | Windows | macOS |
+|---|---|---|
+| `code_exec` | bash (Git Bash) si présent, sinon PowerShell, sinon cmd — forçable par `ZER0_SHELL=bash\|powershell\|cmd` | `bash -lc` |
+| GPU local | `ZER0_GPU_LAYERS=auto` interroge `llama-server --list-devices` (CUDA/Vulkan/ROCm) | Metal par défaut (`-ngl 999`) |
+| Garde-fou thermique | inactif (pas de capteurs portables) | inactif |
+| OCR (`read_image`) | langues via `tesseract --list-langs` | idem (Homebrew) |
+| Serveur local | `llama-server.exe` dans le `PATH` ou `ZER0_LLAMA_SERVER` | idem |
+
+`ZER0_GPU_LAYERS=0` force le CPU, `=N` fixe le nombre de couches. Sans GPU
+détecté, le message de démarrage dit « CPU seul » au lieu de le supposer.
+
 ## 5. Installation
 
 Prérequis : **Rust** (cargo) + un **compilateur C** (`cc`) — `rusqlite` est compilé *bundled*,

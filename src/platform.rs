@@ -42,17 +42,114 @@ pub fn home() -> String {
 /// un modèle qui demande une commande arbitraire ne doit jamais pouvoir faire
 /// `echo $OPENROUTER_API_KEY` ni `env` pour récupérer une clé.
 pub fn shell_command(script: &str) -> Command {
-    let mut c = if cfg!(windows) {
-        let mut c = Command::new("cmd");
-        c.arg("/C").arg(script);
-        c
-    } else {
+    // `cfg!` évalue les deux branches : `windows_shell` n'existe que sous
+    // Windows, donc on sélectionne à la compilation.
+    #[cfg(windows)]
+    let mut c = windows_shell(script);
+    #[cfg(not(windows))]
+    let mut c = {
         let mut c = Command::new("bash");
         c.arg("-lc").arg(script);
         c
     };
     scrub_secrets(&mut c);
     c
+}
+
+/// Shell utilisé par `code_exec` (libellé affiché au modèle).
+pub fn shell_label() -> String {
+    #[cfg(windows)]
+    {
+        let ov = std::env::var("ZER0_SHELL").ok();
+        let has_bash = find_in_path("bash").is_some();
+        let has_pwsh = find_in_path("pwsh").is_some();
+        let has_ps = find_in_path("powershell").is_some();
+        match pick_windows_shell(ov.as_deref(), has_bash, has_pwsh, has_ps) {
+            WinShell::Bash => "bash -lc (Git Bash)".to_string(),
+            WinShell::PowerShell => "powershell -Command".to_string(),
+            WinShell::Cmd => "cmd /C".to_string(),
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        "bash -lc".to_string()
+    }
+}
+
+/// Shell retenu sous Windows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WinShell {
+    Bash,
+    PowerShell,
+    Cmd,
+}
+
+/// Choix **pur** (testable) : `ZER0_SHELL` explicite, sinon bash (Git Bash),
+/// sinon PowerShell, sinon cmd. Objectif : offrir les outils POSIX (`wc`,
+/// `grep`…) aux utilisateurs Windows qui ont Git Bash, au lieu de cmd.
+pub fn pick_windows_shell(
+    override_: Option<&str>,
+    has_bash: bool,
+    has_pwsh: bool,
+    has_powershell: bool,
+) -> WinShell {
+    match override_.map(|s| s.trim().to_ascii_lowercase()).as_deref() {
+        Some("bash") | Some("gitbash") => return WinShell::Bash,
+        Some("pwsh") | Some("powershell") | Some("ps") => return WinShell::PowerShell,
+        Some("cmd") | Some("cmd.exe") => return WinShell::Cmd,
+        _ => {}
+    }
+    if has_bash {
+        WinShell::Bash
+    } else if has_pwsh || has_powershell {
+        WinShell::PowerShell
+    } else {
+        WinShell::Cmd
+    }
+}
+
+#[cfg(windows)]
+fn windows_shell(script: &str) -> Command {
+    let ov = std::env::var("ZER0_SHELL").ok();
+    let has_bash = find_in_path("bash").is_some();
+    let has_pwsh = find_in_path("pwsh").is_some();
+    let has_ps = find_in_path("powershell").is_some();
+    match pick_windows_shell(ov.as_deref(), has_bash, has_pwsh, has_ps) {
+        WinShell::Bash => {
+            let mut c = Command::new("bash");
+            c.arg("-lc").arg(script);
+            c
+        }
+        WinShell::PowerShell => {
+            let mut c = Command::new(if has_pwsh { "pwsh" } else { "powershell" });
+            c.arg("-NoProfile").arg("-Command").arg(script);
+            c
+        }
+        WinShell::Cmd => {
+            let mut c = Command::new("cmd");
+            c.arg("/C").arg(script);
+            c
+        }
+    }
+}
+
+/// Cherche un exécutable dans `PATH` (avec extensions Windows).
+pub fn find_in_path(exe: &str) -> Option<std::path::PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path) {
+        let direct = dir.join(exe);
+        if direct.is_file() {
+            return Some(direct);
+        }
+        #[cfg(windows)]
+        for ext in ["exe", "cmd", "bat"] {
+            let cand = dir.join(format!("{exe}.{ext}"));
+            if cand.is_file() {
+                return Some(cand);
+            }
+        }
+    }
+    None
 }
 
 /// Retire de l'environnement d'un processus enfant toute variable qui **ressemble
@@ -377,6 +474,28 @@ mod tests {
         assert_eq!(g.pci_id, "1002:6779");
         assert_eq!(g.driver.as_deref(), Some("radeon"));
         assert!(parse_uevent("DRIVER=amdgpu\n").is_none());
+    }
+
+    #[test]
+    fn windows_shell_prefers_bash_then_powershell() {
+        assert_eq!(pick_windows_shell(None, true, true, true), WinShell::Bash);
+        assert_eq!(
+            pick_windows_shell(None, false, true, true),
+            WinShell::PowerShell
+        );
+        assert_eq!(
+            pick_windows_shell(None, false, false, true),
+            WinShell::PowerShell
+        );
+        assert_eq!(pick_windows_shell(None, false, false, false), WinShell::Cmd);
+        assert_eq!(
+            pick_windows_shell(Some("cmd"), true, true, true),
+            WinShell::Cmd
+        );
+        assert_eq!(
+            pick_windows_shell(Some("POWERSHELL"), true, false, true),
+            WinShell::PowerShell
+        );
     }
 
     #[test]
