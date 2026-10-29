@@ -185,6 +185,9 @@ pub async fn ensure(wanted: Option<&str>) -> Result<String> {
     // Contexte volontairement petit : en chat, 2048 suffit et le préfill
     // coûte proportionnellement moins cher.
     let ctx = env_u64("ZER0_CTX", 2048);
+    // GPU : les autres utilisateurs en ont. `auto` (défaut) demande au binaire
+    // ses backends (CUDA/Vulkan/ROCm) ; macOS = Metal, toujours disponible.
+    let gpu = gpu_layers(&bin);
 
     let log = std::fs::OpenOptions::new()
         .create(true)
@@ -220,9 +223,12 @@ pub async fn ensure(wanted: Option<&str>) -> Result<String> {
         .arg("-t")
         .arg(threads.to_string())
         .arg("-tb")
-        .arg(batch.to_string())
-        .stdin(Stdio::null())
-        .stdout(Stdio::null());
+        .arg(batch.to_string());
+    if gpu > 0 {
+        // `-ngl 999` = offload maximal (llama.cpp plafonne aux couches réelles).
+        cmd.arg("-ngl").arg(gpu.to_string());
+    }
+    cmd.stdin(Stdio::null()).stdout(Stdio::null());
     match log {
         Some(f) => {
             cmd.stderr(Stdio::from(f));
@@ -243,8 +249,13 @@ pub async fn ensure(wanted: Option<&str>) -> Result<String> {
     let deadline = std::time::Instant::now() + Duration::from_secs(120);
     while std::time::Instant::now() < deadline {
         if is_up().await {
+            let gpu_txt = if gpu > 0 {
+                format!(", GPU {gpu} couches")
+            } else {
+                ", CPU seul".to_string()
+            };
             return Ok(format!(
-                "llama-server démarré — {} ({} cœurs, ctx {ctx})",
+                "llama-server démarré — {} ({} cœurs, ctx {ctx}{gpu_txt})",
                 model.display(),
                 threads
             ));
@@ -319,6 +330,47 @@ pub fn pick_system(provider_id: &str, cloud: &str, local: &str) -> String {
     } else {
         cloud.to_string()
     }
+}
+
+/// Couches à décharger sur GPU. `ZER0_GPU_LAYERS` : `auto` (défaut), `0`, ou N.
+fn gpu_layers(bin: &std::path::Path) -> u64 {
+    match std::env::var("ZER0_GPU_LAYERS").ok().as_deref() {
+        Some("0") => return 0,
+        Some(v) if !v.eq_ignore_ascii_case("auto") => {
+            return v.trim().parse().unwrap_or(0);
+        }
+        _ => {}
+    }
+    // macOS : Metal est le backend par défaut de llama.cpp.
+    if cfg!(target_os = "macos") {
+        return 999;
+    }
+    if detect_gpu(bin) {
+        999
+    } else {
+        0
+    }
+}
+
+/// Interroge le binaire : `--list-devices` (CUDA/Vulkan/ROCm/Metal/SYCL).
+fn detect_gpu(bin: &std::path::Path) -> bool {
+    let Ok(out) = std::process::Command::new(bin)
+        .arg("--list-devices")
+        .output()
+    else {
+        return false;
+    };
+    if !out.status.success() {
+        return false;
+    }
+    let mut s = String::from_utf8_lossy(&out.stdout).to_string();
+    s.push_str(&String::from_utf8_lossy(&out.stderr));
+    s.lines().any(|l| {
+        let l = l.trim_start();
+        ["CUDA", "Vulkan", "ROCm", "Metal", "SYCL"]
+            .iter()
+            .any(|p| l.starts_with(p) && l.contains(':'))
+    })
 }
 
 /// Nombre de cœurs logiques disponibles.

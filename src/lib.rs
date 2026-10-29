@@ -62,9 +62,10 @@ pub fn enrich_system(system: String) -> String {
          - Si le contenu est très long, écris-le en entier d'un coup ; sinon écris puis complète \
            avec `insert`/`str_replace`.\n\
          - Pour vérifier/tester, **préfère un one-liner `python -c \"…\"` simple** plutôt que de créer un \
-           fichier de test (`check.py`). Sous Windows : `python` (pas `python3`) et le quoting \n\
-           `cmd` casse les one-liners multi-instructions — dans ce cas, écris un petit script avec \n\
-           `text_editor`, exécute-le (`python script.py`), puis supprime-le (`text_editor` `delete`).\n\
+           fichier de test (`check.py`). Sous Windows : `python` (pas `python3`) ; `code_exec`\n\
+           utilise bash (Git Bash) s'il est présent, sinon PowerShell, sinon cmd (`ZER0_SHELL`\n\
+           pour forcer). Le quoting diffère selon le shell : en cas de doute, écris un petit\n\
+           script avec `text_editor`, exécute-le (`python script.py`), puis supprime-le.\n\
          - Crée les fichiers sous `{home}` avec un chemin absolu.\n\
          {env}"
     )
@@ -106,6 +107,7 @@ pub fn environment_block() -> String {
             .collect::<Vec<_>>()
             .join(" ; ")
     };
+    let shell = crate::platform::shell_label();
     format!(
         "\n\n## Environnement (réel — ne devine pas, n'invente pas de chemins)\n\
          - Date : {now}\n\
@@ -114,6 +116,7 @@ pub fn environment_block() -> String {
          - Racine du projet : {root}\n\
          - Données : `{}` (base `{}`, mémoire, conversations, tâches `{}`)\n\
          - Matériel : CPU {cores} cœurs logiques ; GPU {gpu}\n\
+         - Shell de `code_exec` : {shell}\n\
          - Le calcul GPU n'est pas garanti (pas de CUDA/ROCm par défaut) : ne le suppose pas.\n\
          - Dépôt git dans le dossier courant : {git}\n\
          - Pour connaître autre chose (fichiers, processus…), utilise `code_exec` (`ls`, `ps`, `uname`…).",

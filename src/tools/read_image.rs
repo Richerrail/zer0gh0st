@@ -41,7 +41,24 @@ pub fn available_langs() -> Vec<String> {
             }
         }
     }
+    if out.is_empty() {
+        // macOS/Windows : les traineddata ne sont pas dans /usr/share.
+        if let Ok(o) = std::process::Command::new("tesseract")
+            .arg("--list-langs")
+            .output()
+        {
+            if o.status.success() {
+                for line in String::from_utf8_lossy(&o.stdout).lines().skip(1) {
+                    let l = line.trim();
+                    if !l.is_empty() && !l.contains(':') && !l.contains(' ') {
+                        out.push(l.to_string());
+                    }
+                }
+            }
+        }
+    }
     out.sort();
+    out.dedup();
     out
 }
 
