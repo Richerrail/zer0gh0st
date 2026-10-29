@@ -1,6 +1,6 @@
 [package]
 name = "zer0"
-version = "0.7.11"
+version = "0.7.12"
 edition = "2021"
 description = "ZER0|GH0ST - a terminal-native AI agent (CLI-only, Rust)"
 authors = ["richerrail"]

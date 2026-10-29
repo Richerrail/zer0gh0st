@@ -1,3 +1,15 @@
+## v0.7.12 — Windows/macOS : GPU auto, shell adapté (2026-10-29)
+
+- **GPU** : `-ngl` automatique. `ZER0_GPU_LAYERS=auto` interroge
+  `llama-server --list-devices` (CUDA/Vulkan/ROCm/SYCL) ; macOS = Metal
+  (`-ngl 999`) ; `0` force le CPU, `N` fixe les couches.
+- **Windows** : `code_exec` préfère bash (Git Bash) → `wc`/`grep` marchent,
+  sinon PowerShell, sinon cmd (`ZER0_SHELL` pour forcer). Shell annoncé dans
+  le bloc Environnement.
+- **OCR** : langues lues via `tesseract --list-langs` quand `tessdata` n'est
+  pas dans `/usr/share` (macOS/Windows).
+- README : section Windows/macOS.
+
 ## v0.7.11 — `knowledge_delete`, OCR multilingue (2026-10-28)
 
 - **`knowledge_delete`** : supprime les chunks dont la source contient un motif
