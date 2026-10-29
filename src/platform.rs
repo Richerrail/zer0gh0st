@@ -42,9 +42,12 @@ pub fn home() -> String {
 /// un modèle qui demande une commande arbitraire ne doit jamais pouvoir faire
 /// `echo $OPENROUTER_API_KEY` ni `env` pour récupérer une clé.
 pub fn shell_command(script: &str) -> Command {
-    let mut c = if cfg!(windows) {
-        windows_shell(script)
-    } else {
+    // `cfg!` évalue les deux branches : `windows_shell` n'existe que sous
+    // Windows, donc on sélectionne à la compilation.
+    #[cfg(windows)]
+    let mut c = windows_shell(script);
+    #[cfg(not(windows))]
+    let mut c = {
         let mut c = Command::new("bash");
         c.arg("-lc").arg(script);
         c
