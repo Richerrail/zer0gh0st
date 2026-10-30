@@ -1,3 +1,9 @@
+## v0.7.13 — Moniteur système `zer0 top` (2026-10-29)
+
+- **`zer0 top [--watch]`** et **`/top`** : btop-like sans btop (CPU global et
+  par cœur, RAM/swap, charge, températures hwmon, top 8 processus) via
+  `sysinfo`. Températures : Linux ; macOS/Windows affichent « indisponible ».
+
 ## v0.7.12 — Windows/macOS : GPU auto, shell adapté (2026-10-29)
 
 - **GPU** : `-ngl` automatique. `ZER0_GPU_LAYERS=auto` interroge

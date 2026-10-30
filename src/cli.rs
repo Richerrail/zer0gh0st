@@ -81,6 +81,15 @@ enum Command {
         #[arg(long)]
         force: bool,
     },
+    /// Moniteur système (CPU, RAM, températures, processus)
+    Top {
+        /// Rafraîchir en continu
+        #[arg(long)]
+        watch: bool,
+        /// Intervalle de rafraîchissement (secondes)
+        #[arg(long, default_value_t = 1)]
+        interval: u64,
+    },
     /// List the models of a provider.
     Models {
         /// Only show free (`:free` / $0) models.
