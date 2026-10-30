@@ -186,7 +186,7 @@ par `ZER0_EXEC_TIMEOUT` ou par appel (`timeout_secs`).
 | **Local** | chat rapide **sans outils** (prompt d'une phrase, contexte 2048, `--no-warmup`, `-np 1`), GGUF scannés, serveur préchargé en 3 s |
 | **GPU** | `-ngl` automatique : CUDA/Vulkan/ROCm via `llama-server --list-devices`, **Metal** sur macOS ; `ZER0_GPU_LAYERS=auto\|0\|N` |
 | **Thermique** | Linux : alerte 80 °C, génération coupée à 88 °C, serveur arrêté à 92 °C (`ZER0_TEMP_*`) |
-| **Moniteur** | `zer0 t0p [--watch]` et `/t0p` : CPU (global + cœurs), RAM/swap, charge, températures, top 8 processus, sans `btop` |
+| **Moniteur** | mod `t0p` dans le panneau latéral (comme radio/bintime) : CPU (global + cœurs), RAM/swap, charge, températures, top 8 processus. Aussi `zer0 t0p [--watch]` en CLI |
 | **Vote** | **👍 / 👎 en bas à droite de l'écran principal** (cliquables) : le pouce haut = **une star GitHub** sur [Richerrail/zer0gh0st](https://github.com/Richerrail/zer0gh0st), le bas retire la star. `/vote` ou `zer0 vote up\|down\|status\|login\|logout`. Compteur réel lu sur l'API GitHub. Connexion GitHub par device flow OAuth (`vote login`) → votes ensuite automatiques. |
 | **Divers** | `/vault`, `/pdf`, personas `/whoami`, recherche `/search` |
 
@@ -344,7 +344,7 @@ zer0 t0p              # un relevé
 zer0 t0p --watch      # rafraîchi toutes les secondes (Ctrl+C pour sortir)
 ```
 
-Dans la TUI : `/t0p`. Températures : Linux uniquement (ailleurs, « indisponible »).
+Dans la TUI : `/t0p` ouvre le **panneau latéral** (même place que `/radio` et `/bintime`) ; `/panel` le ferme, ou `Esc` une fois le panneau focus (Tab). Températures : Linux uniquement (ailleurs, « indisponible »).
 
 ### Providers cloud (clé optionnelle)
 
