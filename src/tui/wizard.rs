@@ -21,7 +21,9 @@ use crate::event::UiEvent;
 use crate::models::ModelEntry;
 use crate::{config, providers};
 
-use super::{theme, App};
+use crate::theme;
+
+use super::App;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Step {
@@ -615,7 +617,7 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
     };
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme::ACCENT))
+        .border_style(Style::default().fg(theme::accent()))
         .title(format!(" ZER0|GH0ST — {} ", w.step.title()));
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -624,7 +626,7 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
     for l in explanatory(w.step) {
         lines.push(Line::from(Span::styled(
             l.to_string(),
-            Style::default().fg(theme::TEXT),
+            Style::default().fg(theme::text()),
         )));
     }
     lines.push(Line::from(""));
@@ -640,12 +642,12 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
             if w.loading {
                 lines.push(Line::from(Span::styled(
                     "⏳ récupération de la liste des modèles…",
-                    Style::default().fg(theme::DIM),
+                    Style::default().fg(theme::dim()),
                 )));
             } else if w.models.is_empty() {
                 lines.push(Line::from(Span::styled(
                     "Liste indisponible — tape l'identifiant du modèle :",
-                    Style::default().fg(theme::DIM),
+                    Style::default().fg(theme::dim()),
                 )));
                 lines.push(Line::from(format!(
                     "  {}",
@@ -673,7 +675,7 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
                             "  … {} autres (tape l'id pour filtrer)",
                             w.models.len() - 14
                         ),
-                        Style::default().fg(theme::DIM),
+                        Style::default().fg(theme::dim()),
                     )));
                 }
             }
@@ -686,7 +688,7 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
         Step::ApiKey | Step::TelegramToken => {
             lines.push(Line::from(Span::styled(
                 format!("  {}", mask(&app.input, true)),
-                Style::default().fg(theme::CODE),
+                Style::default().fg(theme::code()),
             )));
         }
         Step::Commands => lines.extend(command_page(w.page, inner.width as usize)),
@@ -698,7 +700,7 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
         lines.push(Line::from(Span::styled(
             format!("⚠ {err}"),
             Style::default()
-                .fg(theme::ACCENT)
+                .fg(theme::accent())
                 .add_modifier(Modifier::BOLD),
         )));
     }
@@ -714,7 +716,7 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
         height: 1,
     };
     f.render_widget(
-        Paragraph::new(Span::styled(footer, Style::default().fg(theme::DIM)))
+        Paragraph::new(Span::styled(footer, Style::default().fg(theme::dim())))
             .alignment(Alignment::Center),
         farea,
     );
@@ -727,10 +729,10 @@ fn draw_error(f: &mut Frame, area: Rect, msg: &str) {
 fn item_line(selected: bool, text: &str) -> Line<'static> {
     let style = if selected {
         Style::default()
-            .fg(theme::ACCENT)
+            .fg(theme::accent())
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(theme::TEXT)
+        Style::default().fg(theme::text())
     };
     Line::from(Span::styled(
         format!("{} {}", if selected { "▶" } else { " " }, text),
@@ -763,7 +765,7 @@ fn command_page(page: usize, _width: usize) -> Vec<Line<'static>> {
                 .map(|l| {
                     Line::from(Span::styled(
                         (*l).to_string(),
-                        Style::default().fg(theme::TEXT),
+                        Style::default().fg(theme::text()),
                     ))
                 })
                 .collect()

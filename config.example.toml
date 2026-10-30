@@ -21,6 +21,11 @@
 # provider = "openrouter"
 # model    = "nvidia/nemotron-3.5-lightning:free"
 
+# ── Thème de la TUI ─────────────────────────────────────────────────
+# Valeurs : "ghost" (défaut), "noir", "noir-rouge".
+# Dans la TUI, `/theme` ouvre le menu de sélection.
+# theme = "noir-rouge"
+
 # ── Chaîne de bascule (failover), essayée dans l'ordre ─────
 # routes = [
 #   "openrouter/nvidia/nemotron-3.5-lightning:free",
