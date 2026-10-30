@@ -81,6 +81,16 @@ enum Command {
         #[arg(long)]
         force: bool,
     },
+    /// Moniteur système (CPU, RAM, températures, processus)
+    #[command(name = "t0p")]
+    Top {
+        /// Rafraîchir en continu
+        #[arg(long)]
+        watch: bool,
+        /// Intervalle de rafraîchissement (secondes)
+        #[arg(long, default_value_t = 1)]
+        interval: u64,
+    },
     /// List the models of a provider.
     Models {
         /// Only show free (`:free` / $0) models.
@@ -636,6 +646,7 @@ async fn run_command(cmd: Command) -> Result<()> {
             println!("{}", update::run(check, force).await?);
             Ok(())
         }
+        Command::Top { watch, interval } => crate::monitor::cli(watch, interval).await,
         Command::Vault { action } => vault_cmd(action),
         Command::Pdf { action } => pdf_cmd(action),
         Command::Jev { file } => jev_cmd(file).await,

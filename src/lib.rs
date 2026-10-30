@@ -26,6 +26,7 @@ pub mod local;
 pub mod memory;
 pub mod models;
 pub mod mods;
+pub mod monitor;
 pub mod pdf;
 pub mod personas;
 pub mod platform;

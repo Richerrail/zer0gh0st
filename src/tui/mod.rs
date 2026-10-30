@@ -1202,6 +1202,15 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
                     .push(ChatMessage::notice(format!("Réglage non enregistré: {e}"))),
             }
         }
+        "/t0p" => {
+            let ui = ui_tx.clone();
+            tokio::spawn(async move {
+                let txt = tokio::task::spawn_blocking(crate::monitor::snapshot_text)
+                    .await
+                    .unwrap_or_else(|e| format!("moniteur indisponible: {e}"));
+                let _ = ui.send(UiEvent::Info(txt));
+            });
+        }
         "/setup" => wizard::start(app, ui_tx, wizard::Step::Inference),
         "/login" => wizard::start(app, ui_tx, wizard::Step::Provider),
         "/logout" => match crate::commands::provider_remove(&app.provider_id) {
@@ -1263,6 +1272,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
              /system                     prompt actif (local/cloud) + persona\n\
              /system local|cloud <texte> prompt dédié (… reset = défaut)\n\
              /stream [on|off]            streaming réseau (off = réponse en bloc)\n\
+             /t0p                        moniteur système (CPU, RAM, temp, processus)\n\
              /vault [status|lock]        coffre de clés (setup/unlock en CLI)\n\
              /pdf info|text|merge|split  outils PDF locaux\n\
              /jev <fichier>              score qualité code 0-3 (rôle review)\n\
