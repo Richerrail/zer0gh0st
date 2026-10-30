@@ -1,3 +1,10 @@
+## v0.7.14 — `t0p` en mod latéral (2026-10-30)
+
+- `/t0p` ouvre le moniteur dans le **panneau latéral** (même place que
+  `/radio` et `/bintime`), au lieu d'un message dans le fil. Onglet `t0p`,
+  rafraîchi 1×/s ; `/panel` ou `Esc` (panneau focus via Tab) le ferme.
+- `zer0 t0p [--watch]` reste disponible en CLI.
+
 ## v0.7.13 — Moniteur système `zer0 t0p` (2026-10-29)
 
 - **`zer0 t0p [--watch]`** et le **mod `/t0p`** (panneau latéral, comme
