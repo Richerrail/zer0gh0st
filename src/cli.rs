@@ -82,6 +82,7 @@ enum Command {
         force: bool,
     },
     /// Moniteur système (CPU, RAM, températures, processus)
+    #[command(name = "t0p")]
     Top {
         /// Rafraîchir en continu
         #[arg(long)]

@@ -77,7 +77,7 @@ Update the binary from the GitHub Releases
 | `--check <CHECK>` | Only check whether a newer version exists |
 | `--force <FORCE>` | Reinstall even when the version is already current |
 
-### `zer0 top`
+### `zer0 t0p`
 
 Moniteur système (CPU, RAM, températures, processus)
 

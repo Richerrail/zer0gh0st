@@ -1,6 +1,6 @@
-## v0.7.13 — Moniteur système `zer0 top` (2026-10-29)
+## v0.7.13 — Moniteur système `zer0 t0p` (2026-10-29)
 
-- **`zer0 top [--watch]`** et **`/top`** : btop-like sans btop (CPU global et
+- **`zer0 t0p [--watch]`** et **`/t0p`** : btop-like sans btop (CPU global et
   par cœur, RAM/swap, charge, températures hwmon, top 8 processus) via
   `sysinfo`. Températures : Linux ; macOS/Windows affichent « indisponible ».
 

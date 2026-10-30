@@ -1202,7 +1202,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
                     .push(ChatMessage::notice(format!("Réglage non enregistré: {e}"))),
             }
         }
-        "/top" => {
+        "/t0p" => {
             let ui = ui_tx.clone();
             tokio::spawn(async move {
                 let txt = tokio::task::spawn_blocking(crate::monitor::snapshot_text)
@@ -1272,7 +1272,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
              /system                     prompt actif (local/cloud) + persona\n\
              /system local|cloud <texte> prompt dédié (… reset = défaut)\n\
              /stream [on|off]            streaming réseau (off = réponse en bloc)\n\
-             /top                        moniteur système (CPU, RAM, temp, processus)\n\
+             /t0p                        moniteur système (CPU, RAM, temp, processus)\n\
              /vault [status|lock]        coffre de clés (setup/unlock en CLI)\n\
              /pdf info|text|merge|split  outils PDF locaux\n\
              /jev <fichier>              score qualité code 0-3 (rôle review)\n\
