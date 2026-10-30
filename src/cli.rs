@@ -645,6 +645,7 @@ async fn run_command(cmd: Command) -> Result<()> {
             println!("{}", update::run(check, force).await?);
             Ok(())
         }
+        Command::Top { watch, interval } => crate::monitor::cli(watch, interval).await,
         Command::Vault { action } => vault_cmd(action),
         Command::Pdf { action } => pdf_cmd(action),
         Command::Jev { file } => jev_cmd(file).await,
