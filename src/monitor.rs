@@ -159,7 +159,7 @@ pub fn duration(secs: u64) -> String {
     }
 }
 
-/// Rendu texte complet (partagé par `zer0 top` et `/top`).
+/// Rendu texte complet (partagé par `zer0 t0p` et `/t0p`).
 pub fn render(s: &Snapshot) -> String {
     let mut out = String::new();
     out.push_str(&format!(
@@ -222,14 +222,14 @@ pub fn render(s: &Snapshot) -> String {
     out.trim_end().to_string()
 }
 
-/// `/top` : un relevé, prêt à afficher dans la TUI.
+/// `/t0p` : un relevé, prêt à afficher dans la TUI.
 pub fn snapshot_text() -> String {
     let mut m = Monitor::new();
     m.warmup();
     render(&m.snapshot())
 }
 
-/// `zer0 top [--watch] [--interval N]`.
+/// `zer0 t0p [--watch] [--interval N]`.
 pub async fn cli(watch: bool, interval: u64) -> anyhow::Result<()> {
     let mut m = Monitor::new();
     m.warmup();
