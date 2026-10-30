@@ -23,6 +23,7 @@ use crate::models;
 use crate::providers;
 use crate::route;
 use crate::select;
+use crate::theme;
 use crate::tools::ToolSpec;
 
 /// Assemble le prompt système de base et, si elle existe, le texte du persona.
@@ -44,6 +45,7 @@ const HELP_SHORT: &str =
   /provider           choisir un provider (menu)
   /model              choisir un modèle (menu)
   /free               modèles gratuits (menu)
+  /theme              thèmes de couleurs (menu)
   /role               rôles ; /role set <rôle> ouvre un menu
   /route              chaîne de bascule si un modèle échoue
   /think              raisonnement on/off
@@ -57,17 +59,6 @@ const HELP_SHORT: &str =
 
   Touches : F2 menu · F3 écriture · F4 shell · F5 aide · F6 sessions
             F7 relance · F8 0chan · F10 micro · Ctrl+O déplier un outil";
-
-/// Palette inspirée du thème Pi « omarchy-system ».
-mod theme {
-    use ratatui::style::Color;
-    pub const ACCENT: Color = Color::Rgb(255, 113, 206);
-    pub const PANEL: Color = Color::Rgb(34, 23, 51);
-    pub const DIM: Color = Color::Rgb(122, 108, 142);
-    pub const TEXT: Color = Color::Rgb(232, 213, 255);
-    pub const CODE: Color = Color::Rgb(122, 232, 255);
-    pub const BLUE: Color = Color::Rgb(138, 158, 255);
-}
 
 pub struct App {
     pub messages: Vec<ChatMessage>,
@@ -272,6 +263,13 @@ pub async fn run(
 ) -> Result<()> {
     let system = crate::enrich_system(system);
     let g_initial = config::load_global();
+    let theme_warning = match theme::activate(g_initial.theme.as_deref().unwrap_or("ghost")) {
+        Ok(_) => None,
+        Err(e) => {
+            let _ = theme::activate("ghost");
+            Some(format!("⚠ thème de couleurs ignoré : {e}"))
+        }
+    };
     let mut terminal = ratatui::init();
     let _ = crossterm::execute!(
         std::io::stdout(),
@@ -297,10 +295,15 @@ pub async fn run(
         // fait envoyer un historique trop long, que le provider refuse (400).
         .unwrap_or(32_768);
 
+    let mut initial_messages = vec![ChatMessage::notice(
+        "Bonjour 👋, je suis Zer0. Comment puis-je t'aider ?",
+    )];
+    if let Some(warning) = theme_warning {
+        initial_messages.push(ChatMessage::notice(warning));
+    }
+
     let mut app = App {
-        messages: vec![ChatMessage::notice(
-            "Bonjour 👋, je suis Zer0. Comment puis-je t'aider ?",
-        )],
+        messages: initial_messages,
         input: String::new(),
         cursor: 0,
         should_quit: false,
@@ -1220,6 +1223,14 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
             app.side_mode = Some(crate::fun::Mode::Top);
             app.focus_panel = false;
         }
+        "/theme" => {
+            let requested = text.strip_prefix("/theme").unwrap_or("").trim();
+            if requested.is_empty() || requested.eq_ignore_ascii_case("list") {
+                open_theme_menu(app);
+            } else {
+                apply_theme(app, requested);
+            }
+        }
         "/setup" => wizard::start(app, ui_tx, wizard::Step::Inference),
         "/login" => wizard::start(app, ui_tx, wizard::Step::Provider),
         "/logout" => match crate::commands::provider_remove(&app.provider_id) {
@@ -1248,6 +1259,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
              /model                     modèle actuel + sélection (liste)\n\
              /img <chemin>              joint une image au prochain message (vision)\n\
              /update [check]            met à jour le binaire (Releases GitHub)\n\
+             /theme [nom]              menu des thèmes (ou noir-rouge)\n\
              Ctrl+O / clic droit        déplier CE bloc de sortie d'outil\n\
              /model use <id>            change de modèle\n\
              /models [free]             liste les modèles du provider\n\
@@ -1325,6 +1337,7 @@ fn handle_provider(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent
                         id: p.id.clone(),
                         label: format!("{} — {}", p.id, p.name),
                         note,
+                        swatches: Vec::new(),
                     }
                 })
                 .collect();
@@ -1462,6 +1475,7 @@ fn handle_picker_key(
                     }
                 }
                 picker::Kind::Provider => set_provider(app, &item.id, ui_tx),
+                picker::Kind::Theme => apply_theme(app, &item.id),
                 picker::Kind::Command => {
                     // Une commande finissant par un espace attend un argument :
                     // on l'insère ; les autres s'exécutent.
@@ -1618,6 +1632,7 @@ fn open_command_palette(app: &mut App) {
             id: code.clone(),
             label: code,
             note: label,
+            swatches: Vec::new(),
         })
         .collect();
     app.picker = Some(picker::Picker::new(
@@ -1625,6 +1640,63 @@ fn open_command_palette(app: &mut App) {
         items,
         picker::Kind::Command,
     ));
+}
+
+/// Construit les entrées du menu de thèmes (avec aperçus de couleurs).
+fn theme_items(active: theme::Theme) -> Vec<picker::Item> {
+    theme::ALL
+        .iter()
+        .map(|item| {
+            let current = if item.id == active.id {
+                " · actif"
+            } else {
+                ""
+            };
+            picker::Item {
+                id: item.id.to_string(),
+                label: item.label.to_string(),
+                note: format!("{}{current}", item.description),
+                swatches: vec![
+                    item.background,
+                    item.accent,
+                    item.text,
+                    item.code,
+                    item.tool,
+                ],
+            }
+        })
+        .collect()
+}
+
+/// Ouvre le menu de sélection des thèmes de couleurs.
+fn open_theme_menu(app: &mut App) {
+    let active = theme::active();
+    let mut theme_picker = picker::Picker::new(
+        "Thèmes de couleurs",
+        theme_items(active),
+        picker::Kind::Theme,
+    );
+    if let Some(index) = theme::ALL.iter().position(|item| item.id == active.id) {
+        theme_picker.sel = index;
+    }
+    app.picker = Some(theme_picker);
+}
+
+/// Applique un thème immédiatement et le persiste dans la configuration.
+fn apply_theme(app: &mut App, name: &str) {
+    match crate::commands::set_theme(name) {
+        Ok(lines) => {
+            // Les lignes de conversation sont mises en cache avec leurs styles.
+            app.chat_cache.clear();
+            app.chat_cache_len = 0;
+            for line in lines {
+                app.messages.push(ChatMessage::notice(line));
+            }
+        }
+        Err(e) => app
+            .messages
+            .push(ChatMessage::notice(format!("Thème non changé : {e}"))),
+    }
 }
 
 /// Récupère la liste des modèles du provider actif puis ouvre le sélecteur.
@@ -3741,6 +3813,7 @@ fn handle_ui(ev: UiEvent, app: &mut App) {
                         .context_length
                         .map(|c| format!("ctx {c}"))
                         .unwrap_or_default(),
+                    swatches: Vec::new(),
                 })
                 .collect();
             if items.is_empty() {
@@ -3785,6 +3858,7 @@ fn handle_ui(ev: UiEvent, app: &mut App) {
                         label: m.id.clone(),
                         note,
                         id: m.id,
+                        swatches: Vec::new(),
                     }
                 })
                 .collect();
@@ -3870,6 +3944,12 @@ fn handle_ui(ev: UiEvent, app: &mut App) {
 
 fn draw(f: &mut Frame, app: &mut App) {
     let area = f.area();
+    // Le fond est posé avant tous les widgets : les thèmes noirs restent noirs
+    // même si le terminal utilise un fond clair par défaut.
+    f.render_widget(
+        Block::default().style(Style::default().bg(theme::background())),
+        area,
+    );
 
     // Assistant de première connexion : plein écran, avant tout le reste.
     if app.wizard.is_some() {
@@ -3940,7 +4020,7 @@ fn finalize_buffer(f: &mut Frame, app: &mut App) {
         let x1 = a.0.max(h.0);
         let y0 = a.1.min(h.1);
         let y1 = a.1.max(h.1);
-        let sel = Color::Rgb(40, 50, 110);
+        let sel = theme::selection_bg();
         for y in y0..=y1 {
             for x in x0..=x1 {
                 if x < buf.area.width && y < buf.area.height {
@@ -4013,7 +4093,7 @@ fn draw_chats_popup(f: &mut Frame, area: Rect, app: &App) {
     if files.is_empty() {
         lines.push(Line::from(Span::styled(
             "Aucune session enregistrée",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::dim()),
         )));
     } else {
         for (i, p) in files.iter().enumerate() {
@@ -4035,11 +4115,11 @@ fn draw_chats_popup(f: &mut Frame, area: Rect, app: &App) {
             };
             let style = if i == *selected {
                 Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Cyan)
+                    .fg(theme::selection_fg())
+                    .bg(theme::selection_bg())
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::White)
+                Style::default().fg(theme::text())
             };
             let marker = if i == *selected { "▶ " } else { "  " };
             lines.push(Line::from(Span::styled(format!("{marker}{label}"), style)));
@@ -4048,7 +4128,11 @@ fn draw_chats_popup(f: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" Chats — ↑↓ naviguer · Entrée charger · Esc fermer ")
-        .style(Style::default().bg(Color::Rgb(15, 15, 25)).fg(Color::Cyan));
+        .style(
+            Style::default()
+                .bg(theme::popup_bg())
+                .fg(theme::highlight()),
+        );
     f.render_widget(Paragraph::new(lines).block(block), rect);
 }
 
@@ -4135,7 +4219,7 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
     let line = Line::from(vec![
         Span::styled(
             format!("ctx {} · {tokens} tok", ctx_label(app)),
-            Style::default().fg(Color::Gray),
+            Style::default().fg(theme::dim()),
         ),
         Span::raw("  ·······  "),
         Span::styled(
@@ -4148,15 +4232,15 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
                 ),
                 None => "O No project".to_string(),
             },
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::dim()),
         ),
         Span::raw("   "),
         Span::styled(
             format!("think:{}", if app.thinking { "on" } else { "off" }),
             Style::default().fg(if app.thinking {
-                Color::Magenta
+                theme::accent()
             } else {
-                Color::DarkGray
+                theme::dim()
             }),
         ),
         Span::raw("   "),
@@ -4176,9 +4260,9 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
                 }
             ),
             Style::default().fg(if app.roles_enabled {
-                Color::Yellow
+                theme::warning()
             } else {
-                Color::DarkGray
+                theme::dim()
             }),
         ),
         Span::raw("   "),
@@ -4188,10 +4272,10 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
             } else {
                 app.active_endpoint.clone()
             },
-            Style::default().fg(Color::Cyan),
+            Style::default().fg(theme::highlight()),
         ),
         Span::raw("  "),
-        Span::styled("●", Style::default().fg(Color::Green)),
+        Span::styled("●", Style::default().fg(theme::success())),
     ]);
     f.render_widget(Paragraph::new(line), area);
 }
@@ -4202,11 +4286,11 @@ fn draw_location(f: &mut Frame, area: Rect) {
         .unwrap_or_default();
     let project = crate::mods::project_root().display().to_string();
     let line = Line::from(vec![
-        Span::styled("Local ", Style::default().fg(Color::DarkGray)),
-        Span::styled(local, Style::default().fg(Color::White)),
+        Span::styled("Local ", Style::default().fg(theme::dim())),
+        Span::styled(local, Style::default().fg(theme::text())),
         Span::raw("   |   "),
-        Span::styled("Projet ", Style::default().fg(Color::DarkGray)),
-        Span::styled(project, Style::default().fg(Color::White)),
+        Span::styled("Projet ", Style::default().fg(theme::dim())),
+        Span::styled(project, Style::default().fg(theme::text())),
     ]);
     f.render_widget(Paragraph::new(line), area);
 }
@@ -4292,7 +4376,7 @@ fn draw_chat(f: &mut Frame, area: Rect, app: &mut App) {
             push_block(
                 &mut lines,
                 " ··· ",
-                theme::DIM,
+                theme::dim(),
                 &app.reasoning_text,
                 w,
                 None,
@@ -4304,7 +4388,7 @@ fn draw_chat(f: &mut Frame, area: Rect, app: &mut App) {
         } else {
             app.streaming_text.clone()
         };
-        push_block(&mut lines, " ◕ ", theme::ACCENT, &text, w, None, false);
+        push_block(&mut lines, " ◕ ", theme::accent(), &text, w, None, false);
     }
 
     let inner_h = area.height as usize;
@@ -4408,16 +4492,16 @@ fn push_message(lines: &mut Vec<Line>, role: &str, text: &str, w: usize) {
         "user" => push_block(
             lines,
             " ❯ ",
-            theme::ACCENT,
+            theme::accent(),
             text,
             w,
-            Some(theme::PANEL),
+            Some(theme::panel()),
             false,
         ),
-        "assistant" => push_block(lines, " ◕ ", theme::ACCENT, text, w, None, false),
-        "tool" => push_block(lines, " ⚙ ", theme::BLUE, text, w, None, true),
-        "system" => push_block(lines, " ⚙ ", theme::DIM, text, w, None, true),
-        _ => push_block(lines, " · ", theme::DIM, text, w, None, true),
+        "assistant" => push_block(lines, " ◕ ", theme::accent(), text, w, None, false),
+        "tool" => push_block(lines, " ⚙ ", theme::tool(), text, w, None, true),
+        "system" => push_block(lines, " ⚙ ", theme::dim(), text, w, None, true),
+        _ => push_block(lines, " · ", theme::dim(), text, w, None, true),
     }
 }
 
@@ -4466,11 +4550,11 @@ fn push_block(
         }
         let base = {
             let s = Style::default().fg(if in_code {
-                theme::CODE
+                theme::code()
             } else if dim_text {
-                theme::DIM
+                theme::dim()
             } else {
-                theme::TEXT
+                theme::text()
             });
             match bg {
                 Some(b) => s.bg(b),
@@ -4491,7 +4575,7 @@ fn push_block(
             spans.push(Span::styled(
                 body,
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(theme::highlight())
                     .add_modifier(Modifier::BOLD),
             ));
         } else if in_code {
@@ -4562,7 +4646,7 @@ fn inline_spans(text: &str, base: Style) -> Vec<Span<'static>> {
     let styled = |buf: &str, code: bool, bold: bool| {
         let mut s = base;
         if code {
-            s = s.fg(theme::CODE);
+            s = s.fg(theme::code());
         }
         if bold {
             s = s.add_modifier(Modifier::BOLD);
@@ -4647,7 +4731,7 @@ fn draw_input(f: &mut Frame, area: Rect, app: &App) {
         start = crow + 1 - max_lines;
     }
     let base = Style::default()
-        .fg(theme::ACCENT)
+        .fg(theme::accent())
         .add_modifier(Modifier::BOLD);
 
     let mut lines: Vec<Line> = Vec::new();
@@ -4655,12 +4739,12 @@ fn draw_input(f: &mut Frame, area: Rect, app: &App) {
         if start == 0 && i == 0 {
             lines.push(Line::from(vec![
                 Span::styled(prompt, base),
-                Span::styled(seg.clone(), Style::default().fg(theme::TEXT)),
+                Span::styled(seg.clone(), Style::default().fg(theme::text())),
             ]));
         } else {
             lines.push(Line::from(Span::styled(
                 format!("{}{}", " ".repeat(pad), seg),
-                Style::default().fg(theme::TEXT),
+                Style::default().fg(theme::text()),
             )));
         }
     }
@@ -5022,17 +5106,17 @@ fn history_down(app: &mut App) {
 }
 
 fn draw_footer(f: &mut Frame, area: Rect, app: &mut App) {
-    let key = Style::default().fg(Color::Black).bg(Color::Cyan);
-    let txt = Style::default().fg(Color::Gray);
+    let key = Style::default().fg(Color::Black).bg(theme::highlight());
+    let txt = Style::default().fg(theme::dim());
     // État visible : `code_exec` lance de vraies commandes, l'écran doit dire
     // s'il est armé (c'était le trou de sécurité de l'audit).
     let rw = if app.read_write {
-        Style::default().fg(Color::Black).bg(Color::Yellow)
+        Style::default().fg(Color::Black).bg(theme::warning())
     } else {
         txt
     };
     let exec = if app.code_exec {
-        Style::default().fg(Color::Black).bg(Color::Green)
+        Style::default().fg(Color::Black).bg(theme::success())
     } else {
         txt
     };
@@ -5373,6 +5457,20 @@ mod tests {
         assert_eq!(palette_text("whoami"), "/whoami");
         assert_eq!(palette_text("  whoami  "), "/whoami");
         assert_eq!(palette_text(""), "/");
+    }
+
+    #[test]
+    fn theme_menu_lists_every_palette_with_previews() {
+        let items = theme_items(theme::ALL[0]);
+        assert_eq!(items.len(), theme::ALL.len());
+        assert!(items.iter().any(|item| item.id == "noir-rouge"));
+        assert!(items.iter().all(|item| item.swatches.len() >= 5));
+        assert!(items
+            .iter()
+            .find(|item| item.id == "ghost")
+            .unwrap()
+            .note
+            .contains("actif"));
     }
 
     #[test]

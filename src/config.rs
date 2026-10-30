@@ -53,6 +53,10 @@ pub struct GlobalConfig {
     /// Bot Telegram : identifiants (user id) autorisés à parler au bot.
     #[serde(default)]
     pub telegram_allow: Vec<i64>,
+    /// Thème de couleurs de la TUI (`ghost`, `noir`, `noir-rouge`).
+    /// `None` = thème par défaut.
+    #[serde(default)]
+    pub theme: Option<String>,
     /// Prompt système global « cloud » (priorité plus faible que le projet).
     #[serde(default)]
     pub system_prompt: Option<String>,
@@ -125,6 +129,7 @@ impl Default for GlobalConfig {
             telegram_token: None,
             telegram_allow: Vec::new(),
             zero_box_fallbacks: None,
+            theme: None,
             system_prompt: None,
             system_prompt_local: None,
             stream: None,
@@ -860,6 +865,14 @@ mod tests {
         assert!(!is_corrupt(&path));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn theme_is_optional_and_roundtrips() {
+        let fresh: GlobalConfig = toml::from_str("").unwrap();
+        assert_eq!(fresh.theme, None);
+        let configured: GlobalConfig = toml::from_str("theme = \"noir-rouge\"").unwrap();
+        assert_eq!(configured.theme.as_deref(), Some("noir-rouge"));
     }
 
     #[test]

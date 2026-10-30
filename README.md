@@ -383,6 +383,25 @@ CLI : `zer0 apis search "weather" --keyless`, `zer0 apis categories`, `zer0 apis
 > avec chaque résultat, et le rappel « à vérifier » est explicite. Le catalogue n'est
 > **pas** versionné dans le dépôt (il est réimporté quand on veut) → jamais périmé.
 
+### Thèmes de couleurs
+
+La TUI propose un menu de thèmes accessible de deux façons :
+
+```
+/theme                 # ouvre le menu avec aperçus de couleurs
+/theme noir-rouge      # applique directement le thème noir et rouge
+```
+
+| Thème | Identifiant | Couleurs |
+|---|---|---|
+| **Ghost** | `ghost` | rose, violet et cyan — thème historique |
+| **Noir** | `noir` | noir, gris et blanc, minimaliste |
+| **Noir & Rouge** | `noir-rouge` | noir profond, rouge vif et rose pâle |
+
+Le choix est appliqué immédiatement à toute l'interface (chat, menus, picker,
+assistant et Zero-chan), puis persisté dans `~/.config/zer0/config.toml` avec
+`theme = "noir-rouge"`.
+
 ### Mise à jour
 
 ```bash
@@ -462,7 +481,7 @@ contraintes : [docs/IMPROVEMENTS.md](docs/IMPROVEMENTS.md).
 **TUI** (extrait) : `/help` `/think` `/provider` `/model` `/models` `/quota` `/vote` `/ctx` `/free` `/select` `/route` `/telegram` `/tg`
 `/role` `/project` `/memory` `/recall` `/compact` `/task` `/work` `/ask` `/review` `/search`
 `/stop` `/context` `/whoami` `/vault` `/pdf` `/jev` `/kb` `/new` `/history` `/radio` `/bintime`
-`/pong` `/panel` `/clear` `/quit` `/img` `/update` `/embeddings`.
+`/pong` `/panel` `/clear` `/quit` `/img` `/theme` `/update` `/embeddings`.
 
 **CLI** : `zer0 provider|models|model|select|route|role|project|memory|embeddings|task|search|whoami|vault|pdf|jev|bintime|pong|kb|update|quota|vote|0box` — alias débat : `zer0box "<sujet>"` (binaire-lien ou `scripts/zer0box.cmd` depuis les sources).
 

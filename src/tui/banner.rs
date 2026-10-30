@@ -1,6 +1,8 @@
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 
+use crate::theme::{self, BannerStyle};
+
 /// 5-row block glyphs for the big banner.
 fn glyph(c: char) -> [&'static str; 5] {
     match c {
@@ -53,7 +55,7 @@ fn render(animated: bool, phase: u16) -> Vec<Line<'static>> {
         .collect();
     out.push(Line::from(Span::styled(
         format!("   {TAGLINE}"),
-        Style::default().fg(Color::DarkGray),
+        Style::default().fg(theme::dim()),
     )));
     out
 }
@@ -77,18 +79,47 @@ fn colorize(row: &str, width: usize, animated: bool, phase: u16) -> Line<'static
 }
 
 fn color_at(x: usize, w: usize, animated: bool, phase: u16) -> Color {
-    if animated {
-        let hue = ((x as u32 * 360 / w.max(1) as u32) + phase as u32) % 360;
-        hsv_to_rgb(hue as f32, 1.0, 1.0)
-    } else {
-        let t = if w <= 1 {
-            0.0
-        } else {
-            x as f32 / (w - 1) as f32
-        };
-        let r = (70.0 * t) as u8;
-        let g = (200.0 * (1.0 - t) + 90.0 * t) as u8;
-        Color::Rgb(r, g, 255)
+    match theme::active().banner {
+        BannerStyle::Rainbow => {
+            if animated {
+                let hue = ((x as u32 * 360 / w.max(1) as u32) + phase as u32) % 360;
+                hsv_to_rgb(hue as f32, 1.0, 1.0)
+            } else {
+                let t = if w <= 1 {
+                    0.0
+                } else {
+                    x as f32 / (w - 1) as f32
+                };
+                let r = (70.0 * t) as u8;
+                let g = (200.0 * (1.0 - t) + 90.0 * t) as u8;
+                Color::Rgb(r, g, 255)
+            }
+        }
+        BannerStyle::Mono => {
+            let t = if w <= 1 {
+                0.0
+            } else {
+                x as f32 / (w - 1) as f32
+            };
+            let shift = if animated { phase as f32 / 90.0 } else { 0.0 };
+            let wave = (t + shift).sin() * 0.5 + 0.5;
+            let gray = (70.0 + wave * 150.0) as u8;
+            Color::Rgb(gray, gray, gray)
+        }
+        BannerStyle::Red => {
+            let t = if w <= 1 {
+                0.0
+            } else {
+                x as f32 / (w - 1) as f32
+            };
+            let shift = if animated { phase as f32 / 90.0 } else { 0.0 };
+            let wave = (t + shift).sin() * 0.5 + 0.5;
+            Color::Rgb(
+                (95.0 + wave * 160.0) as u8,
+                (8.0 + wave * 45.0) as u8,
+                (14.0 + wave * 50.0) as u8,
+            )
+        }
     }
 }
 
