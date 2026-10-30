@@ -3,7 +3,7 @@
 > **Règle fondamentale** : une propriété de sûreté non documentée n'est pas une propriété sûre —
 > elle est invérifiable. Quelqu'un qui décide de lancer Zer0 ne dispose que de ces documents.
 
-**Version** : 1.0 (2026-10-06) · **Projet** : 0.6.14
+**Version** : 1.0 (2026-10-06) · **Projet** : 0.7.12
 
 ---
 

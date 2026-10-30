@@ -12,7 +12,7 @@
 ![CLI only](https://img.shields.io/badge/interface-CLI%20%2F%20TUI-black.svg)
 ![CI](https://github.com/Richerrail/zer0gh0st/actions/workflows/ci.yml/badge.svg)
 
-**Version** : 0.6.14 · **Licence** : MIT · **Interface** : terminal uniquement (pas de GUI web).
+**Version** : 0.7.12 · **Licence** : MIT · **Interface** : terminal uniquement (pas de GUI web).
 
 ![Aperçu de ZER0│GH0ST](./screenshot.png)
 
@@ -31,8 +31,10 @@ le **shell** est ton terminal Unix, le **ghost** est l'IA dedans.
 2. [Ce que c'est](#2-ce-que-cest)
 3. [Sécurité](#3-sécurité)
 4. [Fonctionnalités](#4-fonctionnalités)
+4bis. [Windows et macOS](#4bis-windows-et-macos)
 5. [Installation](#5-installation)
 6. [Usage & exemples](#6-usage--exemples)
+6bis. [Suggestions d'amélioration](#6bis-suggestions-damélioration)
 7. [Commandes](#7-commandes)
 8. [Zero-chan (voix)](#8-zero-chan-voix)
 9. [Vote (👍 / 👎)](#8bis-vote-👍-)
@@ -180,7 +182,10 @@ par `ZER0_EXEC_TIMEOUT` ou par appel (`timeout_secs`).
 | **Contexte** | compaction automatique (~4000 tokens) via le rôle `utility` |
 | **Tâches** | liste Markdown `.zer0/tasks.md`, `claim/done`, boucle `/work` par sous-agent ; **porte d'honnêteté** : `done` refusé si un livrable mentionné est absent ou vide |
 | **Sous-agents** | `/ask`, `/review`, `/jev` en contexte isolé |
-| **Outils** | `code_exec`, `text_editor`, `web_search`, `memory_*`, `task_*` |
+| **Outils** | 18 outils : `code_exec`, `text_editor`, `read_image` (OCR), `web_search`, `web_read`, `memory_*`, `knowledge_*`, `task_*`, `delegate`, `0box` |
+| **Local** | chat rapide **sans outils** (prompt d'une phrase, contexte 2048, `--no-warmup`, `-np 1`), GGUF scannés, serveur préchargé en 3 s |
+| **GPU** | `-ngl` automatique : CUDA/Vulkan/ROCm via `llama-server --list-devices`, **Metal** sur macOS ; `ZER0_GPU_LAYERS=auto\|0\|N` |
+| **Thermique** | Linux : alerte 80 °C, génération coupée à 88 °C, serveur arrêté à 92 °C (`ZER0_TEMP_*`) |
 | **Vote** | **👍 / 👎 en bas à droite de l'écran principal** (cliquables) : le pouce haut = **une star GitHub** sur [Richerrail/zer0gh0st](https://github.com/Richerrail/zer0gh0st), le bas retire la star. `/vote` ou `zer0 vote up\|down\|status\|login\|logout`. Compteur réel lu sur l'API GitHub. Connexion GitHub par device flow OAuth (`vote login`) → votes ensuite automatiques. |
 | **Divers** | `/vault`, `/pdf`, personas `/whoami`, recherche `/search` |
 
@@ -310,18 +315,26 @@ Silicon)** et **Windows (x86_64)** dans [Releases](https://github.com/Richerrail
 |---|---|---|
 | 🐧 **Linux** | `build-essential pkg-config` · audio `pipewire`/`pulseaudio-utils` · `wl-clipboard`\|`xclip` · `mpv`/`ffmpeg` | cible principale (testé) |
 | 🍎 **macOS** | Xcode CLT · `brew install sox mpv ffmpeg` | via `pbcopy`, micro via `sox` |
-| 🪟 **Windows** | **Visual Studio Build Tools (C++)** · `winget install Gyan.FFmpeg` + `winget install sox_ng.sox_ng` | micro via `sox_ng` ; `code_exec` = `cmd /C` → Git Bash/WSL conseillé |
+| 🪟 **Windows** | **Visual Studio Build Tools (C++)** · `winget install Gyan.FFmpeg` + `winget install sox_ng.sox_ng` | micro via `sox_ng` ; `code_exec` = bash (Git Bash) → PowerShell → cmd, surcharge `ZER0_SHELL` |
 
 ### Mode 100 % local (aucune clé API)
 
-Place un modèle `.gguf` dans `models/` (ou pointe-le) :
+Le local est un **chat conversationnel** (pas d'outils) : c'est ce qui le rend
+utilisable sur une petite machine. Voir le détail en
+[§1 Démarrage rapide](#1-démarrage-rapide).
 
 ```bash
-export ZER0_MODEL=/chemin/vers/mon-modele.Q4_0.gguf   # optionnel (défaut dans serve.sh)
-./scripts/serve.sh           # démarre llama-server (2 cœurs sur 4)
-./scripts/run.sh
+zer0gh0st                 # précharge llama-server en arrière-plan
+# puis, dans la TUI :
+/provider use local
+/model                    # choisit un .gguf du dossier models/
 ```
-Puis dans la TUI : `/provider local`. Backend rapide : `./scripts/serve-fast.sh` (modèle 1.5B).
+
+Réglages : tous les cœurs détectés (génération), moitié en préfill, contexte
+2048, raisonnement coupé, GPU automatique. Surcharges : `ZER0_THREADS`,
+`ZER0_THREADS_BATCH`, `ZER0_CTX`, `ZER0_GPU_LAYERS`, `ZER0_TEMP_STOP`.
+
+`scripts/serve.sh` reste disponible pour lancer le serveur à la main.
 
 ### Providers cloud (clé optionnelle)
 
