@@ -109,6 +109,7 @@ pub fn run_standalone(mode: Mode) -> anyhow::Result<()> {
                     Mode::BinTime => bt.tick(),
                     Mode::Pong => pong.step(),
                     Mode::Radio => radio.tick(),
+                    Mode::Top => top.tick(),
                     Mode::Chat => {}
                 }
                 next += tick;
