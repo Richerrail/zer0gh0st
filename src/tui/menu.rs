@@ -91,7 +91,6 @@ pub const TREE: &[Node] = &[
     n("quota", "/quota"),
     n("vote", "/vote"),
     n("update", "/update"),
-    n("t0p", "/t0p"),
     g(
         "provider",
         &[
@@ -214,6 +213,7 @@ pub const TREE: &[Node] = &[
         &[
             n("radio", "/radio"),
             n("bintime", "/bintime"),
+            n("t0p", "/t0p"),
             n("pong", "/pong"),
             n("panel (fermer)", "/panel"),
         ],
