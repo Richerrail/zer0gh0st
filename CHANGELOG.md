@@ -1,3 +1,7 @@
+## v0.7.15 — `t0p` dans le groupe mods (2026-10-30)
+
+- Le menu range `t0p` avec radio/bintime/pong (il était listé hors groupe).
+
 ## v0.7.14 — `t0p` en mod latéral (2026-10-30)
 
 - `/t0p` ouvre le moniteur dans le **panneau latéral** (même place que
