@@ -153,6 +153,8 @@ pub struct App {
     pub pong: crate::fun::pong::Pong,
     /// Side panel (right of the agent): bintime or radio.
     pub side_mode: Option<crate::fun::Mode>,
+    /// Mod `t0p` (moniteur) : créé à la demande (le warmup prend ~250 ms).
+    pub top: Option<crate::fun::top::Top>,
     /// Whether the side panel has keyboard focus.
     pub focus_panel: bool,
     /// Auto-inject relevant knowledge into the prompt.
@@ -346,6 +348,7 @@ pub async fn run(
         bintime: crate::fun::bintime::BinTime::new(),
         pong: crate::fun::pong::Pong::new(),
         side_mode: None,
+        top: None,
         focus_panel: false,
         kb_auto: true,
         history: Vec::new(),
@@ -594,6 +597,13 @@ async fn event_loop(
                     || app.side_mode == Some(crate::fun::Mode::BinTime)
                 {
                     app.bintime.tick();
+                }
+                if app.mode == crate::fun::Mode::Top
+                    || app.side_mode == Some(crate::fun::Mode::Top)
+                {
+                    if let Some(t) = &mut app.top {
+                        t.tick();
+                    }
                 }
                 if app.mode == crate::fun::Mode::Pong {
                     app.pong.step();
@@ -1203,13 +1213,12 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
             }
         }
         "/t0p" => {
-            let ui = ui_tx.clone();
-            tokio::spawn(async move {
-                let txt = tokio::task::spawn_blocking(crate::monitor::snapshot_text)
-                    .await
-                    .unwrap_or_else(|e| format!("moniteur indisponible: {e}"));
-                let _ = ui.send(UiEvent::Info(txt));
-            });
+            // Même panneau latéral que /radio et /bintime.
+            if app.top.is_none() {
+                app.top = Some(crate::fun::top::Top::new());
+            }
+            app.side_mode = Some(crate::fun::Mode::Top);
+            app.focus_panel = false;
         }
         "/setup" => wizard::start(app, ui_tx, wizard::Step::Inference),
         "/login" => wizard::start(app, ui_tx, wizard::Step::Provider),
@@ -3454,6 +3463,12 @@ fn handle_input(ev: Event, app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
                         app.mode = crate::fun::Mode::Chat;
                     }
                 }
+                crate::fun::Mode::Top => {
+                    if matches!(k.code, KeyCode::Esc | KeyCode::Char('q')) {
+                        app.side_mode = None;
+                        app.mode = crate::fun::Mode::Chat;
+                    }
+                }
                 crate::fun::Mode::Pong => match k.code {
                     KeyCode::Esc | KeyCode::Char('q') => app.mode = crate::fun::Mode::Chat,
                     KeyCode::Char('r') => app.pong.restart(),
@@ -3868,7 +3883,7 @@ fn draw(f: &mut Frame, app: &mut App) {
             app.pong.draw(f, area);
             return;
         }
-        crate::fun::Mode::Radio | crate::fun::Mode::BinTime => {
+        crate::fun::Mode::Radio | crate::fun::Mode::BinTime | crate::fun::Mode::Top => {
             draw_panel(f, area, app, app.mode);
             return;
         }
@@ -3941,6 +3956,11 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &App, mode: crate::fun::Mode) {
     match mode {
         crate::fun::Mode::BinTime => app.bintime.draw(f, area),
         crate::fun::Mode::Radio => app.radio.draw(f, area),
+        crate::fun::Mode::Top => {
+            if let Some(t) = &app.top {
+                t.draw(f, area);
+            }
+        }
         _ => {}
     }
 }
@@ -5214,6 +5234,7 @@ mod tests {
             bintime: crate::fun::bintime::BinTime::new(),
             pong: crate::fun::pong::Pong::new(),
             side_mode: None,
+            top: None,
             focus_panel: false,
             kb_auto: false,
             history: vec![],

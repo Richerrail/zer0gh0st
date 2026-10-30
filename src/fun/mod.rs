@@ -1,6 +1,7 @@
 pub mod bintime;
 pub mod pong;
 pub mod radio;
+pub mod top;
 
 use std::time::{Duration, Instant};
 
@@ -13,6 +14,7 @@ pub enum Mode {
     Radio,
     BinTime,
     Pong,
+    Top,
 }
 
 /// Dump a single Pong frame to stdout (diagnostic).
@@ -40,6 +42,7 @@ pub fn run_standalone(mode: Mode) -> anyhow::Result<()> {
     let mut bt = bintime::BinTime::new();
     let mut pong = pong::Pong::new();
     let mut radio = radio::Radio::new();
+    let mut top = top::Top::new();
 
     let res = (|| -> anyhow::Result<()> {
         let tick = Duration::from_millis(45);
@@ -51,6 +54,7 @@ pub fn run_standalone(mode: Mode) -> anyhow::Result<()> {
                     Mode::BinTime => bt.draw(f, area),
                     Mode::Pong => pong.draw(f, area),
                     Mode::Radio => radio.draw(f, area),
+                    Mode::Top => top.draw(f, area),
                     Mode::Chat => {}
                 }
             })?;
@@ -71,6 +75,11 @@ pub fn run_standalone(mode: Mode) -> anyhow::Result<()> {
                                 KeyCode::Down | KeyCode::Char('s') => pong.set_dir(1),
                                 _ => {}
                             },
+                            Mode::Top => {
+                                if matches!(k.code, KeyCode::Esc | KeyCode::Char('q')) {
+                                    break;
+                                }
+                            }
                             Mode::Radio => match k.code {
                                 KeyCode::Esc | KeyCode::Char('q') => {
                                     radio.stop();
@@ -100,6 +109,7 @@ pub fn run_standalone(mode: Mode) -> anyhow::Result<()> {
                     Mode::BinTime => bt.tick(),
                     Mode::Pong => pong.step(),
                     Mode::Radio => radio.tick(),
+                    Mode::Top => top.tick(),
                     Mode::Chat => {}
                 }
                 next += tick;

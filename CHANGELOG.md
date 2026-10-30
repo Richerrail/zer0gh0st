@@ -1,8 +1,9 @@
 ## v0.7.13 — Moniteur système `zer0 t0p` (2026-10-29)
 
-- **`zer0 t0p [--watch]`** et **`/t0p`** : btop-like sans btop (CPU global et
-  par cœur, RAM/swap, charge, températures hwmon, top 8 processus) via
-  `sysinfo`. Températures : Linux ; macOS/Windows affichent « indisponible ».
+- **`zer0 t0p [--watch]`** et le **mod `/t0p`** (panneau latéral, comme
+  radio/bintime) : btop-like sans btop (CPU global et par cœur, RAM/swap,
+  charge, températures hwmon, top 8 processus) via `sysinfo`. Rafraîchi une
+  fois par seconde. Températures : Linux ; macOS/Windows « indisponible ».
 
 ## v0.7.12 — Windows/macOS : GPU auto, shell adapté (2026-10-29)
 
