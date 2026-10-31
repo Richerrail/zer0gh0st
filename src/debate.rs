@@ -65,42 +65,37 @@ const ACTION_MARKERS: &[&str] = &[
     "patch",
 ];
 
-/// Marqueurs de question / débat : même avec un verbe d'action, on ne veut
-/// qu'une réponse (ex. « comment créer un fichier ? »).
-const QUESTION_MARKERS: &[&str] = &[
-    "est-ce que",
-    "est ce que",
+/// Débuts de phrase interrogatifs : c'est le **cadrage** qui compte, pas la
+/// présence d'un mot quelque part (« écris un fichier qui résume le débat »
+/// reste une action, même s'il contient « débat »).
+const QUESTION_STARTS: &[&str] = &[
+    "est-ce",
+    "est ce",
     "pourquoi",
     "comment",
-    "qu'est-ce",
-    "quest-ce",
+    "qu'est",
+    "quest",
+    "quel",
     "quelle",
-    "quel ",
-    "quels",
     "explique",
-    "expliquer",
-    "analyse",
     "analyser",
+    "analyse",
+    "compare",
     "débat",
     "debat",
-    "debate",
+    "debat",
     "avis",
-    "compare",
-    "comparer",
-    "différence",
-    "difference",
     "penses-tu",
     "dois-je",
     "faut-il",
     "faut il",
-    "vs",
 ];
 
 /// Le sujet demande-t-il un livrable/une action, ou seulement une réponse ?
 pub fn topic_wants_actions(topic: &str) -> bool {
-    let t = format!(" {} ", topic.to_lowercase());
+    let t = topic.trim().to_lowercase();
     let action = ACTION_MARKERS.iter().any(|m| t.contains(m));
-    let question = QUESTION_MARKERS.iter().any(|m| t.contains(m));
+    let question = t.ends_with('?') || QUESTION_STARTS.iter().any(|q| t.starts_with(q));
     action && !question
 }
 
