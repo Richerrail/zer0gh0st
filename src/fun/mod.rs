@@ -1,4 +1,5 @@
 pub mod bintime;
+pub mod file;
 pub mod pong;
 pub mod radio;
 pub mod top;
@@ -15,6 +16,7 @@ pub enum Mode {
     BinTime,
     Pong,
     Top,
+    File,
 }
 
 /// Dump a single Pong frame to stdout (diagnostic).
@@ -43,6 +45,7 @@ pub fn run_standalone(mode: Mode) -> anyhow::Result<()> {
     let mut pong = pong::Pong::new();
     let mut radio = radio::Radio::new();
     let mut top = top::Top::new();
+    let mut file = file::FileExplorer::open("");
 
     let res = (|| -> anyhow::Result<()> {
         let tick = Duration::from_millis(45);
@@ -55,6 +58,7 @@ pub fn run_standalone(mode: Mode) -> anyhow::Result<()> {
                     Mode::Pong => pong.draw(f, area),
                     Mode::Radio => radio.draw(f, area),
                     Mode::Top => top.draw(f, area),
+                    Mode::File => file.draw(f, area),
                     Mode::Chat => {}
                 }
             })?;
@@ -80,6 +84,17 @@ pub fn run_standalone(mode: Mode) -> anyhow::Result<()> {
                                     break;
                                 }
                             }
+                            Mode::File => match k.code {
+                                KeyCode::Esc | KeyCode::Char('q') => break,
+                                KeyCode::Up | KeyCode::Char('k') => file.move_up(),
+                                KeyCode::Down | KeyCode::Char('j') => file.move_down(),
+                                KeyCode::Enter => file.enter(),
+                                KeyCode::Left | KeyCode::Backspace => file.parent(),
+                                KeyCode::Char('c') => file.copy_path(),
+                                KeyCode::Char('.') => file.toggle_hidden(),
+                                KeyCode::Char('r') => file.refresh(),
+                                _ => {}
+                            },
                             Mode::Radio => match k.code {
                                 KeyCode::Esc | KeyCode::Char('q') => {
                                     radio.stop();
@@ -110,6 +125,7 @@ pub fn run_standalone(mode: Mode) -> anyhow::Result<()> {
                     Mode::Pong => pong.step(),
                     Mode::Radio => radio.tick(),
                     Mode::Top => top.tick(),
+                    Mode::File => {}
                     Mode::Chat => {}
                 }
                 next += tick;

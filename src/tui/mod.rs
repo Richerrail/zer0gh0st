@@ -155,6 +155,8 @@ pub struct App {
     pub side_mode: Option<crate::fun::Mode>,
     /// Mod `t0p` (moniteur) : créé à la demande (le warmup prend ~250 ms).
     pub top: Option<crate::fun::top::Top>,
+    /// Mod `0file` (explorateur) : créé à la demande.
+    pub file: Option<crate::fun::file::FileExplorer>,
     /// Whether the side panel has keyboard focus.
     pub focus_panel: bool,
     /// Auto-inject relevant knowledge into the prompt.
@@ -349,6 +351,7 @@ pub async fn run(
         pong: crate::fun::pong::Pong::new(),
         side_mode: None,
         top: None,
+        file: None,
         focus_panel: false,
         kb_auto: true,
         history: Vec::new(),
@@ -920,6 +923,12 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
             app.side_mode = Some(crate::fun::Mode::BinTime);
             app.focus_panel = false;
         }
+        "/0file" => {
+            let arg = args.join(" ");
+            app.file = Some(crate::fun::file::FileExplorer::open(&arg));
+            app.side_mode = Some(crate::fun::Mode::File);
+            app.focus_panel = true;
+        }
         "/panel" => {
             app.radio.stop();
             app.side_mode = None;
@@ -1282,6 +1291,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
              /system local|cloud <texte> prompt dédié (… reset = défaut)\n\
              /stream [on|off]            streaming réseau (off = réponse en bloc)\n\
              /t0p                        moniteur système (CPU, RAM, temp, processus)\n\
+             /0file [chemin]             explorateur de dossiers (copie du chemin)\n\
              /vault [status|lock]        coffre de clés (setup/unlock en CLI)\n\
              /pdf info|text|merge|split  outils PDF locaux\n\
              /jev <fichier>              score qualité code 0-3 (rôle review)\n\
@@ -3469,6 +3479,12 @@ fn handle_input(ev: Event, app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
                         app.mode = crate::fun::Mode::Chat;
                     }
                 }
+                crate::fun::Mode::File => {
+                    if matches!(k.code, KeyCode::Esc | KeyCode::Char('q')) {
+                        app.side_mode = None;
+                        app.mode = crate::fun::Mode::Chat;
+                    }
+                }
                 crate::fun::Mode::Pong => match k.code {
                     KeyCode::Esc | KeyCode::Char('q') => app.mode = crate::fun::Mode::Chat,
                     KeyCode::Char('r') => app.pong.restart(),
@@ -3537,6 +3553,7 @@ fn handle_input(ev: Event, app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
         // autre touche (F3–F10, etc.) relâche le focus et retombe dans la saisie.
         if app.side_mode.is_some() && app.focus_panel {
             let is_radio = app.side_mode == Some(crate::fun::Mode::Radio);
+            let is_file = app.side_mode == Some(crate::fun::Mode::File);
             match k.code {
                 KeyCode::Tab => {
                     app.focus_panel = false;
@@ -3546,6 +3563,60 @@ fn handle_input(ev: Event, app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
                     app.radio.stop();
                     app.side_mode = None;
                     app.focus_panel = false;
+                    return;
+                }
+                KeyCode::Up | KeyCode::Char('k') if is_file => {
+                    if let Some(fe) = &mut app.file {
+                        fe.move_up();
+                    }
+                    return;
+                }
+                KeyCode::Down | KeyCode::Char('j') if is_file => {
+                    if let Some(fe) = &mut app.file {
+                        fe.move_down();
+                    }
+                    return;
+                }
+                KeyCode::Enter if is_file => {
+                    if let Some(fe) = &mut app.file {
+                        fe.enter();
+                    }
+                    return;
+                }
+                KeyCode::Left | KeyCode::Backspace if is_file => {
+                    if let Some(fe) = &mut app.file {
+                        fe.parent();
+                    }
+                    return;
+                }
+                KeyCode::Char('c') if is_file => {
+                    if let Some(fe) = &mut app.file {
+                        fe.copy_path();
+                    }
+                    return;
+                }
+                KeyCode::Char('.') if is_file => {
+                    if let Some(fe) = &mut app.file {
+                        fe.toggle_hidden();
+                    }
+                    return;
+                }
+                KeyCode::Char('r') if is_file => {
+                    if let Some(fe) = &mut app.file {
+                        fe.refresh();
+                    }
+                    return;
+                }
+                KeyCode::Char('g') if is_file => {
+                    if let Some(fe) = &mut app.file {
+                        fe.go_top();
+                    }
+                    return;
+                }
+                KeyCode::Char('G') if is_file => {
+                    if let Some(fe) = &mut app.file {
+                        fe.go_bottom();
+                    }
                     return;
                 }
                 KeyCode::Up | KeyCode::Char('k') if is_radio => {
@@ -3883,8 +3954,12 @@ fn draw(f: &mut Frame, app: &mut App) {
             app.pong.draw(f, area);
             return;
         }
-        crate::fun::Mode::Radio | crate::fun::Mode::BinTime | crate::fun::Mode::Top => {
-            draw_panel(f, area, app, app.mode);
+        crate::fun::Mode::Radio
+        | crate::fun::Mode::BinTime
+        | crate::fun::Mode::Top
+        | crate::fun::Mode::File => {
+            let mode = app.mode;
+            draw_panel(f, area, app, mode);
             return;
         }
         crate::fun::Mode::Chat => {}
@@ -3952,13 +4027,18 @@ fn finalize_buffer(f: &mut Frame, app: &mut App) {
     }
 }
 
-fn draw_panel(f: &mut Frame, area: Rect, app: &App, mode: crate::fun::Mode) {
+fn draw_panel(f: &mut Frame, area: Rect, app: &mut App, mode: crate::fun::Mode) {
     match mode {
         crate::fun::Mode::BinTime => app.bintime.draw(f, area),
         crate::fun::Mode::Radio => app.radio.draw(f, area),
         crate::fun::Mode::Top => {
             if let Some(t) = &app.top {
                 t.draw(f, area);
+            }
+        }
+        crate::fun::Mode::File => {
+            if let Some(fe) = &mut app.file {
+                fe.draw(f, area);
             }
         }
         _ => {}
@@ -5235,6 +5315,7 @@ mod tests {
             pong: crate::fun::pong::Pong::new(),
             side_mode: None,
             top: None,
+            file: None,
             focus_panel: false,
             kb_auto: false,
             history: vec![],

@@ -214,6 +214,7 @@ pub const TREE: &[Node] = &[
             n("radio", "/radio"),
             n("bintime", "/bintime"),
             n("t0p", "/t0p"),
+            n("0file", "/0file "),
             n("pong", "/pong"),
             n("panel (fermer)", "/panel"),
         ],
