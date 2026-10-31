@@ -29,25 +29,25 @@ fn pipe_to(cmd: &str, args: &[&str], text: &str) -> bool {
     matches!(c.wait(), Ok(s) if s.success())
 }
 
-pub fn copy(text: &str) {
+pub fn copy(text: &str) -> bool {
     // Wayland
     if has("wl-copy") && pipe_to("wl-copy", &[], text) {
-        return;
+        return true;
     }
     // X11
     if has("xclip") && pipe_to("xclip", &["-selection", "clipboard"], text) {
-        return;
+        return true;
     }
     if has("xsel") && pipe_to("xsel", &["--clipboard", "--input"], text) {
-        return;
+        return true;
     }
     // macOS
     if has("pbcopy") && pipe_to("pbcopy", &[], text) {
-        return;
+        return true;
     }
     // Windows: clip.exe (builtin cmd)
     if has("clip") && pipe_to("clip", &[], text) {
-        return;
+        return true;
     }
     // Windows: PowerShell Set-Clipboard (marche meme si clip absent du PATH)
     // Methode 1: Fichier temporaire + [IO.File]::ReadAllText() | Set-Clipboard (robuste, UTF-8 garanti)
@@ -73,7 +73,7 @@ pub fn copy(text: &str) {
             {
                 let _ = c.wait();
                 let _ = std::fs::remove_file(&tmp);
-                return;
+                return true;
             }
             let _ = std::fs::remove_file(&tmp);
         }
@@ -92,7 +92,7 @@ pub fn copy(text: &str) {
         }
         c.stdin.take();
         if matches!(c.wait(), Ok(s) if s.success()) {
-            return;
+            return true;
         }
     }
     // Repli OSC 52 (base64) -- supporté par de nombreux terminaux (SSH inclus).
@@ -101,6 +101,7 @@ pub fn copy(text: &str) {
     let mut out = std::io::stdout();
     let _ = write!(out, "\x1b]52;c;{b64}\x07");
     let _ = out.flush();
+    false
 }
 
 /// Lit le presse-papier. Ordre : `wl-paste` -> `xclip -o` / `xsel -o`

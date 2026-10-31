@@ -1,3 +1,13 @@
+## v0.7.16 — Mod `0file` (explorateur rétro) (2026-10-30)
+
+- `/0file [chemin]` : explorateur de dossiers dans le panneau latéral, style
+  phosphore vert/ambre (bordure double, sélection inversée).
+- Lecture seule : navigation (↑↓, Entrée, Retour), `c` copie le chemin absolu
+  (dossier ou fichier), `.` affiche les cachés, `r` relit, `g`/`G` début/fin.
+- Tri dossiers d'abord, tailles lisibles, `~` pour le dossier personnel.
+- `clipboard::copy` renvoie désormais un vrai succès (message honnête si aucun
+  outil presse-papier n'est présent).
+
 ## v0.7.15 — `t0p` dans le groupe mods (2026-10-30)
 
 - Le menu range `t0p` avec radio/bintime/pong (il était listé hors groupe).
