@@ -1,3 +1,10 @@
+## v0.7.18 — 0file : clic exécute, molette et pagination (2026-10-31)
+
+- Le clic sur `0file` dans le menu **ouvre** le panneau (il insérait `/0file `
+  dans la saisie, car l'entrée finissait par une espace = « attend un argument »).
+- Défilement : molette sur le panneau, `PageUp`/`PageDown`, `Home`/`End`,
+  et compteur `position/total` dans le pied du panneau.
+
 ## v0.7.17 — 0box : MAIN synthétise avant d'agir (2026-10-31)
 
 - Le prompt de MAIN disait « tu DOIS appeler des outils, sinon TU ÉCHOUES » :
