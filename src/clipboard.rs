@@ -73,7 +73,7 @@ pub fn copy(text: &str) -> bool {
             {
                 let _ = c.wait();
                 let _ = std::fs::remove_file(&tmp);
-                return;
+                return true;
             }
             let _ = std::fs::remove_file(&tmp);
         }
