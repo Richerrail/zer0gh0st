@@ -141,6 +141,17 @@ impl FileExplorer {
         self.clamp_scroll();
     }
 
+    /// Avance/recule d'une page (hauteur visible).
+    pub fn page(&mut self, forward: bool) {
+        let step = self.rows.max(1);
+        if forward {
+            self.sel = (self.sel + step).min(self.entries.len().saturating_sub(1));
+        } else {
+            self.sel = self.sel.saturating_sub(step);
+        }
+        self.clamp_scroll();
+    }
+
     pub fn go_top(&mut self) {
         self.sel = 0;
         self.clamp_scroll();
@@ -324,8 +335,10 @@ impl FileExplorer {
                 Style::default().fg(if *ok { PHOSPHOR } else { AMBER }),
             )
         } else {
+            let total = self.entries.len();
+            let pos = if total == 0 { 0 } else { self.sel + 1 };
             Span::styled(
-                " ↑↓ ↵ c:copier .:cachés r:relire ",
+                format!(" ↑↓ ↵ c:copier .:cachés  {pos}/{total} "),
                 Style::default().fg(DIM),
             )
         };
@@ -423,6 +436,23 @@ mod tests {
         let up = fe.entries.first().expect("..");
         assert!(up.up);
         assert_eq!(up.path, d);
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn page_moves_by_visible_height() {
+        let d = tmpdir("page");
+        for i in 0..30 {
+            std::fs::write(d.join(format!("f{i:02}.txt")), b"x").unwrap();
+        }
+        let mut fe = FileExplorer::open(d.to_str().unwrap());
+        fe.rows = 5;
+        fe.page(true);
+        assert_eq!(fe.sel, 5);
+        fe.page(false);
+        assert_eq!(fe.sel, 0);
+        fe.go_bottom();
+        assert_eq!(fe.sel, fe.entries.len() - 1);
         let _ = std::fs::remove_dir_all(d);
     }
 

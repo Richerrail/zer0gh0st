@@ -157,6 +157,8 @@ pub struct App {
     pub top: Option<crate::fun::top::Top>,
     /// Mod `0file` (explorateur) : créé à la demande.
     pub file: Option<crate::fun::file::FileExplorer>,
+    /// Zone écran du panneau 0file (molette / clics).
+    pub file_rect: Rect,
     /// Whether the side panel has keyboard focus.
     pub focus_panel: bool,
     /// Auto-inject relevant knowledge into the prompt.
@@ -352,6 +354,7 @@ pub async fn run(
         side_mode: None,
         top: None,
         file: None,
+        file_rect: Rect::default(),
         focus_panel: false,
         kb_auto: true,
         history: Vec::new(),
@@ -3476,6 +3479,12 @@ fn handle_input(ev: Event, app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
                 }
             }
             MouseEventKind::ScrollDown => {
+                if app.side_mode == Some(crate::fun::Mode::File) && inside(Some(app.file_rect)) {
+                    if let Some(fe) = &mut app.file {
+                        fe.move_down();
+                    }
+                    return;
+                }
                 if let Some(p) = app.picker.as_mut() {
                     p.move_sel(1);
                 } else if inside(Some(app.menu_rect)) {
@@ -3487,6 +3496,12 @@ fn handle_input(ev: Event, app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
                 }
             }
             MouseEventKind::ScrollUp => {
+                if app.side_mode == Some(crate::fun::Mode::File) && inside(Some(app.file_rect)) {
+                    if let Some(fe) = &mut app.file {
+                        fe.move_up();
+                    }
+                    return;
+                }
                 if let Some(p) = app.picker.as_mut() {
                     p.move_sel(-1);
                 } else if inside(Some(app.menu_rect)) {
@@ -3676,6 +3691,30 @@ fn handle_input(ev: Event, app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
                 KeyCode::Char('r') if is_file => {
                     if let Some(fe) = &mut app.file {
                         fe.refresh();
+                    }
+                    return;
+                }
+                KeyCode::PageDown if is_file => {
+                    if let Some(fe) = &mut app.file {
+                        fe.page(true);
+                    }
+                    return;
+                }
+                KeyCode::PageUp if is_file => {
+                    if let Some(fe) = &mut app.file {
+                        fe.page(false);
+                    }
+                    return;
+                }
+                KeyCode::Home if is_file => {
+                    if let Some(fe) = &mut app.file {
+                        fe.go_top();
+                    }
+                    return;
+                }
+                KeyCode::End if is_file => {
+                    if let Some(fe) = &mut app.file {
+                        fe.go_bottom();
                     }
                     return;
                 }
@@ -4109,6 +4148,7 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App, mode: crate::fun::Mode) 
             }
         }
         crate::fun::Mode::File => {
+            app.file_rect = area;
             if let Some(fe) = &mut app.file {
                 fe.draw(f, area);
             }
@@ -5388,6 +5428,7 @@ mod tests {
             side_mode: None,
             top: None,
             file: None,
+            file_rect: Rect::default(),
             focus_panel: false,
             kb_auto: false,
             history: vec![],
