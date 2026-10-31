@@ -1,3 +1,14 @@
+## v0.7.17 — 0box : MAIN synthétise avant d'agir (2026-10-31)
+
+- Le prompt de MAIN disait « tu DOIS appeler des outils, sinon TU ÉCHOUES » :
+  sur un débat de test il créait des tâches et des fichiers, puis rendait une
+  réponse vide. Il doit désormais produire une **synthèse en texte**.
+- `debate::topic_wants_actions()` (déterministe, testé) : une question ou un
+  débat n'ouvre pas `task_add`, `task_update`, `task_delete`, `text_editor`
+  ni `code_exec`. Seule une demande explicite de livrable les ouvre.
+- MAIN a son propre prompt système (synthèse d'abord, outils de lecture
+  seulement), et les outils d'écriture ne lui sont plus exposés dans ce cas.
+
 ## v0.7.16 — Mod `0file` (explorateur rétro) (2026-10-30)
 
 - `/0file [chemin]` : explorateur de dossiers dans le panneau latéral, style

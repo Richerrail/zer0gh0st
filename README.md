@@ -182,6 +182,7 @@ par `ZER0_EXEC_TIMEOUT` ou par appel (`timeout_secs`).
 | **Contexte** | compaction automatique (~4000 tokens) via le rôle `utility` |
 | **Tâches** | liste Markdown `.zer0/tasks.md`, `claim/done`, boucle `/work` par sous-agent ; **porte d'honnêteté** : `done` refusé si un livrable mentionné est absent ou vide |
 | **Sous-agents** | `/ask`, `/review`, `/jev` en contexte isolé |
+| **0box** | débat code → reasoning → MAIN : MAIN **synthétise en texte** ; il n'ouvre les outils d'écriture (fichiers, commandes, tâches) que si le sujet demande explicitement un livrable |
 | **Outils** | 18 outils : `code_exec`, `text_editor`, `read_image` (OCR), `web_search`, `web_read`, `memory_*`, `knowledge_*`, `task_*`, `delegate`, `0box` |
 | **Local** | chat rapide **sans outils** (prompt d'une phrase, contexte 2048, `--no-warmup`, `-np 1`), GGUF scannés, serveur préchargé en 3 s |
 | **GPU** | `-ngl` automatique : CUDA/Vulkan/ROCm via `llama-server --list-devices`, **Metal** sur macOS ; `ZER0_GPU_LAYERS=auto\|0\|N` |

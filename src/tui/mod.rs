@@ -2323,6 +2323,27 @@ pub async fn run_0box_debate(topic: String, perspectives: Vec<String>, setup: De
         .cloned()
         .collect();
 
+    // Un débat/une question ne doit PAS ouvrir les outils d'écriture : sinon
+    // MAIN crée des tâches et des fichiers pour un test, puis rend une réponse
+    // vide (constaté). Seule une demande explicite de livrable les ouvre.
+    let actionable = crate::debate::topic_wants_actions(&topic);
+    const WRITE_TOOLS: [&str; 5] = [
+        "task_add",
+        "task_update",
+        "task_delete",
+        "text_editor",
+        "code_exec",
+    ];
+    let main_tools: Vec<crate::tools::ToolSpec> = if actionable {
+        tools.clone()
+    } else {
+        tools
+            .iter()
+            .filter(|t| !WRITE_TOOLS.contains(&t.name))
+            .cloned()
+            .collect()
+    };
+
     // Ensure MAIN is always last for synthesis + execution
     let mut debate_perspectives = perspectives.clone();
     if let Some(pos) = debate_perspectives.iter().position(|r| r == "main") {
@@ -2360,11 +2381,46 @@ pub async fn run_0box_debate(topic: String, perspectives: Vec<String>, setup: De
         }
     }
 
+    // MAIN : prompt distinct. La synthèse est le livrable ; les outils
+    // d'écriture ne sont ouverts que si le sujet le demande explicitement.
+    let mut main_system = format!(
+        "{}\n\n## RÈGLES DU DÉBAT 0BOX — MAIN\n\
+         Tu es MAIN, dernier tour du débat. Ton livrable principal est une synthèse en texte : \
+         décision, raisons, points d'accord/désaccord, prochaines étapes (5 à 10 lignes).\n\
+         Tu ne remplaces pas la synthèse par un fichier ni par des appels d'outils : le lecteur \
+         lit ta réponse dans le débat.\n",
+        system
+    );
+    if actionable {
+        main_system.push_str(
+            "\nLe sujet demande un livrable concret : tu peux exécuter, mais commence par la \
+             synthèse, puis agis. Ne crée une tâche que si le sujet demande un suivi de travail.\n",
+        );
+    } else {
+        main_system.push_str(
+            "\nLe sujet est une question ou un débat : n'écris AUCUN fichier, ne crée AUCUNE tâche, \
+             n'exécute AUCUNE commande. Réponds en texte. Les outils de lecture restent permis si \
+             une vérification est nécessaire.\n",
+        );
+    }
+    if !main_tools.is_empty() {
+        main_system.push_str("\n## Outils réellement disponibles pour MAIN\n");
+        for t in &main_tools {
+            main_system.push_str(&format!("- {} : {}\n", t.name, t.description));
+        }
+    } else {
+        main_system.push_str("\nAucun outil n'est disponible pour ce tour : réponds en texte.\n");
+    }
+
     // Tour 1 : Premier participant (pas d'historique de débat)
     for (turn_idx, role) in debate_perspectives.iter().enumerate() {
         let is_last = turn_idx == debate_perspectives.len() - 1;
         let role_label = if is_last {
-            "MAIN (synthèse + action)"
+            if actionable {
+                "MAIN (synthèse + action)"
+            } else {
+                "MAIN (synthèse)"
+            }
         } else {
             role
         };
@@ -2378,14 +2434,25 @@ pub async fn run_0box_debate(topic: String, perspectives: Vec<String>, setup: De
                 role
             )
         } else if is_last {
-            // MAIN : synthèse + attribution des tâches + EXÉCUTION IMMÉDIATE
+            // MAIN : la synthèse d'abord. Actions seulement si le sujet le demande.
             let history = format_conversation(&conversation);
+            let instruction = if actionable {
+                "Le sujet demande un livrable : 1) écris la synthèse (décision, raisons, étapes), \
+                 2) puis exécute ce qui est demandé (fichiers/commandes), 3) crée des tâches \
+                 uniquement si un suivi est utile. Ta réponse doit contenir la synthèse, pas \
+                 seulement des appels d'outils."
+            } else {
+                "Le sujet est une question ou un débat : réponds en TEXTE, sans créer de fichier, \
+                 sans créer de tâche, sans exécuter de commande. Ta réponse est la synthèse : \
+                 décision/verdict, raisons, nuances, prochaines étapes (5 à 10 lignes)."
+            };
             format!(
-                "=== DÉBAT 0BOX — TOUR {}/{} (MAIN - SYNTHÈSE + TÂCHES + EXÉCUTION) ===\nSUJET : {}\nHISTORIQUE DU DÉBAT :\n{}\n\n⚠️⚠️⚠️ INSTRUCTION CRITIQUE POUR MAIN ⚠️⚠️⚠️\n\nTu es MAIN. Ton rôle : SYNTHÉTISER, ATTRIBUER LES TÂCHES, puis EXÉCUTER.\n\nRÈGLE ABSOLUE : Tu DOIS appeler des outils DANS CETTE RÉPONSE.\nNE RÉPONDS PAS AVEC DU TEXTE SEULEMENT.\n\nPROCÉDURE OBLIGATOIRE (dans cet ordre) :\n0. VÉRIFIE D'ABORD avec task_list ce qui existe déjà : ne recrée JAMAIS une tâche existante — reprends le travail là où il en est (task_update claim → travail → done).\n1. CRÉE LES TÂCHES manquantes : appelle task_add UNE FOIS PAR étape du plan d'action.\n   Exemple : task_add text=\"Créer TodoList.java\" role=\"code\"\n   → chaque tâche reçoit un id (t1, t2, …) que les outils te renvoient.\n2. EXÉCUTE : appelle text_editor (create) pour CHAQUE fichier à créer,\n   code_exec pour CHAQUE commande à lancer.\n3. Marque l'avancement : task_update id=t1 status=claim au démarrage,\n   task_update id=t1 status=done quand c'est fini.\n4. Enchaîne les appels SANS t'arrêter jusqu'à ce que le plan soit réalisé.\n\nLes tâches restent visibles avec /task : l'utilisateur pourra les reprendre\navec /work si le budget d'appels d'outils est épuisé avant la fin.\n\nSi tu ne fais qu'écrire du texte sans appeler task_add, TU ÉCHOUES.\n\nCommence MAINTENANT : task_list d'abord, puis task_add pour les étapes manquantes.",
+                "=== DÉBAT 0BOX — TOUR {}/{} (MAIN — SYNTHÈSE) ===\nSUJET : {}\nHISTORIQUE DU DÉBAT :\n{}\n\nINSTRUCTION POUR MAIN :\n{}\n\nRéponds maintenant : commence par la synthèse, en clair.",
                 turn_idx + 1,
                 debate_perspectives.len(),
                 topic,
-                history
+                history,
+                instruction
             )
         } else {
             // Participants intermédiaires : réagissent au débat
@@ -2413,6 +2480,11 @@ pub async fn run_0box_debate(topic: String, perspectives: Vec<String>, setup: De
         )));
 
         // Exécute le tour avec validation et retry si échec
+        let (turn_system, turn_tools): (&str, &[crate::tools::ToolSpec]) = if is_last {
+            (&main_system, &main_tools)
+        } else {
+            (&debate_system, &tools)
+        };
         let (speaker, response) = run_0box_turn_with_retry(
             DebateTurn {
                 role,
@@ -2420,8 +2492,8 @@ pub async fn run_0box_debate(topic: String, perspectives: Vec<String>, setup: De
                 prompt: &prompt,
                 endpoints: &endpoints,
             },
-            &debate_system,
-            &tools,
+            turn_system,
+            turn_tools,
             &options,
             &ui,
             3, // max retries per turn
