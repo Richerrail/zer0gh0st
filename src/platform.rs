@@ -64,7 +64,15 @@ pub fn shell_label() -> String {
         let has_bash = find_in_path("bash").is_some();
         let has_pwsh = find_in_path("pwsh").is_some();
         let has_ps = find_in_path("powershell").is_some();
-        match pick_windows_shell(ov.as_deref(), has_bash, has_pwsh, has_ps) {
+        let chosen = choose_windows_shell(
+            ov.as_deref(),
+            std::env::var_os("MSYSTEM").is_some(),
+            std::env::var_os("PSModulePath").is_some(),
+            has_bash,
+            has_pwsh,
+            has_ps,
+        );
+        match chosen {
             WinShell::Bash => "bash -lc (Git Bash)".to_string(),
             WinShell::PowerShell => "powershell -Command".to_string(),
             WinShell::Cmd => "cmd /C".to_string(),
@@ -82,6 +90,30 @@ pub enum WinShell {
     Bash,
     PowerShell,
     Cmd,
+}
+
+/// Choix **pur** (testable) : `ZER0_SHELL` explicite, sinon le shell d'où
+/// Zer0 a été lancé (Git Bash via `MSYSTEM`, PowerShell via `PSModulePath`),
+/// sinon bash (Git Bash), sinon PowerShell, sinon cmd.
+#[allow(clippy::too_many_arguments)]
+pub fn choose_windows_shell(
+    override_: Option<&str>,
+    msys: bool,
+    ps_module_path: bool,
+    has_bash: bool,
+    has_pwsh: bool,
+    has_powershell: bool,
+) -> WinShell {
+    if override_.is_some() {
+        return pick_windows_shell(override_, has_bash, has_pwsh, has_powershell);
+    }
+    if msys && has_bash {
+        return WinShell::Bash;
+    }
+    if ps_module_path && (has_pwsh || has_powershell) {
+        return WinShell::PowerShell;
+    }
+    pick_windows_shell(None, has_bash, has_pwsh, has_powershell)
 }
 
 /// Choix **pur** (testable) : `ZER0_SHELL` explicite, sinon bash (Git Bash),
@@ -114,7 +146,15 @@ fn windows_shell(script: &str) -> Command {
     let has_bash = find_in_path("bash").is_some();
     let has_pwsh = find_in_path("pwsh").is_some();
     let has_ps = find_in_path("powershell").is_some();
-    match pick_windows_shell(ov.as_deref(), has_bash, has_pwsh, has_ps) {
+    let chosen = choose_windows_shell(
+        ov.as_deref(),
+        std::env::var_os("MSYSTEM").is_some(),
+        std::env::var_os("PSModulePath").is_some(),
+        has_bash,
+        has_pwsh,
+        has_ps,
+    );
+    match chosen {
         WinShell::Bash => {
             let mut c = Command::new("bash");
             c.arg("-lc").arg(script);
@@ -474,6 +514,35 @@ mod tests {
         assert_eq!(g.pci_id, "1002:6779");
         assert_eq!(g.driver.as_deref(), Some("radeon"));
         assert!(parse_uevent("DRIVER=amdgpu\n").is_none());
+    }
+
+    #[test]
+    fn inherited_shell_wins_over_the_heuristic() {
+        // Lancé depuis PowerShell (PSModulePath) → PowerShell, même avec bash.
+        assert_eq!(
+            choose_windows_shell(None, false, true, true, true, true),
+            WinShell::PowerShell
+        );
+        // Lancé depuis Git Bash (MSYSTEM) → bash.
+        assert_eq!(
+            choose_windows_shell(None, true, false, true, true, true),
+            WinShell::Bash
+        );
+        // Rien d'hérité → ancien ordre (bash d'abord).
+        assert_eq!(
+            choose_windows_shell(None, false, false, true, true, true),
+            WinShell::Bash
+        );
+        // ZER0_SHELL gagne toujours.
+        assert_eq!(
+            choose_windows_shell(Some("cmd"), true, true, true, true, true),
+            WinShell::Cmd
+        );
+        // PSModulePath sans PowerShell installé → repli.
+        assert_eq!(
+            choose_windows_shell(None, false, true, false, false, false),
+            WinShell::Cmd
+        );
     }
 
     #[test]

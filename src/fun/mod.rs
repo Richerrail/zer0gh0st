@@ -2,6 +2,7 @@ pub mod bintime;
 pub mod file;
 pub mod pong;
 pub mod radio;
+pub mod term;
 pub mod top;
 
 use std::time::{Duration, Instant};
@@ -17,6 +18,7 @@ pub enum Mode {
     Pong,
     Top,
     File,
+    Term,
 }
 
 /// Dump a single Pong frame to stdout (diagnostic).
@@ -46,6 +48,7 @@ pub fn run_standalone(mode: Mode) -> anyhow::Result<()> {
     let mut radio = radio::Radio::new();
     let mut top = top::Top::new();
     let mut file = file::FileExplorer::open("");
+    let mut term = term::Term::new();
 
     let res = (|| -> anyhow::Result<()> {
         let tick = Duration::from_millis(45);
@@ -59,6 +62,7 @@ pub fn run_standalone(mode: Mode) -> anyhow::Result<()> {
                     Mode::Radio => radio.draw(f, area),
                     Mode::Top => top.draw(f, area),
                     Mode::File => file.draw(f, area),
+                    Mode::Term => term.draw(f, area),
                     Mode::Chat => {}
                 }
             })?;
@@ -80,6 +84,11 @@ pub fn run_standalone(mode: Mode) -> anyhow::Result<()> {
                                 _ => {}
                             },
                             Mode::Top => {
+                                if matches!(k.code, KeyCode::Esc | KeyCode::Char('q')) {
+                                    break;
+                                }
+                            }
+                            Mode::Term => {
                                 if matches!(k.code, KeyCode::Esc | KeyCode::Char('q')) {
                                     break;
                                 }
@@ -126,6 +135,7 @@ pub fn run_standalone(mode: Mode) -> anyhow::Result<()> {
                     Mode::Radio => radio.tick(),
                     Mode::Top => top.tick(),
                     Mode::File => {}
+                    Mode::Term => {}
                     Mode::Chat => {}
                 }
                 next += tick;

@@ -220,6 +220,7 @@ pub const TREE: &[Node] = &[
             n("bintime", "/bintime"),
             n("t0p", "/t0p"),
             n("0file", "/0file"),
+            n("zer0CL", "/0cl"),
             n("pong", "/pong"),
             n("panel (fermer)", "/panel"),
         ],
