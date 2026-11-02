@@ -46,6 +46,7 @@ const HELP_SHORT: &str =
   /model              choisir un modèle (menu)
   /free               modèles gratuits (menu)
   /theme              thèmes de couleurs (menu)
+  /sound on|off       sons d'interface (défaut : off)
   /role               rôles ; /role set <rôle> ouvre un menu
   /route              chaîne de bascule si un modèle échoue
   /think              raisonnement on/off
@@ -914,6 +915,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
         "/kb" => handle_kb(app, &args, ui_tx),
         "/apis" => handle_apis(app, &args),
         "/radio" => {
+            crate::sound::event(crate::sound::Event::Panel);
             let arg = args.join(" ");
             if !arg.trim().is_empty() {
                 app.radio = crate::fun::radio::Radio::new();
@@ -925,11 +927,13 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
             app.focus_panel = false;
         }
         "/bintime" => {
+            crate::sound::event(crate::sound::Event::Panel);
             app.bintime = crate::fun::bintime::BinTime::new();
             app.side_mode = Some(crate::fun::Mode::BinTime);
             app.focus_panel = false;
         }
         "/0file" => {
+            crate::sound::event(crate::sound::Event::Panel);
             let arg = args.join(" ");
             app.file = Some(crate::fun::file::FileExplorer::open(&arg));
             app.side_mode = Some(crate::fun::Mode::File);
@@ -1228,12 +1232,47 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
             }
         }
         "/t0p" => {
+            crate::sound::event(crate::sound::Event::Panel);
             // Même panneau latéral que /radio et /bintime.
             if app.top.is_none() {
                 app.top = Some(crate::fun::top::Top::new());
             }
             app.side_mode = Some(crate::fun::Mode::Top);
             app.focus_panel = false;
+        }
+        "/sound" => {
+            let wanted = match args.first().copied() {
+                Some("on") => true,
+                Some("off") => false,
+                None => !crate::sound::enabled(),
+                Some(other) => {
+                    app.messages.push(ChatMessage::notice(format!(
+                        "usage: /sound [on|off] (reçu: {other})"
+                    )));
+                    return;
+                }
+            };
+            // Couper : jouer AVANT d'enregistrer (sinon `event()` est déjà muet).
+            if !wanted {
+                crate::sound::event(crate::sound::Event::ToggleOff);
+            }
+            let mut g = config::load_global();
+            g.sound = Some(wanted);
+            match config::save_global(&g) {
+                Ok(()) => {
+                    if wanted {
+                        crate::sound::event(crate::sound::Event::ToggleOn);
+                    }
+                    app.messages.push(ChatMessage::notice(if wanted {
+                        "Sons activés (pack castle). /sound off pour couper.".to_string()
+                    } else {
+                        "Sons désactivés.".to_string()
+                    }));
+                }
+                Err(e) => app
+                    .messages
+                    .push(ChatMessage::notice(format!("Réglage non enregistré: {e}"))),
+            }
         }
         "/theme" => {
             let requested = text.strip_prefix("/theme").unwrap_or("").trim();
@@ -1271,7 +1310,8 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
              /model                     modèle actuel + sélection (liste)\n\
              /img <chemin>              joint une image au prochain message (vision)\n\
              /update [check]            met à jour le binaire (Releases GitHub)\n\
-             /theme [nom]              menu des thèmes (ou noir-rouge)\n\
+             /theme [nom]              menu des thèmes (castle, noir, noir-rouge)\n\
+             /sound [on|off]           sons d'interface (défaut : off)\n\
              Ctrl+O / clic droit        déplier CE bloc de sortie d'outil\n\
              /model use <id>            change de modèle\n\
              /models [free]             liste les modèles du provider\n\
@@ -1419,21 +1459,25 @@ fn handle_picker_key(
             if let Some(p) = app.picker.as_mut() {
                 p.move_sel(-1)
             }
+            picker_sound(app);
         }
         KeyCode::Down => {
             if let Some(p) = app.picker.as_mut() {
                 p.move_sel(1)
             }
+            picker_sound(app);
         }
         KeyCode::PageUp => {
             if let Some(p) = app.picker.as_mut() {
                 p.page(-1, 10)
             }
+            picker_sound(app);
         }
         KeyCode::PageDown => {
             if let Some(p) = app.picker.as_mut() {
                 p.page(1, 10)
             }
+            picker_sound(app);
         }
         KeyCode::Backspace => {
             if let Some(p) = app.picker.as_mut() {
@@ -1468,6 +1512,12 @@ fn handle_picker_key(
                 input_set(app, palette_text(&p.filter));
                 return;
             };
+            match p.kind {
+                picker::Kind::Theme => {
+                    crate::sound::event(crate::sound::Event::Theme(item.id.clone()))
+                }
+                _ => crate::sound::event(crate::sound::Event::Select),
+            }
             match p.kind {
                 picker::Kind::Model => {
                     if let Some(role) = p.target.clone() {
@@ -1681,6 +1731,21 @@ fn theme_items(active: theme::Theme) -> Vec<picker::Item> {
         .collect()
 }
 
+/// Aperçu sonore du picker : le son du thème survolé, sinon un tick.
+fn picker_sound(app: &App) {
+    let Some(p) = app.picker.as_ref() else {
+        return;
+    };
+    match p.kind {
+        picker::Kind::Theme => {
+            if let Some(it) = p.selected() {
+                crate::sound::event(crate::sound::Event::Theme(it.id.clone()));
+            }
+        }
+        _ => crate::sound::event(crate::sound::Event::Tick),
+    }
+}
+
 /// Ouvre le menu de sélection des thèmes de couleurs.
 fn open_theme_menu(app: &mut App) {
     let active = theme::active();
@@ -1699,6 +1764,8 @@ fn open_theme_menu(app: &mut App) {
 fn apply_theme(app: &mut App, name: &str) {
     match crate::commands::set_theme(name) {
         Ok(lines) => {
+            // Signature sonore du thème (si les sons sont activés).
+            crate::sound::event(crate::sound::Event::Theme(theme::active().id.to_string()));
             // Les lignes de conversation sont mises en cache avec leurs styles.
             app.chat_cache.clear();
             app.chat_cache_len = 0;
@@ -4058,6 +4125,7 @@ fn handle_ui(ev: UiEvent, app: &mut App) {
                 .push(ChatMessage::notice(format!("⚙ → {first}")));
         }
         UiEvent::TurnComplete(full) => {
+            crate::sound::event(crate::sound::Event::Done);
             let base = app.conversation.len();
             app.messages.truncate(app.display_mark);
             for m in full.iter().skip(base) {
@@ -4091,6 +4159,7 @@ fn handle_ui(ev: UiEvent, app: &mut App) {
             app.auto_scroll = true;
         }
         UiEvent::Error(e) => {
+            crate::sound::event(crate::sound::Event::Error);
             app.messages.truncate(app.display_mark);
             app.messages
                 .push(ChatMessage::notice(format!("⚠ erreur: {e}")));

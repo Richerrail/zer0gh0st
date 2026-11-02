@@ -36,6 +36,7 @@ pub mod quota;
 pub mod route;
 pub mod search;
 pub mod select;
+pub mod sound;
 pub mod tasks;
 pub mod telegram;
 pub mod theme;

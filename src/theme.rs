@@ -19,6 +19,8 @@ pub enum BannerStyle {
     Mono,
     /// Dégradé rouge, du bordeaux au rouge vif.
     Red,
+    /// Dégradé acier bleuté (thème castle / DOS).
+    Steel,
 }
 
 /// Palette complète d'un thème.
@@ -48,6 +50,8 @@ pub struct Theme {
     pub warning: Color,
     pub danger: Color,
     pub banner: BannerStyle,
+    /// Pack de sons du thème (`""` = aucun son de thème).
+    pub sound_pack: &'static str,
 }
 
 /// Thèmes disponibles. Le premier est le thème par défaut.
@@ -73,6 +77,7 @@ pub const ALL: &[Theme] = &[
         warning: Color::Yellow,
         danger: Color::LightRed,
         banner: BannerStyle::Rainbow,
+        sound_pack: "",
     },
     Theme {
         id: "noir",
@@ -95,6 +100,7 @@ pub const ALL: &[Theme] = &[
         warning: Color::Rgb(205, 185, 140),
         danger: Color::Rgb(220, 85, 85),
         banner: BannerStyle::Mono,
+        sound_pack: "",
     },
     Theme {
         id: "noir-rouge",
@@ -117,6 +123,30 @@ pub const ALL: &[Theme] = &[
         warning: Color::Rgb(220, 165, 70),
         danger: Color::Rgb(255, 60, 68),
         banner: BannerStyle::Red,
+        sound_pack: "",
+    },
+    Theme {
+        id: "castle",
+        label: "Castle",
+        description: "acier bleu, rouge sang — Wolfenstein 3D (1992)",
+        background: Color::Rgb(10, 10, 18),
+        accent: Color::Rgb(176, 32, 32),
+        panel: Color::Rgb(20, 24, 36),
+        dim: Color::Rgb(106, 114, 128),
+        text: Color::Rgb(216, 216, 224),
+        code: Color::Rgb(112, 184, 216),
+        tool: Color::Rgb(128, 144, 176),
+        border: Color::Rgb(60, 70, 88),
+        highlight: Color::Rgb(224, 224, 240),
+        selection_bg: Color::Rgb(176, 32, 32),
+        selection_fg: Color::White,
+        menu_selection_bg: Color::Rgb(140, 26, 26),
+        popup_bg: Color::Rgb(14, 16, 24),
+        success: Color::Rgb(80, 160, 80),
+        warning: Color::Rgb(208, 160, 48),
+        danger: Color::Rgb(224, 48, 48),
+        banner: BannerStyle::Steel,
+        sound_pack: "castle",
     },
 ];
 
@@ -141,6 +171,7 @@ fn canonical_name(name: &str) -> String {
         "red" | "rouge" | "black-red" | "black-et-red" | "noir-et-rouge" => {
             "noir-rouge".to_string()
         }
+        "wolf" | "wolf3d" | "wolfenstein" | "bleu" | "acier" | "steel" => "castle".to_string(),
         other => other.to_string(),
     }
 }
@@ -224,6 +255,15 @@ pub fn danger() -> Color {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn castle_theme_is_selectable_and_has_its_pack() {
+        let t = resolve("castle").expect("castle");
+        assert_eq!(t.id, "castle");
+        assert_eq!(t.sound_pack, "castle");
+        assert_eq!(resolve("wolf3d").expect("alias").id, "castle");
+        assert_eq!(t.banner, BannerStyle::Steel);
+    }
+
     use super::*;
 
     #[test]

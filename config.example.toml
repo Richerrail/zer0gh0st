@@ -25,6 +25,8 @@
 # Valeurs : "ghost" (défaut), "noir", "noir-rouge".
 # Dans la TUI, `/theme` ouvre le menu de sélection.
 # theme = "noir-rouge"
+# Sons d'interface (clips rétro) : désactivés par défaut.
+# sound = false
 
 # ── Chaîne de bascule (failover), essayée dans l'ordre ─────
 # routes = [

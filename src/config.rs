@@ -57,6 +57,9 @@ pub struct GlobalConfig {
     /// `None` = thème par défaut.
     #[serde(default)]
     pub theme: Option<String>,
+    /// Sons d'interface (défaut : `false`, silencieux).
+    #[serde(default)]
+    pub sound: Option<bool>,
     /// Prompt système global « cloud » (priorité plus faible que le projet).
     #[serde(default)]
     pub system_prompt: Option<String>,
@@ -130,6 +133,7 @@ impl Default for GlobalConfig {
             telegram_allow: Vec::new(),
             zero_box_fallbacks: None,
             theme: None,
+            sound: None,
             system_prompt: None,
             system_prompt_local: None,
             stream: None,

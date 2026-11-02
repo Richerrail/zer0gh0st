@@ -188,6 +188,8 @@ par `ZER0_EXEC_TIMEOUT` ou par appel (`timeout_secs`).
 | **GPU** | `-ngl` automatique : CUDA/Vulkan/ROCm via `llama-server --list-devices`, **Metal** sur macOS ; `ZER0_GPU_LAYERS=auto\|0\|N` |
 | **Thermique** | Linux : alerte 80 °C, génération coupée à 88 °C, serveur arrêté à 92 °C (`ZER0_TEMP_*`) |
 | **Explorateur** | mod `0file` dans le panneau latéral : dossiers/fichiers, navigation, tailles, `c` copie le chemin absolu, `.` cachés. Lecture seule |
+| **Thèmes** | `/theme` : `ghost` (historique), `noir`, `noir-rouge`, **`castle`** (Wolfenstein 3D : acier bleu, rouge sang, banner acier) ; persistant |
+| **Sons** | packs WAV **embarqués** (CC0, synthétisés) : tick, switch, porte, erreur, fin de tour ; **désactivés par défaut**, `/sound on` |
 | **Moniteur** | mod `t0p` dans le panneau latéral (comme radio/bintime) : CPU (global + cœurs), RAM/swap, charge, températures, top 8 processus. Aussi `zer0 t0p [--watch]` en CLI |
 | **Vote** | **👍 / 👎 en bas à droite de l'écran principal** (cliquables) : le pouce haut = **une star GitHub** sur [Richerrail/zer0gh0st](https://github.com/Richerrail/zer0gh0st), le bas retire la star. `/vote` ou `zer0 vote up\|down\|status\|login\|logout`. Compteur réel lu sur l'API GitHub. Connexion GitHub par device flow OAuth (`vote login`) → votes ensuite automatiques. |
 | **Divers** | `/vault`, `/pdf`, personas `/whoami`, recherche `/search` |
@@ -377,6 +379,18 @@ Réglages : tous les cœurs détectés (génération), moitié en préfill, cont
 `ZER0_THREADS_BATCH`, `ZER0_CTX`, `ZER0_GPU_LAYERS`, `ZER0_TEMP_STOP`.
 
 `scripts/serve.sh` reste disponible pour lancer le serveur à la main.
+
+### Thèmes et sons
+
+```bash
+/theme              # menu avec aperçus (ghost, noir, noir-rouge, castle)
+/theme castle       # applique directement (alias : wolf, wolf3d, acier)
+/sound on           # active les sons d'interface (désactivés par défaut)
+/sound off
+```
+
+Le pack `castle` (WAV 16 bits, originaux CC0) est embarqué dans le binaire :
+aucun fichier à télécharger, aucun son si aucun lecteur audio n'est présent.
 
 ### Moniteur système
 

@@ -106,6 +106,20 @@ fn color_at(x: usize, w: usize, animated: bool, phase: u16) -> Color {
             let gray = (70.0 + wave * 150.0) as u8;
             Color::Rgb(gray, gray, gray)
         }
+        BannerStyle::Steel => {
+            let t = if w <= 1 {
+                0.0
+            } else {
+                x as f32 / (w - 1) as f32
+            };
+            let shift = if animated { phase as f32 / 120.0 } else { 0.0 };
+            let wave = (t * 6.0 + shift).sin() * 0.22 + 0.78;
+            Color::Rgb(
+                (70.0 + wave * 90.0) as u8,
+                (95.0 + wave * 105.0) as u8,
+                (135.0 + wave * 105.0) as u8,
+            )
+        }
         BannerStyle::Red => {
             let t = if w <= 1 {
                 0.0
