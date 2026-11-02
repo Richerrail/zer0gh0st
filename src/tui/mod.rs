@@ -3173,8 +3173,9 @@ fn cmd_vote_login(ui_tx: &UnboundedSender<UiEvent>) {
                     crate::clipboard::copy(&creds.access);
                     let _ = ui.send(UiEvent::Info(format!(
                         "Jeton obtenu mais non stocke dans le coffre : {e}\n\nIl est copie dans le presse-papier : colle-le dans\n\
-~/.config/zer0/config.toml  →  [keys]  github = \"…\"\n\
+{cfg}  →  [keys]  github = \"…\"\n\
 (ou relance `{cmd} vote login` dans un terminal normal).",
+                        cfg = crate::config::global_path().display(),
                         cmd = crate::vote::self_cmd(),
                     )));
                 }

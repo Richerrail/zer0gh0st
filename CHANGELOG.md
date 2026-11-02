@@ -1,3 +1,17 @@
+## v0.7.19 — Installation macOS : passerelle, Homebrew, chemins (2026-10-31)
+
+- **`zer0-gw` est enfin livré** : la CI release compile avec `--features gateway`
+  et publie `zer0-gw-<cible>` (+ dans le `.tar.gz` / `.zip`) ; `install.sh`
+  construit la feature et propose `--install` vers `~/.local/bin`.
+- **Homebrew** : `install.sh` affiche la commande d'installation officielle
+  (au lieu d'un simple lien) et rappelle de relancer après installation ;
+  README : section macOS avec `xcode-select --install` + Homebrew + deps.
+- **Chemins macOS** : la config/le coffre vivent dans
+  `~/Library/Application Support/zer0/`, pas `~/.config/zer0`. Corrigé dans
+  le README et dans les messages de la TUI (chemin réel affiché).
+- **401** : le message d'erreur indique le chemin de config et les pistes
+  (clé refusée, coffre verrouillé).
+
 ## v0.7.18 — 0file : clic exécute, molette et pagination (2026-10-31)
 
 - Le clic sur `0file` dans le menu **ouvre** le panneau (il insérait `/0file `
