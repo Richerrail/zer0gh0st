@@ -1,3 +1,8 @@
+## v0.7.24 — Marqueur des réponses (2026-11-02)
+
+- Les réponses de l'agent ne commencent plus par `◕` mais par un bloc `▌`
+  discret. Le visage `◕` reste réservé à Zero-chan.
+
 ## v0.7.23 — Spinner tâches (2026-11-02)
 
 - Le marqueur « en cours » n'est plus `* ¤ o O 0 O o ¤` : spinner braille
