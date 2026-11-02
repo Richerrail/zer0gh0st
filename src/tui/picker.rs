@@ -4,7 +4,10 @@
 //! testable sans terminal ; le rendu est dans `draw`.
 
 use ratatui::prelude::*;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
+
+use crate::theme;
 
 #[derive(Clone, Debug)]
 pub struct Item {
@@ -14,6 +17,8 @@ pub struct Item {
     pub label: String,
     /// Information secondaire (contexte, transport, état de clé…).
     pub note: String,
+    /// Petits aperçus de couleurs (utilisés par le menu des thèmes).
+    pub swatches: Vec<Color>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -22,6 +27,8 @@ pub enum Kind {
     Provider,
     /// Palette de commandes (déclenchée en tapant `/`).
     Command,
+    /// Sélecteur de thème de couleurs.
+    Theme,
 }
 
 #[derive(Debug)]
@@ -134,6 +141,8 @@ pub fn draw(f: &mut Frame, area: Rect, p: &Picker) {
     };
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme::border()))
+        .style(Style::default().bg(theme::background()))
         .title(format!(" {} · {} ", p.title, filtre));
     let inner = block.inner(r);
     f.render_widget(block, r);
@@ -146,11 +155,16 @@ pub fn draw(f: &mut Frame, area: Rect, p: &Picker) {
         .iter()
         .map(|&i| {
             let it = &p.items[i];
-            ListItem::new(format!(
-                " {:<44} {}",
-                truncate(&it.label, 44),
-                truncate(&it.note, 60)
-            ))
+            let mut spans = vec![Span::raw(format!(" {:<28}", truncate(&it.label, 28)))];
+            if !it.swatches.is_empty() {
+                spans.push(Span::raw(" "));
+                for color in &it.swatches {
+                    spans.push(Span::styled("██", Style::default().fg(*color).bg(*color)));
+                }
+                spans.push(Span::raw(" "));
+            }
+            spans.push(Span::raw(truncate(&it.note, 54)));
+            ListItem::new(Line::from(spans))
         })
         .collect();
     let mut st = ListState::default();
@@ -159,8 +173,8 @@ pub fn draw(f: &mut Frame, area: Rect, p: &Picker) {
     }
     let list = List::new(items).highlight_style(
         Style::default()
-            .bg(Color::Rgb(40, 50, 110))
-            .fg(Color::White),
+            .bg(theme::selection_bg())
+            .fg(theme::selection_fg()),
     );
     let list_area = Rect {
         height: inner.height - 1,
@@ -172,7 +186,7 @@ pub fn draw(f: &mut Frame, area: Rect, p: &Picker) {
         " {} item(s) · ↑↓ naviguer · taper = filtrer · Entrée valider · Échap annuler",
         vis.len()
     ))
-    .style(Style::default().fg(Color::DarkGray));
+    .style(Style::default().fg(theme::dim()));
     f.render_widget(
         help,
         Rect {
@@ -193,6 +207,7 @@ mod tests {
                 id: (*id).to_string(),
                 label: (*id).to_string(),
                 note: String::new(),
+                swatches: Vec::new(),
             })
             .collect()
     }

@@ -1,3 +1,9 @@
+## Non publié
+
+- **Thèmes de couleurs TUI** : `/theme` ouvre un menu avec aperçus et persiste
+  le choix. Thèmes `ghost` (historique), `noir` et `noir-rouge` ; le fond, le
+  banner, les menus, le picker, l'assistant et Zero-chan suivent le thème.
+
 ## v0.7.20 — Assistant : champ de clé visible (2026-11-01)
 
 - L'étape « 3/8 — Clé API » n'affichait **rien** quand le champ était vide :
