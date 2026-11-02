@@ -8,7 +8,13 @@
 set -euo pipefail
 
 MINIMAL=0
-[ "${1:-}" = "--minimal" ] && MINIMAL=1
+INSTALL_BIN=0
+for arg in "$@"; do
+  case "$arg" in
+    --minimal) MINIMAL=1 ;;
+    --install) INSTALL_BIN=1 ;;
+  esac
+done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -58,7 +64,11 @@ install_suse() {
 }
 install_darwin() {
   if ! command -v brew >/dev/null; then
-    echo "⚠ Homebrew est requis pour les dépendances macOS : https://brew.sh"
+    echo "⚠ Homebrew est requis pour les dépendances macOS."
+    echo "  Installe-le (une seule fois) :"
+    echo '  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+    echo "  Puis relance ce script. (Homebrew s'ajoute au PATH via ~/.zprofile.)"
+    BREW_MISSING=1
     return
   fi
   [ "$MINIMAL" -eq 0 ] && brew install sox mpv ffmpeg python@3.12
@@ -95,11 +105,23 @@ if [ "$MINIMAL" -eq 0 ]; then
 fi
 
 echo
-echo "→ Compilation de Zer0 (release)…"
-cargo build --release
+echo "→ Compilation de Zer0 (release + passerelle zer0-gw)…"
+cargo build --release --features gateway
+
+if [ "$INSTALL_BIN" -eq 1 ]; then
+  BIN="${HOME}/.local/bin"
+  mkdir -p "$BIN"
+  cp target/release/zer0 "$BIN/zer0"
+  [ -f target/release/zer0-gw ] && cp target/release/zer0-gw "$BIN/zer0-gw"
+  echo "✅ Binaires copiés dans $BIN (ajoute-le au PATH si besoin)."
+fi
 
 echo
 echo "✅ Terminé. Lance :"
 echo "   ./target/release/zer0            # TUI"
 echo "   ./target/release/zer0 --help"
+if [ -f target/release/zer0-gw ]; then
+  echo "   ./target/release/zer0-gw         # passerelle locale (optionnelle)"
+fi
+[ "${BREW_MISSING:-0}" -eq 1 ] && echo "⚠ Homebrew manquait : relance ce script après l'avoir installé pour sox/mpv/ffmpeg/python."
 [ "$MINIMAL" -eq 0 ] || echo "   (mode --minimal : voix/média/presse-papier non installés)"

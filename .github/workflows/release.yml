@@ -35,29 +35,33 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --target ${{ matrix.target }} --features gateway
 
       - name: Package (Unix)
         if: matrix.os != 'windows-latest'
         shell: bash
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf ../../../zer0-${{ matrix.target }}.tar.gz zer0
-          # Binaire brut : ce que télécharge `zer0 update` (pas d'archive à extraire).
+          tar czf ../../../zer0-${{ matrix.target }}.tar.gz zer0 zer0-gw
+          # Binaires bruts : `zer0 update` ne télécharge que `zer0` ; la
+          # passerelle est fournie à côté (installation manuelle).
           cp zer0 ../../../zer0-${{ matrix.target }}
+          cp zer0-gw ../../../zer0-gw-${{ matrix.target }}
           cd ../../..
           sha256sum "zer0-${{ matrix.target }}" "zer0-${{ matrix.target }}.tar.gz" \
-            > "SHA256SUMS.${{ matrix.target }}"
+            "zer0-gw-${{ matrix.target }}" > "SHA256SUMS.${{ matrix.target }}"
 
       - name: Package (Windows → .zip)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          Compress-Archive -Path "target/${{ matrix.target }}/release/zer0.exe" `
+          Compress-Archive -Path "target/${{ matrix.target }}/release/zer0.exe", `
+            "target/${{ matrix.target }}/release/zer0-gw.exe" `
             -DestinationPath "zer0-${{ matrix.target }}.zip"
           Copy-Item "target/${{ matrix.target }}/release/zer0.exe" "zer0-${{ matrix.target }}.exe"
+          Copy-Item "target/${{ matrix.target }}/release/zer0-gw.exe" "zer0-gw-${{ matrix.target }}.exe"
           $lines = @()
-          foreach ($f in @("zer0-${{ matrix.target }}.exe", "zer0-${{ matrix.target }}.zip")) {
+          foreach ($f in @("zer0-${{ matrix.target }}.exe", "zer0-gw-${{ matrix.target }}.exe", "zer0-${{ matrix.target }}.zip")) {
             $h = (Get-FileHash $f -Algorithm SHA256).Hash.ToLower()
             $lines += "$h  $f"
           }
@@ -70,6 +74,7 @@ jobs:
           # sans extension (Linux/macOS), dont `zer0 update` a besoin.
           files: |
             zer0-${{ matrix.target }}*
+            zer0-gw-${{ matrix.target }}*
             SHA256SUMS.${{ matrix.target }}
           overwrite_files: true
 

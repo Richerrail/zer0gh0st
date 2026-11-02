@@ -296,8 +296,16 @@ impl ApiClient {
             if !resp.status().is_success() {
                 let status = resp.status();
                 let text = resp.text().await.unwrap_or_default();
+                let mut msg = format!("{status}: {}", text.chars().take(200).collect::<String>());
+                if matches!(status.as_u16(), 401 | 403) {
+                    msg.push_str(&format!(
+                        "\n— clé absente ou refusée. Vérifie `zer0 provider list`, que le coffre \
+                         est déverrouillé, et la config : {}",
+                        crate::config::global_path().display()
+                    ));
+                }
                 return Err(ChatError::Setup {
-                    err: anyhow!("{status}: {}", text.chars().take(200).collect::<String>()),
+                    err: anyhow!(msg),
                     status: Some(status.as_u16()),
                 });
             }

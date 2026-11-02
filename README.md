@@ -206,6 +206,8 @@ spécifiques :
 | Garde-fou thermique | inactif (pas de capteurs portables) | inactif |
 | OCR (`read_image`) | langues via `tesseract --list-langs` | idem (Homebrew) |
 | Serveur local | `llama-server.exe` dans le `PATH` ou `ZER0_LLAMA_SERVER` | idem |
+| Config / clés | `%APPDATA%\zer0\` | `~/Library/Application Support/zer0/` |
+| Passerelle | `zer0-gw.exe` (fourni dans le `.zip`) | `zer0-gw` (fourni dans le `.tar.gz`) |
 
 `ZER0_GPU_LAYERS=0` force le CPU, `=N` fixe le nombre de couches. Sans GPU
 détecté, le message de démarrage dit « CPU seul » au lieu de le supposer.
@@ -221,6 +223,11 @@ micro via `pw-record` (PipeWire) → `parecord` (PulseAudio) → `arecord` (ALSA
 
 ### Depuis GitHub
 
+> 🍎 **macOS** : Homebrew est nécessaire pour `sox`, `mpv`, `ffmpeg` et
+> `python@3.12`. S'il n'est pas installé :
+> `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`
+> puis `xcode-select --install` pour les outils de compilation.
+>
 > 💡 **Installation automatique** Linux/macOS (dépendances selon la distro —
 > Debian/Ubuntu/**Kali**/Fedora/Arch/openSUSE) : `./scripts/install.sh`.
 > Sous Windows : `.\scripts\install.cmd`. Les deux installent aussi les
@@ -233,6 +240,38 @@ cd zer0gh0st
 ./scripts/install.sh         # dépendances + Zero-chan + build (ou : cargo build --release)
 ./target/release/zer0        # ou : ./scripts/run.sh
 ```
+
+### macOS
+
+```bash
+# 1. Outils de compilation Apple
+xcode-select --install
+
+# 2. Homebrew (si absent) — puis relancer le shell
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# 3. Dépendances (voix, média, presse-papier)
+brew install sox mpv ffmpeg python@3.12
+
+# 4. Zer0 + passerelle locale
+git clone https://github.com/Richerrail/zer0gh0st.git
+cd zer0gh0st
+./scripts/install.sh          # build avec la feature gateway
+./target/release/zer0         # TUI
+./target/release/zer0-gw      # passerelle locale optionnelle (port 8787)
+```
+
+**Chemins sur macOS** (différents de Linux) :
+
+| Élément | macOS |
+|---|---|
+| Config + clés + coffre | `~/Library/Application Support/zer0/` |
+| Données (conversations, mémoire) | `~/Library/Application Support/zer0gh0st/` |
+| Vault | `~/Library/Application Support/zer0/vault.enc` |
+
+`zer0 provider list` affiche la clé comme présente, mais un **401** signifie
+qu'elle est refusée ou que le coffre n'est pas déverrouillé : le message
+d'erreur indique désormais le chemin exact de la config.
 
 ### Windows
 
@@ -592,7 +631,7 @@ Le projet assume ses limites (principe directeur, §12) :
 - **Rate-limits fournisseurs** : les paliers gratuits (NVIDIA, OpenRouter) renvoient par
   moments des `429` → failover, mais la réponse peut être vide.
 - **Whisper local requis** pour la voix (`faster-whisper`), sinon STT indisponible.
-- **Linux testé** ; macOS/Windows sont *portables* mais non validés (voir [`ECOSYSTEM.md`](./ECOSYSTEM.md) §5).
+- **Linux** : testé au quotidien. **macOS/Windows** : compilés et testés en CI, premières installations réelles en cours — les retours sont utiles.
 
 ---
 
