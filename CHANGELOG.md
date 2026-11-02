@@ -1,3 +1,10 @@
+## v0.7.25 — Marqueurs 👤 / 🖳 (2026-11-02)
+
+- Messages utilisateur préfixés `👤`, réponses IA préfixées `🖳` (y compris
+  pendant le streaming).
+- L'indentation des blocs utilise la **largeur en colonnes** (emoji = 2), pas
+  le nombre de caractères : plus de décalage sur les lignes suivantes.
+
 ## v0.7.24 — Marqueur des réponses (2026-11-02)
 
 - Les réponses de l'agent ne commencent plus par `◕` mais par un bloc `▌`
