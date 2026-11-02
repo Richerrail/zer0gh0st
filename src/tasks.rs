@@ -365,10 +365,11 @@ pub fn next_pending() -> Option<Task> {
     load().into_iter().find(|t| t.status == Status::Pending)
 }
 
-/// Animation des tâches **en cours** : le marqueur `[~]` devient un cycle
-/// `* ¤ o O 0 O o ¤`, pour distinguer « en cours » de « en attente » d'un coup
-/// d'œil, même en monochrome.
-pub const SPINNER: &[char] = &['*', '¤', 'o', 'O', '0', 'O', 'o', '¤'];
+/// Animation des tâches **en cours** : le marqueur `[~]` devient un point
+/// braille qui tourne (`⠋ ⠙ ⠹ …`), pour distinguer « en cours » de « en
+/// attente » d'un coup d'œil. Une seule colonne, lisible en monochrome, et
+/// beaucoup moins « bruit » que l'ancien `* ¤ o O 0 O o ¤`.
+pub const SPINNER: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
 fn mark_for(status: Status, phase: Option<usize>) -> String {
     match (status, phase) {
@@ -425,6 +426,18 @@ mod tests {
         assert_eq!(parse_due(""), None);
         // epoch déjà passé → ramené à maintenant (rappel immédiat)
         assert!(parse_due("1").unwrap() >= now);
+    }
+
+    #[test]
+    fn spinner_frames_are_one_column_wide() {
+        use unicode_width::UnicodeWidthChar;
+        for c in SPINNER {
+            assert_eq!(
+                UnicodeWidthChar::width(*c),
+                Some(1),
+                "frame {c:?} n'occupe pas exactement une colonne"
+            );
+        }
     }
 
     #[test]
