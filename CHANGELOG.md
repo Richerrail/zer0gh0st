@@ -1,8 +1,13 @@
-## Non publié
+## v0.7.21 — Thèmes TUI (2026-11-01)
 
-- **Thèmes de couleurs TUI** : `/theme` ouvre un menu avec aperçus et persiste
-  le choix. Thèmes `ghost` (historique), `noir` et `noir-rouge` ; le fond, le
+Contribution de **darkdober4** (PR #14), rebasée sur 0.7.20.
+
+- **Thèmes de couleurs** : `/theme` ouvre un menu avec aperçus et persiste le
+  choix. Thèmes `ghost` (historique), `noir` et `noir-rouge` ; le fond, le
   banner, les menus, le picker, l'assistant et Zero-chan suivent le thème.
+- `/theme <nom>` applique directement (alias `noir`, `rouge`, `noir_rouge`…).
+- Le champ de clé de l'assistant (0.7.20) est conservé et prend les couleurs
+  du thème actif.
 
 ## v0.7.20 — Assistant : champ de clé visible (2026-11-01)
 
