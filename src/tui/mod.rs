@@ -5467,6 +5467,38 @@ mod tests {
     /// souris était perdue et AUCUN clic n'atteignait plus le TUI (menu
     /// compris). D'où `platform::open()` sans héritage de console et
     /// `platform::restore_mouse_capture()`.
+    /// L'étape « Clé API » affichait un champ vide donc invisible : on ne
+    /// savait pas où coller la clé. Le placeholder doit être rendu.
+    #[test]
+    fn wizard_api_key_step_shows_a_visible_field() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let mut app = test_app();
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        wizard::start(&mut app, &tx, wizard::Step::ApiKey);
+        let mut term = Terminal::new(TestBackend::new(100, 30)).unwrap();
+        term.draw(|f| draw(f, &mut app)).unwrap();
+
+        let buf = term.backend().buffer().clone();
+        let mut text = String::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                text.push_str(buf[(x, y)].symbol());
+            }
+            text.push('\n');
+        }
+        assert!(text.contains("Clé API"), "titre absent: {text}");
+        assert!(
+            text.contains("colle ta clé ici"),
+            "champ de saisie invisible: {text}"
+        );
+        assert!(
+            text.contains("Tape ou colle la clé"),
+            "pied de page inadapté: {text}"
+        );
+    }
+
     #[tokio::test]
     async fn clicks_reach_menu_and_vote_buttons() {
         use crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};

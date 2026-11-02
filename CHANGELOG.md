@@ -1,3 +1,10 @@
+## v0.7.20 — Assistant : champ de clé visible (2026-11-01)
+
+- L'étape « 3/8 — Clé API » n'affichait **rien** quand le champ était vide :
+  on ne savait pas où coller la clé. Placeholder + curseur visibles, libellé
+  `Clé API :`, et pied de page adapté (« Tape ou colle la clé… »).
+- Même correction pour le jeton Telegram.
+
 ## v0.7.19 — Installation macOS : passerelle, Homebrew, chemins (2026-10-31)
 
 - **`zer0-gw` est enfin livré** : la CI release compile avec `--features gateway`
