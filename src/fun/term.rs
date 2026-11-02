@@ -40,7 +40,7 @@ pub struct Term {
 impl Term {
     pub fn new() -> Self {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let mut t = Self {
+        let t = Self {
             cwd,
             input: String::new(),
             history: Vec::new(),
@@ -182,11 +182,17 @@ impl Term {
                     return;
                 }
             };
+            // stdout et stderr sont deux types distincts : on les efface
+            // derrière `dyn AsyncRead` pour les traiter dans la même boucle.
+            let mut pipes: Vec<Box<dyn tokio::io::AsyncRead + Unpin + Send>> = Vec::new();
+            if let Some(o) = child.stdout.take() {
+                pipes.push(Box::new(o));
+            }
+            if let Some(e) = child.stderr.take() {
+                pipes.push(Box::new(e));
+            }
             let mut readers = Vec::new();
-            for pipe in [child.stdout.take(), child.stderr.take()]
-                .into_iter()
-                .flatten()
-            {
+            for pipe in pipes {
                 let lines = lines.clone();
                 readers.push(tokio::spawn(async move {
                     use tokio::io::{AsyncBufReadExt, BufReader};
