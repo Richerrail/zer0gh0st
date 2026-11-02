@@ -2,7 +2,7 @@
 
 > Complément du README ; décrit la structure technique sans la visite guidée.
 
-**Version** : 1.1 · **Projet** : 0.7.22
+**Version** : 1.1 · **Projet** : voir `Cargo.toml` / la release
 
 ---
 
