@@ -12,6 +12,23 @@
 use anyhow::{anyhow, Result};
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Thème de couleurs
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Sélectionne et persiste un thème de la TUI.
+pub fn set_theme(name: &str) -> Result<Vec<String>> {
+    let selected = crate::theme::resolve(name)?;
+    let mut global = crate::config::load_global();
+    global.theme = Some(selected.id.to_string());
+    crate::config::save_global(&global)?;
+    crate::theme::activate(selected.id)?;
+    Ok(vec![format!(
+        "Thème actif : {} ({})",
+        selected.label, selected.id
+    )])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Tâches
 // ─────────────────────────────────────────────────────────────────────────────
 

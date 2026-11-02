@@ -9,10 +9,12 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStderr, Command, Stdio};
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
+
+use crate::theme;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum State {
@@ -417,11 +419,11 @@ impl ZeroChan {
     /// Petit bloc d'état (à droite du banner).
     pub fn draw(&self, f: &mut Frame, area: Rect) {
         let color = match self.state {
-            State::Off => Color::DarkGray,
-            State::Idle => Color::Magenta,
-            State::Listening => Color::LightRed,
-            State::Thinking => Color::Yellow,
-            State::Speaking => Color::LightGreen,
+            State::Off => theme::dim(),
+            State::Idle => theme::accent(),
+            State::Listening => theme::danger(),
+            State::Thinking => theme::warning(),
+            State::Speaking => theme::success(),
         };
         let block = Block::default()
             .borders(Borders::ALL)
@@ -461,7 +463,7 @@ impl ZeroChan {
                 .collect();
             lines.push(Line::from(Span::styled(
                 t,
-                Style::default().fg(Color::Gray),
+                Style::default().fg(theme::dim()),
             )));
         }
         f.render_widget(Paragraph::new(lines), inner);
@@ -506,23 +508,19 @@ pub fn draw_buttons(f: &mut Frame, area: Rect, zc: &ZeroChan) -> (Option<Rect>, 
     if area.width < 13 || area.height < 3 {
         return (None, None);
     }
-    let border = if zc.on {
-        Color::Magenta
-    } else {
-        Color::DarkGray
-    };
+    let border = if zc.on { theme::accent() } else { theme::dim() };
     let dim = Style::default().fg(border);
     let on_color = if zc.on {
-        Color::LightGreen
+        theme::success()
     } else {
-        Color::Gray
+        theme::dim()
     };
     let mic_color = if zc.is_recording() {
-        Color::LightRed
+        theme::danger()
     } else if zc.on {
-        Color::Cyan
+        theme::highlight()
     } else {
-        Color::Gray
+        theme::dim()
     };
     let s0 = format!("{:<3}", if zc.on { "on" } else { "off" });
     let s1 = format!(

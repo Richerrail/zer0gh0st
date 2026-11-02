@@ -3,10 +3,12 @@
 //! argument s'exécute au clic, une commande avec argument s'insère dans la saisie.
 
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
+
+use crate::theme;
 
 pub struct Node {
     pub label: &'static str,
@@ -90,6 +92,7 @@ pub const TREE: &[Node] = &[
     n("free", "/free"),
     n("quota", "/quota"),
     n("vote", "/vote"),
+    n("theme", "/theme"),
     n("update", "/update"),
     g(
         "provider",
@@ -243,7 +246,7 @@ pub fn draw(
             rows.push((
                 Line::from(Span::styled(
                     format!(" {}", node.label),
-                    Style::default().fg(Color::Gray),
+                    Style::default().fg(theme::text()),
                 )),
                 node.run.map(Hit::Cmd),
             ));
@@ -254,7 +257,7 @@ pub fn draw(
                 Line::from(Span::styled(
                     format!(" {marker} {}", node.label),
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(theme::highlight())
                         .add_modifier(Modifier::BOLD),
                 )),
                 Some(Hit::Group(node.label)),
@@ -264,7 +267,7 @@ pub fn draw(
                     rows.push((
                         Line::from(Span::styled(
                             format!("     {}", ch.label),
-                            Style::default().fg(Color::Gray),
+                            Style::default().fg(theme::dim()),
                         )),
                         ch.run.map(Hit::Cmd),
                     ));
@@ -280,11 +283,11 @@ pub fn draw(
     };
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Rgb(110, 95, 140)))
+        .border_style(Style::default().fg(theme::border()))
         .title(Span::styled(
             title,
             Style::default()
-                .fg(Color::Cyan)
+                .fg(theme::highlight())
                 .add_modifier(Modifier::BOLD),
         ));
     let inner = block.inner(area);
@@ -304,7 +307,6 @@ pub fn draw(
     let start = *scroll as usize;
     let visible = rows.iter().skip(start).take(inner.height as usize);
 
-    const SEL_BG: Color = Color::Rgb(72, 33, 75);
     let mut lines: Vec<Line> = Vec::new();
     let mut i = 0usize;
     for (y, (line, hit)) in (inner.y..).zip(visible) {
@@ -320,7 +322,7 @@ pub fn draw(
                 *h,
             ));
             if sel == Some(i) {
-                line = line.style(Style::default().bg(SEL_BG));
+                line = line.style(Style::default().bg(theme::menu_selection_bg()));
             }
             i += 1;
         }
