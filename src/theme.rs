@@ -19,6 +19,8 @@ pub enum BannerStyle {
     Mono,
     /// Dégradé rouge, du bordeaux au rouge vif.
     Red,
+    /// Dégradé acier bleuté (thème castle / DOS).
+    Steel,
 }
 
 /// Palette complète d'un thème.
@@ -48,6 +50,8 @@ pub struct Theme {
     pub warning: Color,
     pub danger: Color,
     pub banner: BannerStyle,
+    /// Pack de sons du thème (`""` = aucun son de thème).
+    pub sound_pack: &'static str,
 }
 
 /// Thèmes disponibles. Le premier est le thème par défaut.
@@ -141,6 +145,7 @@ fn canonical_name(name: &str) -> String {
         "red" | "rouge" | "black-red" | "black-et-red" | "noir-et-rouge" => {
             "noir-rouge".to_string()
         }
+        "wolf" | "wolf3d" | "wolfenstein" | "bleu" | "acier" | "steel" => "castle".to_string(),
         other => other.to_string(),
     }
 }
@@ -224,6 +229,15 @@ pub fn danger() -> Color {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn castle_theme_is_selectable_and_has_its_pack() {
+        let t = resolve("castle").expect("castle");
+        assert_eq!(t.id, "castle");
+        assert_eq!(t.sound_pack, "castle");
+        assert_eq!(resolve("wolf3d").expect("alias").id, "castle");
+        assert_eq!(t.banner, BannerStyle::Steel);
+    }
+
     use super::*;
 
     #[test]

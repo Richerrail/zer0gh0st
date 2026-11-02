@@ -1,3 +1,15 @@
+## v0.7.22 — Thème `castle` + sons (2026-11-02)
+
+- **Thème `castle`** (Wolfenstein 3D) : acier bleu, rouge sang, banner acier,
+  sélection rouge pleine ; alias `wolf`, `wolf3d`, `acier`.
+- **Sons d'interface** : pack `castle` embarqué (8 WAV 16 bits, originaux
+  CC0, voir `assets/sfx/`), `tick`, `select`, `theme_castle`, `panel_open`,
+  `toggle_on/off`, `error`, `done`. **Désactivés par défaut** (`/sound on`).
+- Chaque thème déclare son pack de sons (`sound_pack`) ; les thèmes sans pack
+  restent silencieux. Aperçu sonore au survol du menu `/theme`.
+- Aucun son si `sound = false`, en CLI, ou sans lecteur audio (pw-play,
+  paplay, aplay, afplay, PowerShell).
+
 ## v0.7.21 — Thèmes TUI (2026-11-01)
 
 Contribution de **darkdober4** (PR #14), rebasée sur 0.7.20.
