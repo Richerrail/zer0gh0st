@@ -684,10 +684,37 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
             }
         }
         Step::ApiKey | Step::TelegramToken => {
-            lines.push(Line::from(Span::styled(
-                format!("  {}", mask(&app.input, true)),
-                Style::default().fg(theme::CODE),
-            )));
+            let label = if w.step == Step::ApiKey {
+                "Clé API : "
+            } else {
+                "Jeton Telegram : "
+            };
+            let mut spans = vec![Span::styled(
+                format!("  {label}"),
+                Style::default()
+                    .fg(theme::ACCENT)
+                    .add_modifier(Modifier::BOLD),
+            )];
+            if app.input.is_empty() {
+                // Champ vide = invisible sans placeholder : c'était le bug.
+                spans.push(Span::styled(
+                    "▏",
+                    Style::default()
+                        .fg(theme::ACCENT)
+                        .add_modifier(Modifier::SLOW_BLINK),
+                ));
+                spans.push(Span::styled(
+                    " colle ta clé ici, puis Entrée",
+                    Style::default().fg(theme::DIM),
+                ));
+            } else {
+                spans.push(Span::styled(
+                    mask(&app.input, true),
+                    Style::default().fg(theme::CODE),
+                ));
+                spans.push(Span::styled("▏", Style::default().fg(theme::ACCENT)));
+            }
+            lines.push(Line::from(spans));
         }
         Step::Commands => lines.extend(command_page(w.page, inner.width as usize)),
         Step::Done => {}
@@ -706,7 +733,14 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
     let body = Paragraph::new(lines).wrap(Wrap { trim: false });
     f.render_widget(body, inner);
 
-    let footer = " ↑↓ choisir · Entrée valider · Échap reprendre plus tard ";
+    let footer = match w.step {
+        Step::ApiKey => " Tape ou colle la clé · Entrée valider · Échap plus tard ",
+        Step::TelegramToken => " Tape ou colle le jeton · Entrée valider · Échap plus tard ",
+        Step::Model => " ↑↓ choisir · taper = filtrer · Entrée valider · Échap plus tard ",
+        Step::Commands => " Entrée : page suivante · Échap : plus tard ",
+        Step::Done => " Entrée pour terminer ",
+        _ => " ↑↓ choisir · Entrée valider · Échap reprendre plus tard ",
+    };
     let farea = Rect {
         x: area.x,
         y: area.y + area.height.saturating_sub(1),
