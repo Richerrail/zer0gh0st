@@ -47,6 +47,7 @@ const HELP_SHORT: &str =
   /free               modèles gratuits (menu)
   /theme              thèmes de couleurs (menu)
   /sound on|off       sons d'interface (défaut : off)
+  /0cl                shell dans le panneau latéral (zer0CL)
   /role               rôles ; /role set <rôle> ouvre un menu
   /route              chaîne de bascule si un modèle échoue
   /think              raisonnement on/off
@@ -149,8 +150,12 @@ pub struct App {
     pub top: Option<crate::fun::top::Top>,
     /// Mod `0file` (explorateur) : créé à la demande.
     pub file: Option<crate::fun::file::FileExplorer>,
+    /// Mod `zer0CL` (shell) : créé à la demande.
+    pub term: Option<crate::fun::term::Term>,
     /// Zone écran du panneau 0file (molette / clics).
     pub file_rect: Rect,
+    /// Zone écran du panneau zer0CL (molette).
+    pub term_rect: Rect,
     /// Whether the side panel has keyboard focus.
     pub focus_panel: bool,
     /// Auto-inject relevant knowledge into the prompt.
@@ -359,6 +364,8 @@ pub async fn run(
         top: None,
         file: None,
         file_rect: Rect::default(),
+        term: None,
+        term_rect: Rect::default(),
         focus_panel: false,
         kb_auto: true,
         history: Vec::new(),
@@ -932,6 +939,14 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
             app.side_mode = Some(crate::fun::Mode::BinTime);
             app.focus_panel = false;
         }
+        "/0cl" => {
+            crate::sound::event(crate::sound::Event::Panel);
+            if app.term.is_none() {
+                app.term = Some(crate::fun::term::Term::new());
+            }
+            app.side_mode = Some(crate::fun::Mode::Term);
+            app.focus_panel = true;
+        }
         "/0file" => {
             crate::sound::event(crate::sound::Event::Panel);
             let arg = args.join(" ");
@@ -1312,6 +1327,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
              /update [check]            met à jour le binaire (Releases GitHub)\n\
              /theme [nom]              menu des thèmes (castle, noir, noir-rouge)\n\
              /sound [on|off]           sons d'interface (défaut : off)\n\
+             /0cl                      shell dans le panneau (zer0CL)\n\
              Ctrl+O / clic droit        déplier CE bloc de sortie d'outil\n\
              /model use <id>            change de modèle\n\
              /models [free]             liste les modèles du provider\n\
@@ -3625,6 +3641,12 @@ fn handle_input(ev: Event, app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
                     }
                     return;
                 }
+                if app.side_mode == Some(crate::fun::Mode::Term) && inside(Some(app.term_rect)) {
+                    if let Some(t) = &mut app.term {
+                        t.scroll_down(3);
+                    }
+                    return;
+                }
                 if let Some(p) = app.picker.as_mut() {
                     p.move_sel(1);
                 } else if inside(Some(app.menu_rect)) {
@@ -3639,6 +3661,12 @@ fn handle_input(ev: Event, app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
                 if app.side_mode == Some(crate::fun::Mode::File) && inside(Some(app.file_rect)) {
                     if let Some(fe) = &mut app.file {
                         fe.move_up();
+                    }
+                    return;
+                }
+                if app.side_mode == Some(crate::fun::Mode::Term) && inside(Some(app.term_rect)) {
+                    if let Some(t) = &mut app.term {
+                        t.scroll_up(3);
                     }
                     return;
                 }
@@ -3712,6 +3740,12 @@ fn handle_input(ev: Event, app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
                         app.mode = crate::fun::Mode::Chat;
                     }
                 }
+                crate::fun::Mode::Term => {
+                    if matches!(k.code, KeyCode::Esc) {
+                        app.side_mode = None;
+                        app.mode = crate::fun::Mode::Chat;
+                    }
+                }
                 crate::fun::Mode::Pong => match k.code {
                     KeyCode::Esc | KeyCode::Char('q') => app.mode = crate::fun::Mode::Chat,
                     KeyCode::Char('r') => app.pong.restart(),
@@ -3781,15 +3815,65 @@ fn handle_input(ev: Event, app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
         if app.side_mode.is_some() && app.focus_panel {
             let is_radio = app.side_mode == Some(crate::fun::Mode::Radio);
             let is_file = app.side_mode == Some(crate::fun::Mode::File);
+            let is_term = app.side_mode == Some(crate::fun::Mode::Term);
             match k.code {
                 KeyCode::Tab => {
                     app.focus_panel = false;
                     return;
                 }
-                KeyCode::Esc | KeyCode::Char('q') => {
+                KeyCode::Esc => {
                     app.radio.stop();
                     app.side_mode = None;
                     app.focus_panel = false;
+                    return;
+                }
+                // `q` ferme les panneaux sauf le shell, où c'est une lettre.
+                KeyCode::Char('q') if !is_term => {
+                    app.radio.stop();
+                    app.side_mode = None;
+                    app.focus_panel = false;
+                    return;
+                }
+                KeyCode::Char(c) if is_term => {
+                    if let Some(t) = &mut app.term {
+                        t.push_char(c);
+                    }
+                    return;
+                }
+                KeyCode::Backspace if is_term => {
+                    if let Some(t) = &mut app.term {
+                        t.backspace();
+                    }
+                    return;
+                }
+                KeyCode::Enter if is_term => {
+                    if let Some(t) = &mut app.term {
+                        t.run();
+                    }
+                    return;
+                }
+                KeyCode::Up if is_term => {
+                    if let Some(t) = &mut app.term {
+                        t.history_prev();
+                    }
+                    return;
+                }
+                KeyCode::Down if is_term => {
+                    if let Some(t) = &mut app.term {
+                        t.history_next();
+                    }
+                    return;
+                }
+                KeyCode::PageUp if is_term => {
+                    if let Some(t) = &mut app.term {
+                        t.scroll_up(10);
+                    }
+                    return;
+                }
+                KeyCode::PageDown if is_term => {
+                    if let Some(t) = &mut app.term {
+                        t.scroll_down(10);
+                    }
                     return;
                 }
                 KeyCode::Up | KeyCode::Char('k') if is_file => {
@@ -4218,7 +4302,8 @@ fn draw(f: &mut Frame, app: &mut App) {
         crate::fun::Mode::Radio
         | crate::fun::Mode::BinTime
         | crate::fun::Mode::Top
-        | crate::fun::Mode::File => {
+        | crate::fun::Mode::File
+        | crate::fun::Mode::Term => {
             let mode = app.mode;
             draw_panel(f, area, app, mode);
             return;
@@ -4301,6 +4386,12 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App, mode: crate::fun::Mode) 
             app.file_rect = area;
             if let Some(fe) = &mut app.file {
                 fe.draw(f, area);
+            }
+        }
+        crate::fun::Mode::Term => {
+            app.term_rect = area;
+            if let Some(t) = &mut app.term {
+                t.draw(f, area);
             }
         }
         _ => {}
@@ -5584,6 +5675,8 @@ mod tests {
             top: None,
             file: None,
             file_rect: Rect::default(),
+            term: None,
+            term_rect: Rect::default(),
             focus_panel: false,
             kb_auto: false,
             history: vec![],

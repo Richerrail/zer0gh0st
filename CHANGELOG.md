@@ -1,3 +1,13 @@
+## v0.7.26 — Mod `zer0CL` (shell latéral) (2026-11-02)
+
+- `/0cl` ouvre un **shell dans le panneau latéral** (mods), comme `0file`/`t0p`.
+- Commandes tapées par l'utilisateur uniquement (le modèle n'y a pas accès),
+  exécutées via le shell de la plateforme (`platform::shell_command`) :
+  sous Windows, PowerShell si lancé depuis PowerShell, bash depuis Git Bash.
+- Sortie en direct (stdout+stderr), historique `↑↓`, `cd`, `clear`, molette et
+  `PageUp`/`PageDown`, `Tab` pour rendre le focus, `Esc` pour fermer.
+- Aucune dépendance nouvelle.
+
 ## v0.7.25 — Marqueurs 👤 / 🖳 (2026-11-02)
 
 - Messages utilisateur préfixés `👤`, réponses IA préfixées `🖳` (y compris

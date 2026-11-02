@@ -193,6 +193,7 @@ par `ZER0_EXEC_TIMEOUT` ou par appel (`timeout_secs`).
 | **Explorateur** | mod `0file` dans le panneau latéral : dossiers/fichiers, navigation, tailles, `c` copie le chemin absolu, `.` cachés. Lecture seule |
 | **Thèmes** | `/theme` : `ghost` (historique), `noir`, `noir-rouge`, **`castle`** (Wolfenstein 3D : acier bleu, rouge sang, banner acier) ; persistant |
 | **Sons** | packs WAV **embarqués** (CC0, synthétisés) : tick, switch, porte, erreur, fin de tour ; **désactivés par défaut**, `/sound on` |
+| **zer0CL** | shell dans le panneau latéral (`/0cl`) : exécute des commandes **tapées par toi**, sortie en direct, historique ↑↓, `cd`, `clear`. Aucune dépendance, aucun accès du modèle |
 | **Moniteur** | mod `t0p` dans le panneau latéral (comme radio/bintime) : CPU (global + cœurs), RAM/swap, charge, températures, top 8 processus. Aussi `zer0 t0p [--watch]` en CLI |
 | **Vote** | **👍 / 👎 en bas à droite de l'écran principal** (cliquables) : le pouce haut = **une star GitHub** sur [Richerrail/zer0gh0st](https://github.com/Richerrail/zer0gh0st), le bas retire la star. `/vote` ou `zer0 vote up\|down\|status\|login\|logout`. Compteur réel lu sur l'API GitHub. Connexion GitHub par device flow OAuth (`vote login`) → votes ensuite automatiques. |
 | **Divers** | `/vault`, `/pdf`, personas `/whoami`, recherche `/search` |
@@ -382,6 +383,18 @@ Réglages : tous les cœurs détectés (génération), moitié en préfill, cont
 `ZER0_THREADS_BATCH`, `ZER0_CTX`, `ZER0_GPU_LAYERS`, `ZER0_TEMP_STOP`.
 
 `scripts/serve.sh` reste disponible pour lancer le serveur à la main.
+
+### zer0CL — un shell dans le panneau
+
+```bash
+/0cl            # ouvre le shell (panneau latéral, focus direct)
+```
+
+- les commandes sont **tapées par toi** : le modèle ne peut pas s'en servir ;
+- utilise le shell de la plateforme (`ZER0_SHELL` pour forcer) : sous Windows,
+  PowerShell si Zer0 a été lancé depuis PowerShell, bash depuis Git Bash ;
+- `↑↓` historique, `cd`, `clear`, molette/`PageUp`/`PageDown` pour la sortie,
+  `Tab` rend le focus au chat, `Esc` ferme.
 
 ### Thèmes et sons
 
