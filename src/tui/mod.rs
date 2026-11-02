@@ -4650,7 +4650,7 @@ fn draw_chat(f: &mut Frame, area: Rect, app: &mut App) {
         } else {
             app.streaming_text.clone()
         };
-        push_block(&mut lines, " ◕ ", theme::accent(), &text, w, None, false);
+        push_block(&mut lines, " ▌ ", theme::accent(), &text, w, None, false);
     }
 
     let inner_h = area.height as usize;
@@ -4760,7 +4760,7 @@ fn push_message(lines: &mut Vec<Line>, role: &str, text: &str, w: usize) {
             Some(theme::panel()),
             false,
         ),
-        "assistant" => push_block(lines, " ◕ ", theme::accent(), text, w, None, false),
+        "assistant" => push_block(lines, " ▌ ", theme::accent(), text, w, None, false),
         "tool" => push_block(lines, " ⚙ ", theme::tool(), text, w, None, true),
         "system" => push_block(lines, " ⚙ ", theme::dim(), text, w, None, true),
         _ => push_block(lines, " · ", theme::dim(), text, w, None, true),
