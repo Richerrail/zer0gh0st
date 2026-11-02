@@ -1,3 +1,9 @@
+## v0.7.23 — Spinner tâches (2026-11-02)
+
+- Le marqueur « en cours » n'est plus `* ¤ o O 0 O o ¤` : spinner braille
+  `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`, une colonne, lisible en monochrome.
+- Test : chaque frame occupe exactement une colonne (pas de décalage).
+
 ## v0.7.22 — Thème `castle` + sons (2026-11-02)
 
 - **Thème `castle`** (Wolfenstein 3D) : acier bleu, rouge sang, banner acier,
