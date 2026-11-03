@@ -10,7 +10,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -34,6 +34,8 @@ pub struct Term {
     hist_pos: Option<usize>,
     lines: Arc<Mutex<Vec<String>>>,
     running: Arc<AtomicBool>,
+    /// PID du shell en cours (0 = aucun). Tué à la fermeture du panneau.
+    pid: Arc<AtomicU32>,
     scroll: usize,
 }
 
@@ -47,15 +49,22 @@ impl Term {
             hist_pos: None,
             lines: Arc::new(Mutex::new(Vec::new())),
             running: Arc::new(AtomicBool::new(false)),
+            pid: Arc::new(AtomicU32::new(0)),
             scroll: 0,
         };
         let shell = crate::platform::shell_label();
-        t.push_line(format!("zer0CL — shell : {shell}"));
-        t.push_line("Tape une commande, Entrée pour l'exécuter. Esc ferme.".to_string());
+        t.push_line(format!("zer0CL — mini-console (shell : {shell})"));
+        t.push_line("Pas un terminal : une commande à la fois, stdin fermé —".to_string());
+        t.push_line(
+            "  vim/htop/less et les mots de passe interactifs ne marchent pas.".to_string(),
+        );
+        t.push_line("cd/clear gérés par le panneau ; export/alias non persistants.".to_string());
+        t.push_line("ANSI filtré · Esc ferme et tue la commande en cours.".to_string());
         t
     }
 
     fn push_line(&self, line: String) {
+        let line = strip_ansi(&line);
         let line = if line.chars().count() > MAX_LINE_CHARS {
             line.chars().take(MAX_LINE_CHARS).collect::<String>() + "…"
         } else {
@@ -162,6 +171,8 @@ impl Term {
             return;
         }
 
+        // Une seule commande à la fois : la précédente est tuée.
+        self.stop();
         self.push_line(format!("{}{}", self.prompt(), line));
         self.scroll = 0;
         self.running.store(true, Ordering::Relaxed);
@@ -173,15 +184,21 @@ impl Term {
             .stderr(Stdio::piped());
         let lines = self.lines.clone();
         let running = self.running.clone();
+        let pid = self.pid.clone();
         tokio::spawn(async move {
             let mut child = match cmd.spawn() {
                 Ok(c) => c,
                 Err(e) => {
                     push_to(&lines, format!("échec du lancement : {e}"));
+                    pid.store(0, Ordering::Relaxed);
                     running.store(false, Ordering::Relaxed);
                     return;
                 }
             };
+            // Mémorise le PID pour pouvoir le tuer à la fermeture.
+            if let Some(id) = child.id() {
+                pid.store(id, Ordering::Relaxed);
+            }
             // stdout et stderr sont deux types distincts : on les efface
             // derrière `dyn AsyncRead` pour les traiter dans la même boucle.
             let mut pipes: Vec<Box<dyn tokio::io::AsyncRead + Unpin + Send>> = Vec::new();
@@ -212,8 +229,31 @@ impl Term {
                 .map(|c| format!("[exit {c}]"))
                 .unwrap_or_else(|| "[terminé]".to_string());
             push_to(&lines, code);
+            pid.store(0, Ordering::Relaxed);
             running.store(false, Ordering::Relaxed);
         });
+    }
+
+    /// Tue le processus en cours (0 = rien à faire).
+    pub fn stop(&self) {
+        let pid = self.pid.swap(0, Ordering::Relaxed);
+        if pid == 0 {
+            return;
+        }
+        #[cfg(unix)]
+        {
+            let _ = std::process::Command::new("kill")
+                .args(["-TERM", &pid.to_string()])
+                .status();
+        }
+        #[cfg(windows)]
+        {
+            let _ = std::process::Command::new("taskkill")
+                .args(["/PID", &pid.to_string(), "/T", "/F"])
+                .status();
+        }
+        self.running.store(false, Ordering::Relaxed);
+        self.push_line(format!("⏹ processus {pid} arrêté"));
     }
 
     pub fn draw(&mut self, f: &mut Frame, area: Rect) {
@@ -294,6 +334,56 @@ impl Term {
     }
 }
 
+impl Drop for Term {
+    fn drop(&mut self) {
+        // Quitter la TUI ne doit pas laisser un build tourner en fond.
+        self.stop();
+    }
+}
+
+/// Retire les séquences ANSI (couleurs, curseur) : le panneau est du texte.
+pub fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\x1b' {
+            out.push(c);
+            continue;
+        }
+        match chars.peek().copied() {
+            Some('[') => {
+                chars.next();
+                // CSI : jusqu'au byte final 0x40..=0x7e
+                for n in chars.by_ref() {
+                    if ('@'..='~').contains(&n) {
+                        break;
+                    }
+                }
+            }
+            Some(']') => {
+                chars.next();
+                // OSC : jusqu'à BEL ou ST (ESC \)
+                for n in chars.by_ref() {
+                    if n == '\x07' {
+                        break;
+                    }
+                    if n == '\x1b' {
+                        if chars.peek() == Some(&'\\') {
+                            chars.next();
+                        }
+                        break;
+                    }
+                }
+            }
+            Some(_) => {
+                chars.next();
+            }
+            None => {}
+        }
+    }
+    out
+}
+
 impl Default for Term {
     fn default() -> Self {
         Self::new()
@@ -301,6 +391,7 @@ impl Default for Term {
 }
 
 fn push_to(lines: &Arc<Mutex<Vec<String>>>, line: String) {
+    let line = strip_ansi(&line);
     let line = if line.chars().count() > MAX_LINE_CHARS {
         line.chars().take(MAX_LINE_CHARS).collect::<String>() + "…"
     } else {
@@ -353,6 +444,13 @@ mod tests {
         t.run();
         assert_eq!(t.cwd, std::env::temp_dir().canonicalize().unwrap());
         assert!(t.input.is_empty());
+    }
+
+    #[test]
+    fn strip_ansi_removes_colors_and_osc() {
+        assert_eq!(strip_ansi("\x1b[1;32mok\x1b[0m"), "ok");
+        assert_eq!(strip_ansi("\x1b]0;titre\x07texte"), "texte");
+        assert_eq!(strip_ansi("sans ansi"), "sans ansi");
     }
 
     #[test]

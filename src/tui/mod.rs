@@ -930,6 +930,9 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
         "/kb" => handle_kb(app, &args, ui_tx),
         "/apis" => handle_apis(app, &args),
         "/radio" => {
+            if let Some(t) = &app.term {
+                t.stop();
+            }
             crate::sound::event(crate::sound::Event::Panel);
             let arg = args.join(" ");
             if !arg.trim().is_empty() {
@@ -942,6 +945,9 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
             app.focus_panel = false;
         }
         "/bintime" => {
+            if let Some(t) = &app.term {
+                t.stop();
+            }
             crate::sound::event(crate::sound::Event::Panel);
             app.bintime = crate::fun::bintime::BinTime::new();
             app.side_mode = Some(crate::fun::Mode::BinTime);
@@ -956,6 +962,9 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
             app.focus_panel = true;
         }
         "/0file" => {
+            if let Some(t) = &app.term {
+                t.stop();
+            }
             crate::sound::event(crate::sound::Event::Panel);
             let arg = args.join(" ");
             app.file = Some(crate::fun::file::FileExplorer::open(&arg));
@@ -964,6 +973,9 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
         }
         "/panel" => {
             app.radio.stop();
+            if let Some(t) = &app.term {
+                t.stop();
+            }
             app.side_mode = None;
             app.focus_panel = false;
         }
@@ -1256,6 +1268,9 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
             }
         }
         "/t0p" => {
+            if let Some(t) = &app.term {
+                t.stop();
+            }
             crate::sound::event(crate::sound::Event::Panel);
             // Même panneau latéral que /radio et /bintime.
             if app.top.is_none() {
@@ -3838,6 +3853,9 @@ fn handle_input(ev: Event, app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
                 }
                 KeyCode::Esc => {
                     app.radio.stop();
+                    if let Some(t) = &app.term {
+                        t.stop();
+                    }
                     app.side_mode = None;
                     app.focus_panel = false;
                     return;
