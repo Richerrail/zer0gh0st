@@ -1,3 +1,13 @@
+## v0.7.27 — Menu repliable (rail `◀☰`) (2026-11-03)
+
+- Le menu n'occupe plus une colonne en permanence : replié, il devient un
+  **rail de 2 colonnes** (`◀☰`, rappel `F2`) collé aux mods ; déplié, il prend
+  sa place et reste collé au panneau.
+- `F2`, un clic sur le rail ou `/menu` ouvrent le menu ; `Esc`/`F2` le ferment.
+- Les panneaux de mods s'élargissent quand le menu est replié (56 col → 44 col
+  quand il est ouvert).
+- Couleurs du rail et du menu issues du **thème actif** (castle, noir, ghost…).
+
 ## v0.7.26 — Mod `zer0CL` (shell latéral) (2026-11-02)
 
 - `/0cl` ouvre un **shell dans le panneau latéral** (mods), comme `0file`/`t0p`.

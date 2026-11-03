@@ -196,6 +196,10 @@ pub struct App {
     pub menu_rect: Rect,
     /// Navigation clavier du menu (F2) : focus + index sélectionné.
     pub menu_focus: bool,
+    /// Menu déroulant ouvert ? (sinon : rail `◀☰` à droite)
+    pub menu_visible: bool,
+    /// Zone écran du rail (clic pour ouvrir le menu).
+    pub rail_rect: Rect,
     pub menu_sel: usize,
     /// Dernier événement clavier traité (pour déduplication sur Windows).
     pub last_key_event: Option<(KeyCode, KeyModifiers, std::time::Instant)>,
@@ -390,6 +394,8 @@ pub async fn run(
         menu_scroll: 0,
         menu_rect: Rect::default(),
         menu_focus: false,
+        menu_visible: false,
+        rail_rect: Rect::default(),
         menu_sel: 0,
         last_key_event: None,
         thinking: options.thinking || g_initial.thinking,
@@ -967,6 +973,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
         "/ctx" => handle_ctx(app, &args),
         "/telegram" | "/tg" => handle_telegram(app, &args, ui_tx),
         "/menu" => {
+            app.menu_visible = true;
             app.menu_focus = true;
             app.menu_sel = 0;
             app.messages.push(ChatMessage::notice(
@@ -3575,6 +3582,11 @@ fn handle_input(ev: Event, app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
         };
         match me.kind {
             MouseEventKind::Down(MouseButton::Left) => {
+                if inside(Some(app.rail_rect)) {
+                    app.menu_visible = true;
+                    app.menu_focus = true;
+                    return;
+                }
                 // Le menu passe EN PREMIER : ses zones sont des lignes entières
                 // et ne croisent pas les pouces (bas-droite). Le vote est
                 // ensuite vérifié, avant toute sélection de texte.
@@ -3804,6 +3816,7 @@ fn handle_input(ev: Event, app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
                 }
                 KeyCode::Esc | KeyCode::F(2) => {
                     app.menu_focus = false;
+                    app.menu_visible = false;
                     return;
                 }
                 // Toute autre touche : on sort du menu et on continue dessous.
@@ -4066,7 +4079,8 @@ fn handle_input(ev: Event, app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
                 }
             }
             KeyCode::F(2) => {
-                app.menu_focus = true;
+                app.menu_visible = !app.menu_visible;
+                app.menu_focus = app.menu_visible;
                 app.menu_sel = app.menu_sel.min(app.menu_hits.len().saturating_sub(1));
             }
             KeyCode::F(3) => {
@@ -4311,27 +4325,50 @@ fn draw(f: &mut Frame, app: &mut App) {
         crate::fun::Mode::Chat => {}
     }
 
-    // Panneau latéral : le mod s'ouvre à droite du menu de commandes.
+    // Rail `◀☰` (menu replié) ou menu déroulant, puis panneau de mod éventuel.
+    const RAIL_W: u16 = 4;
+    const MENU_W: u16 = 28;
     if let Some(sm) = app.side_mode {
-        if area.width >= 130 {
+        let panel_w = if app.menu_visible { 44 } else { 56 };
+        if area.width >= 120 {
+            let mut cons = vec![Constraint::Min(50)];
+            cons.push(Constraint::Length(if app.menu_visible {
+                MENU_W
+            } else {
+                RAIL_W
+            }));
+            cons.push(Constraint::Length(panel_w));
             let cols = Layout::default()
                 .direction(Direction::Horizontal)
-                .constraints([Constraint::Min(90), Constraint::Length(40)])
+                .constraints(cons)
                 .split(area);
-            draw_agent(f, cols[0], app, true);
-            draw_panel(f, cols[1], app, sm);
-        } else if area.width >= 110 {
-            let cols = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Min(70), Constraint::Length(40)])
-                .split(area);
-            draw_agent(f, cols[0], app, false);
-            draw_panel(f, cols[1], app, sm);
+            draw_agent(f, cols[0], app);
+            if app.menu_visible {
+                draw_menu_column(f, cols[1], app);
+            } else {
+                draw_rail(f, cols[1], app);
+            }
+            draw_panel(f, cols[2], app, sm);
         } else {
             draw_panel(f, area, app, sm);
         }
+    } else if area.width >= 80 {
+        let right = if app.menu_visible { MENU_W } else { RAIL_W };
+        let cols = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(50), Constraint::Length(right)])
+            .split(area);
+        draw_agent(f, cols[0], app);
+        if app.menu_visible {
+            draw_menu_column(f, cols[1], app);
+        } else {
+            draw_rail(f, cols[1], app);
+        }
     } else {
-        draw_agent(f, area, app, true);
+        draw_agent(f, area, app);
+        app.menu_rect = Rect::default();
+        app.menu_hits.clear();
+        app.rail_rect = Rect::default();
     }
     draw_chats_popup(f, area, app);
     finalize_buffer(f, app);
@@ -4489,7 +4526,47 @@ fn draw_chats_popup(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(Paragraph::new(lines).block(block), rect);
 }
 
-fn draw_agent(f: &mut Frame, area: Rect, app: &mut App, show_menu: bool) {
+/// Colonne du menu déroulant (état ouvert).
+fn draw_menu_column(f: &mut Frame, area: Rect, app: &mut App) {
+    app.menu_rect = area;
+    app.rail_rect = Rect::default();
+    let open = app.menu_open;
+    let sel = if app.menu_focus {
+        Some(app.menu_sel)
+    } else {
+        None
+    };
+    menu::draw(f, area, open, &mut app.menu_scroll, &mut app.menu_hits, sel);
+}
+
+/// Rail replié : un seul bouton `◀☰` (thème actif) + rappel `F2`.
+fn draw_rail(f: &mut Frame, area: Rect, app: &mut App) {
+    app.rail_rect = area;
+    app.menu_rect = Rect::default();
+    app.menu_hits.clear();
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme::border()))
+        .style(Style::default().bg(theme::panel()));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    let mut lines = vec![Line::from(Span::styled(
+        "◀☰",
+        Style::default()
+            .fg(theme::accent())
+            .add_modifier(Modifier::BOLD),
+    ))];
+    if inner.height > 4 {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "F2",
+            Style::default().fg(theme::dim()),
+        )));
+    }
+    f.render_widget(Paragraph::new(lines).alignment(Alignment::Center), inner);
+}
+
+fn draw_agent(f: &mut Frame, area: Rect, app: &mut App) {
     let input_h = input_height(app, area.width);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -4521,33 +4598,7 @@ fn draw_agent(f: &mut Frame, area: Rect, app: &mut App, show_menu: bool) {
     }
 
     draw_location(f, chunks[2]);
-    let body = chunks[3];
-    if show_menu && body.width >= 80 {
-        let cols = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Min(40), Constraint::Length(30)])
-            .split(body);
-        draw_chat(f, cols[0], app);
-        app.menu_rect = cols[1];
-        let open = app.menu_open;
-        let sel = if app.menu_focus {
-            Some(app.menu_sel)
-        } else {
-            None
-        };
-        menu::draw(
-            f,
-            cols[1],
-            open,
-            &mut app.menu_scroll,
-            &mut app.menu_hits,
-            sel,
-        );
-    } else {
-        app.menu_hits.clear();
-        app.menu_rect = Rect::default();
-        draw_chat(f, body, app);
-    }
+    draw_chat(f, chunks[3], app);
 
     // Barre de saisie + boutons 0chan / micro à droite (visibles dès 60 colonnes).
     if chunks[4].width >= 60 {
@@ -5701,6 +5752,8 @@ mod tests {
             menu_scroll: 0,
             menu_rect: Rect::default(),
             menu_focus: false,
+            menu_visible: true,
+            rail_rect: Rect::default(),
             menu_sel: 0,
             last_key_event: None,
         }
@@ -5764,6 +5817,24 @@ mod tests {
             !app.menu_hits.is_empty(),
             "le menu n'expose aucune zone cliquable"
         );
+
+        // 1bis) Menu replié : le clic sur le rail `◀☰` l'ouvre.
+        app.menu_visible = false;
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        assert!(!app.rail_rect.width == 0, "rail non dessiné");
+        let rr = app.rail_rect;
+        handle_input(
+            Event::Mouse(MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: rr.x + 1,
+                row: rr.y + 1,
+                modifiers: KeyModifiers::NONE,
+            }),
+            &mut app,
+            &tx,
+        );
+        assert!(app.menu_visible, "le clic sur ◀☰ n'ouvre pas le menu");
+        term.draw(|f| draw(f, &mut app)).unwrap();
 
         // 2) Un clic sur une entrée du menu est routé vers le menu.
         let (r, _hit) = app.menu_hits[0];

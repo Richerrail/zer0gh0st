@@ -161,6 +161,7 @@ Détail complet du modèle de menace : [`SAFETY.md`](./SAFETY.md).
 
 | Domaine | Détail |
 |---|---|
+| **Menu repliable** | rail `◀☰` (2 col) quand le menu est fermé ; `F2`/clic ouvre le menu déroulant **collé aux mods**, qui prennent la place libérée. Couleurs du thème actif |
 | **TUI** | banner `ZER0│GH0ST` (`ghost in the shell`) animé, statut, **palette `/` filtrante**, **sélection navigable** `/model` et `/provider`, **molette** (conversation / panneaux), raisonnement affiché, **panneau latéral**, **saisie style Pi**, **historique ↑↓** |
 | **Boucle d'agent** | appels d'outils, streaming SSE, max 8 itérations, budget 24 outils/tour, détection de boucle |
 | **Containment** | réponse coupée à 1 Mo, timeout d'inactivité 240 s, `/stop` |
