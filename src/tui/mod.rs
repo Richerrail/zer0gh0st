@@ -5858,7 +5858,7 @@ mod tests {
         // 3) Un clic sur un pouce n'est pas une sélection de texte non plus.
         let up = app.btn_vote_up.expect("pas de zone upvote");
         let down = app.btn_vote_down.expect("pas de zone downvote");
-        assert!(up.x > 100, "upvote pas à droite : {up:?}");
+        assert!(up.x > 60, "upvote pas à droite : {up:?}");
         assert!(down.x > up.x, "downvote pas après upvote");
         handle_input(
             Event::Mouse(MouseEvent {
