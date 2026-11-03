@@ -5526,7 +5526,7 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &mut App) {
         Style::default().fg(Color::Black).bg(theme::success())
     } else {
         // Désarmé : clignote jaune/rouge (~2 Hz) pour que ça se voie.
-        let warn = (app.anim_phase / 30) % 2 == 0;
+        let warn = (app.anim_phase / 30).is_multiple_of(2);
         Style::default().fg(Color::Black).bg(if warn {
             theme::warning()
         } else {
