@@ -577,7 +577,9 @@ async fn event_loop(
                 || app.mode != crate::fun::Mode::Chat
                 || app.side_mode.is_some()
                 || app.zc.on
-                || app.task_view.is_some() =>
+                || app.task_view.is_some()
+                // Clignotement de l'avertissement F4 (shell désarmé).
+                || !app.code_exec =>
             {
                 app.anim_phase = app.anim_phase.wrapping_add(6);
                 // Animation des tâches en cours (un pas toutes les ~480 ms).
@@ -5523,7 +5525,13 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &mut App) {
     let exec = if app.code_exec {
         Style::default().fg(Color::Black).bg(theme::success())
     } else {
-        txt
+        // Désarmé : clignote jaune/rouge (~2 Hz) pour que ça se voie.
+        let warn = (app.anim_phase / 30) % 2 == 0;
+        Style::default().fg(Color::Black).bg(if warn {
+            theme::warning()
+        } else {
+            theme::danger()
+        })
     };
     let spans = vec![
         Span::styled(" F6 ", key),
