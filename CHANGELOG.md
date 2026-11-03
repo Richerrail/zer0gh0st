@@ -1,3 +1,9 @@
+## v0.7.28 — Avertissement F4 clignotant (2026-11-03)
+
+- `Code-exec` dans le pied de page **clignote jaune/rouge** quand le shell est
+  désarmé (il restait gris, peu visible) ; **vert** quand il est actif.
+- Couleurs prises dans le thème actif (`warning`/`danger`/`success`).
+
 ## v0.7.27 — Menu repliable (rail `◀☰`) (2026-11-03)
 
 - Le menu n'occupe plus une colonne en permanence : replié, il devient un
