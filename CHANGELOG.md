@@ -1,3 +1,13 @@
+## v0.7.29 — zer0CL : kill, ANSI, limites (2026-11-03)
+
+- **Kill** : fermer le panneau (Esc, `/panel`, changement de mod, sortie de la
+  TUI) tue la commande en cours (`TERM`/`taskkill /T`). Une nouvelle commande
+  tue la précédente. Plus de build orphelin après `Esc`.
+- **ANSI filtré** : les séquences de couleur/OSC sont retirées avant affichage.
+- Message d'accueil du panneau : ce n'est **pas un terminal** (une commande à
+  la fois, stdin fermé, `vim`/`htop`/mots de passe indisponibles,
+  `export`/alias non persistants).
+
 ## v0.7.28 — Avertissement F4 clignotant (2026-11-03)
 
 - `Code-exec` dans le pied de page **clignote jaune/rouge** quand le shell est
