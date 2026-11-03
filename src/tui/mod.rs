@@ -5821,7 +5821,7 @@ mod tests {
         // 1bis) Menu replié : le clic sur le rail `◀☰` l'ouvre.
         app.menu_visible = false;
         term.draw(|f| draw(f, &mut app)).unwrap();
-        assert!(!app.rail_rect.width == 0, "rail non dessiné");
+        assert_ne!(app.rail_rect.width, 0, "rail non dessiné");
         let rr = app.rail_rect;
         handle_input(
             Event::Mouse(MouseEvent {
