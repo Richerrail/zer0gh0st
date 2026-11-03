@@ -354,7 +354,7 @@ pub fn strip_ansi(s: &str) -> String {
             Some('[') => {
                 chars.next();
                 // CSI : jusqu'au byte final 0x40..=0x7e
-                while let Some(n) = chars.next() {
+                for n in chars.by_ref() {
                     if ('@'..='~').contains(&n) {
                         break;
                     }
@@ -363,7 +363,7 @@ pub fn strip_ansi(s: &str) -> String {
             Some(']') => {
                 chars.next();
                 // OSC : jusqu'à BEL ou ST (ESC \)
-                while let Some(n) = chars.next() {
+                for n in chars.by_ref() {
                     if n == '\x07' {
                         break;
                     }
