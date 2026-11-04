@@ -52,6 +52,13 @@ pub struct Theme {
     pub banner: BannerStyle,
     /// Pack de sons du thème (`""` = aucun son de thème).
     pub sound_pack: &'static str,
+    /// Glyphe du bouton « ouvrir le menu déroulant » (rail replié, à droite).
+    pub rail_arrow: &'static str,
+    /// Le rail est-il une « poignée de tiroir » (ASCII, verticale) au lieu du
+    /// simple `◀☰` ?
+    pub rail_drawer: bool,
+    /// Halo lumineux autour du glyphe du rail (effet néon).
+    pub rail_glow: bool,
 }
 
 /// Thèmes disponibles. Le premier est le thème par défaut.
@@ -78,6 +85,9 @@ pub const ALL: &[Theme] = &[
         danger: Color::LightRed,
         banner: BannerStyle::Rainbow,
         sound_pack: "",
+        rail_arrow: "◀☰",
+        rail_drawer: false,
+        rail_glow: false,
     },
     Theme {
         id: "noir",
@@ -101,6 +111,9 @@ pub const ALL: &[Theme] = &[
         danger: Color::Rgb(220, 85, 85),
         banner: BannerStyle::Mono,
         sound_pack: "",
+        rail_arrow: "◀☰",
+        rail_drawer: false,
+        rail_glow: false,
     },
     Theme {
         id: "noir-rouge",
@@ -124,6 +137,11 @@ pub const ALL: &[Theme] = &[
         danger: Color::Rgb(255, 60, 68),
         banner: BannerStyle::Red,
         sound_pack: "",
+        // Poignée de tiroir (ASCII : aucun glyphe exotique) pour tirer le menu.
+        // `>>` = le tiroir est rentré, on tire pour l'ouvrir.
+        rail_arrow: ">>",
+        rail_drawer: true,
+        rail_glow: true,
     },
     Theme {
         id: "castle",
@@ -147,10 +165,17 @@ pub const ALL: &[Theme] = &[
         danger: Color::Rgb(224, 48, 48),
         banner: BannerStyle::Steel,
         sound_pack: "castle",
+        rail_arrow: "◀☰",
+        rail_drawer: false,
+        rail_glow: false,
     },
 ];
 
 static ACTIVE_INDEX: AtomicUsize = AtomicUsize::new(0);
+
+/// Verrou des tests qui changent le thème actif (état global partagé).
+#[cfg(test)]
+pub(crate) static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Thème actuellement actif.
 pub fn active() -> Theme {
@@ -252,6 +277,18 @@ pub fn warning() -> Color {
 pub fn danger() -> Color {
     active().danger
 }
+/// Glyphe du bouton d'ouverture du menu (rail replié, à droite).
+pub fn rail_arrow() -> &'static str {
+    active().rail_arrow
+}
+/// Le rail se dessine-t-il en « poignée de tiroir » ?
+pub fn rail_drawer() -> bool {
+    active().rail_drawer
+}
+/// Le rail affiche-t-il un halo néon autour de son glyphe ?
+pub fn rail_glow() -> bool {
+    active().rail_glow
+}
 
 #[cfg(test)]
 mod tests {
@@ -273,9 +310,27 @@ mod tests {
 
     #[test]
     fn activation_changes_the_active_palette() {
+        let _lock = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         activate("noir-rouge").unwrap();
         assert_eq!(active().id, "noir-rouge");
         activate("ghost").unwrap();
+    }
+
+    #[test]
+    fn noir_rouge_gets_a_neon_drawer_handle_on_the_rail() {
+        let red = resolve("noir-rouge").unwrap();
+        // ASCII uniquement : les chevrons `▶` ne s'affichent pas partout.
+        assert_eq!(red.rail_arrow, ">>");
+        assert!(
+            red.rail_drawer,
+            "le thème noir-rouge doit avoir une poignée"
+        );
+        assert!(red.rail_glow, "le thème noir-rouge doit avoir un halo néon");
+        for other in ALL.iter().filter(|t| t.id != "noir-rouge") {
+            assert_eq!(other.rail_arrow, "◀☰");
+            assert!(!other.rail_drawer);
+            assert!(!other.rail_glow);
+        }
     }
 
     #[test]

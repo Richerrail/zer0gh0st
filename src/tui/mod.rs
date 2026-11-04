@@ -1,5 +1,6 @@
 mod banner;
 mod menu;
+mod neon;
 mod picker;
 mod wizard;
 
@@ -200,12 +201,24 @@ pub struct App {
     pub menu_visible: bool,
     /// Zone écran du rail (clic pour ouvrir le menu).
     pub rail_rect: Rect,
+    /// Zone écran de la flèche du rail (clic = ouvrir/fermer le menu).
+    pub arrow_rect: Rect,
     pub menu_sel: usize,
     /// Dernier événement clavier traité (pour déduplication sur Windows).
     pub last_key_event: Option<(KeyCode, KeyModifiers, std::time::Instant)>,
 }
 
 impl App {
+    /// Cellules voisines de la poignée (dessus et dessous) : c'est de là que
+    /// part l'onde qui fait le tour de la page.
+    fn arrow_sources(&self) -> [(u16, u16); 2] {
+        let r = self.arrow_rect;
+        if r.width == 0 || r.height == 0 {
+            return [(0, 0), (0, 0)];
+        }
+        [(r.x, r.y.saturating_sub(1)), (r.x, r.y + r.height)]
+    }
+
     fn settings(&self) -> Settings {
         Settings {
             provider_id: self.provider_id.clone(),
@@ -396,6 +409,7 @@ pub async fn run(
         menu_focus: false,
         menu_visible: false,
         rail_rect: Rect::default(),
+        arrow_rect: Rect::default(),
         menu_sel: 0,
         last_key_event: None,
         thinking: options.thinking || g_initial.thinking,
@@ -578,6 +592,8 @@ async fn event_loop(
                 || app.side_mode.is_some()
                 || app.zc.on
                 || app.task_view.is_some()
+                // Onde néon autour de la page (menu ouvert).
+                || app.menu_visible
                 // Clignotement de l'avertissement F4 (shell désarmé).
                 || !app.code_exec =>
             {
@@ -3599,9 +3615,15 @@ fn handle_input(ev: Event, app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
         };
         match me.kind {
             MouseEventKind::Down(MouseButton::Left) => {
+                // La poignée « tiroir » (ou le rail) ouvre *ou* ferme le menu.
+                if inside(Some(app.arrow_rect)) {
+                    app.menu_visible = !app.menu_visible;
+                    app.menu_focus = app.menu_visible;
+                    return;
+                }
                 if inside(Some(app.rail_rect)) {
-                    app.menu_visible = true;
-                    app.menu_focus = true;
+                    app.menu_visible = !app.menu_visible;
+                    app.menu_focus = app.menu_visible;
                     return;
                 }
                 // Le menu passe EN PREMIER : ses zones sont des lignes entières
@@ -4345,52 +4367,69 @@ fn draw(f: &mut Frame, app: &mut App) {
         crate::fun::Mode::Chat => {}
     }
 
-    // Rail `◀☰` (menu replié) ou menu déroulant, puis panneau de mod éventuel.
+    // Menu déroulant + rail (poignée « tiroir ») collés au bord droit, puis
+    // le panneau de mod éventuel. Le rail reste toujours présent : c’est la
+    // poignée que l’on tire pour ouvrir/fermer le menu.
     const RAIL_W: u16 = 4;
     const MENU_W: u16 = 28;
+    // Les zones cliquables du menu sont recalculées à chaque rendu.
+    app.menu_hits.clear();
     if let Some(sm) = app.side_mode {
-        let panel_w = if app.menu_visible { 44 } else { 56 };
+        let panel_w = if app.menu_visible { 44 } else { 52 };
         if area.width >= 120 {
-            let mut cons = vec![Constraint::Min(50)];
-            cons.push(Constraint::Length(if app.menu_visible {
-                MENU_W
-            } else {
-                RAIL_W
-            }));
+            let mut cons = vec![Constraint::Min(if app.menu_visible { 40 } else { 50 })];
+            if app.menu_visible {
+                cons.push(Constraint::Length(MENU_W));
+            }
+            cons.push(Constraint::Length(RAIL_W));
             cons.push(Constraint::Length(panel_w));
             let cols = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints(cons)
                 .split(area);
             draw_agent(f, cols[0], app);
+            let mut next = 1;
             if app.menu_visible {
-                draw_menu_column(f, cols[1], app);
-            } else {
-                draw_rail(f, cols[1], app);
+                draw_menu_column(f, cols[next], app);
+                next += 1;
             }
-            draw_panel(f, cols[2], app, sm);
+            draw_rail(f, cols[next], app);
+            next += 1;
+            draw_panel(f, cols[next], app, sm);
         } else {
             draw_panel(f, area, app, sm);
         }
     } else if area.width >= 80 {
-        let right = if app.menu_visible { MENU_W } else { RAIL_W };
+        let mut cons = vec![Constraint::Min(if app.menu_visible { 40 } else { 50 })];
+        if app.menu_visible {
+            cons.push(Constraint::Length(MENU_W));
+        }
+        cons.push(Constraint::Length(RAIL_W));
         let cols = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Min(50), Constraint::Length(right)])
+            .constraints(cons)
             .split(area);
         draw_agent(f, cols[0], app);
+        let mut next = 1;
         if app.menu_visible {
-            draw_menu_column(f, cols[1], app);
-        } else {
-            draw_rail(f, cols[1], app);
+            draw_menu_column(f, cols[next], app);
+            next += 1;
         }
+        draw_rail(f, cols[next], app);
     } else {
         draw_agent(f, area, app);
         app.menu_rect = Rect::default();
         app.menu_hits.clear();
         app.rail_rect = Rect::default();
+        app.arrow_rect = Rect::default();
     }
     draw_chats_popup(f, area, app);
+    // Onde néon (thème noir-rouge, menu ouvert) : 1 pixel part de chaque côté
+    // des chevrons rouges et se dégrade en contournant le tour de la page.
+    // Menu fermé → rien n'est dessiné, l'animation s'arrête.
+    if app.menu_visible && theme::rail_glow() && app.arrow_rect.width > 0 {
+        neon::draw_wave(f, area, app.arrow_sources(), app.anim_phase);
+    }
     finalize_buffer(f, app);
 
     // Sélecteur (/model, /provider) par-dessus tout le reste.
@@ -4550,6 +4589,7 @@ fn draw_chats_popup(f: &mut Frame, area: Rect, app: &App) {
 fn draw_menu_column(f: &mut Frame, area: Rect, app: &mut App) {
     app.menu_rect = area;
     app.rail_rect = Rect::default();
+    app.arrow_rect = Rect::default();
     let open = app.menu_open;
     let sel = if app.menu_focus {
         Some(app.menu_sel)
@@ -4559,19 +4599,27 @@ fn draw_menu_column(f: &mut Frame, area: Rect, app: &mut App) {
     menu::draw(f, area, open, &mut app.menu_scroll, &mut app.menu_hits, sel);
 }
 
-/// Rail replié : un seul bouton `◀☰` (thème actif) + rappel `F2`.
+/// Rail : la poignée « tiroir » du menu déroulant (côté droit de l'écran).
+///
+/// Thème `noir-rouge` : poignée verticale ASCII (`<<` / `>>`) + rainure, on
+/// tire dessus pour sortir le menu. Autres thèmes : le `◀☰` historique.
 fn draw_rail(f: &mut Frame, area: Rect, app: &mut App) {
     app.rail_rect = area;
     app.menu_rect = Rect::default();
-    app.menu_hits.clear();
+    app.arrow_rect = Rect::default();
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme::border()))
         .style(Style::default().bg(theme::panel()));
     let inner = block.inner(area);
     f.render_widget(block, area);
+    if theme::rail_drawer() {
+        // Poignée de tiroir : centrée verticalement, à côté du menu.
+        app.arrow_rect = neon::draw_handle(f, area, app.menu_visible);
+        return;
+    }
     let mut lines = vec![Line::from(Span::styled(
-        "◀☰",
+        theme::rail_arrow(),
         Style::default()
             .fg(theme::accent())
             .add_modifier(Modifier::BOLD),
@@ -5780,6 +5828,7 @@ mod tests {
             menu_focus: false,
             menu_visible: true,
             rail_rect: Rect::default(),
+            arrow_rect: Rect::default(),
             menu_sel: 0,
             last_key_event: None,
         }
@@ -5958,6 +6007,116 @@ mod tests {
             .unwrap()
             .note
             .contains("actif"));
+    }
+
+    /// La poignée « tiroir » (thème noir-rouge) est en ASCII, collée au bord
+    /// droit, et l'onde ne court que tant que le menu est ouvert.
+    #[test]
+    fn noir_rouge_draws_a_drawer_handle_and_a_wave_around_the_page() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let _lock = theme::TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        theme::activate("noir-rouge").unwrap();
+
+        let mut app = test_app();
+        app.menu_visible = false;
+        let mut term = Terminal::new(TestBackend::new(120, 40)).unwrap();
+
+        // 1) Menu fermé : la poignée ASCII est à droite, au milieu en hauteur.
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        let handle = app.arrow_rect;
+        assert!(handle.width >= 2, "poignée absente : {handle:?}");
+        assert!(
+            handle.x + handle.width >= 118,
+            "la poignée n'est pas collée au bord droit : {handle:?}"
+        );
+        let buf = term.backend().buffer();
+        let glyph: String = (handle.x..handle.x + handle.width)
+            .map(|x| buf[(x, handle.y)].symbol())
+            .collect();
+        assert_eq!(glyph, ">>", "glyphe inattendu : {glyph:?}");
+        assert!(
+            glyph.is_ascii(),
+            "la poignée doit rester en ASCII : {glyph:?}"
+        );
+
+        // 2) Menu ouvert : l'onde passe sur le bord droit, juste au-dessus de
+        //    la poignée (elle part de chaque côté).
+        let probe_x = 119u16;
+        let probe_y = handle.y - 1;
+        let closed_fg = term.backend().buffer()[(probe_x, probe_y)].fg;
+        app.menu_visible = true;
+        app.anim_phase = 0;
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        let buf = term.backend().buffer();
+        let open_fg = buf[(probe_x, probe_y)].fg;
+        assert_ne!(
+            open_fg, closed_fg,
+            "l'onde ne passe pas sur le bord droit : {open_fg:?}"
+        );
+        let is_red = match open_fg {
+            Color::LightRed | Color::Red => true,
+            Color::Rgb(r, g, b) => r > g && r > b && r > 40,
+            _ => false,
+        };
+        assert!(is_red, "le trait n'est pas rouge : {open_fg:?}");
+
+        // 3) Menu refermé : plus aucune onde (l'animation s'arrête).
+        app.menu_visible = false;
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        let buf = term.backend().buffer();
+        assert_eq!(
+            buf[(probe_x, probe_y)].fg,
+            closed_fg,
+            "l'onde doit s'arrêter quand le menu est fermé"
+        );
+
+        theme::activate("ghost").unwrap();
+    }
+
+    /// Un clic sur la flèche rouge ouvre le menu, un second clic le referme.
+    #[tokio::test]
+    async fn clicking_the_red_arrow_toggles_the_menu() {
+        use crossterm::event::{Event, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let _lock = theme::TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        theme::activate("noir-rouge").unwrap();
+
+        let mut app = test_app();
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut term = Terminal::new(TestBackend::new(120, 40)).unwrap();
+
+        app.menu_visible = false;
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        let arrow = app.arrow_rect;
+        assert!(arrow.width > 0, "flèche absente du rail");
+        let click = |app: &mut App, tx: &tokio::sync::mpsc::UnboundedSender<UiEvent>| {
+            handle_input(
+                Event::Mouse(MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: arrow.x,
+                    row: arrow.y,
+                    modifiers: KeyModifiers::NONE,
+                }),
+                app,
+                tx,
+            );
+        };
+        click(&mut app, &tx);
+        assert!(
+            app.menu_visible,
+            "le clic sur la flèche n'ouvre pas le menu"
+        );
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        let arrow = app.arrow_rect;
+        assert!(arrow.width > 0, "flèche absente du menu ouvert");
+        click(&mut app, &tx);
+        assert!(!app.menu_visible, "le clic sur la flèche ne referme pas");
+
+        theme::activate("ghost").unwrap();
     }
 
     #[test]
