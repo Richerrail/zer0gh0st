@@ -679,8 +679,6 @@ mod tests {
             };
             assert!(!is_owned_llama(&owned));
         }
-        #[cfg(not(target_os = "linux"))]
-        let _ = me;
     }
 
     #[test]
