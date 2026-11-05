@@ -472,10 +472,28 @@ La TUI propose un menu de thèmes accessible de deux façons :
 | **Ghost** | `ghost` | rose, violet et cyan — thème historique |
 | **Noir** | `noir` | noir, gris et blanc, minimaliste |
 | **Noir & Rouge** | `noir-rouge` | noir profond, rouge vif et rose pâle |
+| **Castle** | `castle` | acier bleu et rouge sang (Wolfenstein 3D) + sons rétro |
 
 Le choix est appliqué immédiatement à toute l'interface (chat, menus, picker,
 assistant et Zero-chan), puis persisté dans `~/.config/zer0/config.toml` avec
 `theme = "noir-rouge"`.
+
+#### La poignée « tiroir » du thème `noir-rouge`
+
+Dans le thème **Noir & Rouge**, le menu déroulant se tire comme **le tiroir
+d'une commode** : un rail vertical collé au **côté droit** de l'écran, avec une
+poignée ASCII au milieu (rien d'exotique : `>>` quand le tiroir est rentré,
+`<<` quand il est sorti) et une rainure `══`.
+
+- **clic sur la poignée** (ou `F2`) : on tire le menu vers l'extérieur ;
+- **menu ouvert** : une petite onde rouge de 1 pixel part de **chaque côté** de
+  la poignée, se **dégrade** (rouge vif → rouge → pointillés qui se dissolvent)
+  et fait le tour de la page en boucle (animation) ;
+- **menu refermé** : l'animation s'arrête et le trait disparaît (aucun contour
+  permanent autour de la page) ;
+- la poignée reste visible même menu ouvert : c'est elle qui le referme.
+
+Les autres thèmes gardent le bouton `◀☰` historique.
 
 ### Mise à jour
 

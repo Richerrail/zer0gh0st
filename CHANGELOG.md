@@ -1,3 +1,17 @@
+## Non publié
+
+- **Poignée « tiroir » (thème `noir-rouge`)** : le menu déroulant se tire
+  comme un tiroir de commode — rail vertical collé au côté droit de l'écran,
+  poignée ASCII (`>>` pour ouvrir, `<<` pour refermer) + rainure, clic pour
+  sortir/refermer le menu.
+- **Onde autour de la page** : menu ouvert, une petite onde rouge de 1 pixel
+  part de chaque côté de la poignée et se dégrade (rouge vif → rouge →
+  pointillés) en contournant le tour de la page, en boucle. Menu fermé →
+  l'animation s'arrête et le trait disparaît (pas de contour permanent).
+- Couleurs ANSI 16 (`Red`/`LightRed`) : le néon s'affiche même sur un terminal
+  sans truecolor, et la poignée n'utilise que de l'ASCII/box-drawing. Sur un
+  terminal truecolor, l'onde passe en dégradé RGB continu.
+
 ## v0.7.29 — zer0CL : kill, ANSI, limites (2026-11-03)
 
 - **Kill** : fermer le panneau (Esc, `/panel`, changement de mod, sortie de la

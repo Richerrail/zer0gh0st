@@ -22,7 +22,7 @@
 # model    = "nvidia/nemotron-3.5-lightning:free"
 
 # ── Thème de la TUI ─────────────────────────────────────────────────
-# Valeurs : "ghost" (défaut), "noir", "noir-rouge".
+# Valeurs : "ghost" (défaut), "noir", "noir-rouge", "castle".
 # Dans la TUI, `/theme` ouvre le menu de sélection.
 # theme = "noir-rouge"
 # Sons d'interface (clips rétro) : désactivés par défaut.
