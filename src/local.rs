@@ -128,6 +128,119 @@ pub fn pid_path() -> PathBuf {
     crate::config::data_dir().join("llama-server.pid")
 }
 
+/// Contenu du fichier PID : `pid` (ancien format) ou `pid starttime`
+/// (nouveau format, avec le champ 22 de `/proc/<pid>/stat` au démarrage).
+///
+/// Le `starttime` permet de détecter la réutilisation du PID par un autre
+/// processus après la mort du serveur : même PID, `starttime` différent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnedPid {
+    pub pid: u32,
+    pub starttime: Option<u64>,
+}
+
+/// Lit et parse le fichier PID. `None` si absent/illisible/invalide.
+pub fn read_owned_pid() -> Option<OwnedPid> {
+    let raw = std::fs::read_to_string(pid_path()).ok()?;
+    parse_owned_pid(&raw)
+}
+
+fn parse_owned_pid(raw: &str) -> Option<OwnedPid> {
+    let mut it = raw.split_whitespace();
+    let pid: u32 = it.next()?.parse().ok()?;
+    let starttime = it.next().and_then(|s| s.parse::<u64>().ok());
+    Some(OwnedPid { pid, starttime })
+}
+
+/// Écrit le fichier PID au format `pid starttime` (starttime lu dans
+/// `/proc/<pid>/stat` ; absent si illisible — repli sur le seul PID).
+fn write_owned_pid(pid: u32) {
+    let start = proc_starttime(pid);
+    let content = match start {
+        Some(t) => format!("{pid} {t}\n"),
+        None => format!("{pid}\n"),
+    };
+    let _ = std::fs::write(pid_path(), content);
+}
+
+/// Champ 22 de `/proc/<pid>/stat` (jiffies depuis le boot). `None` si le
+/// processus n'existe pas ou si `/proc` est indisponible.
+#[cfg(target_os = "linux")]
+fn proc_starttime(pid: u32) -> Option<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // Le champ 2 (comm) peut contenir des espaces/parenthèses : on part
+    // après la dernière `)`.
+    let after = stat.rsplit_once(')')?.1;
+    // after = " <state> <ppid> …" ; starttime est le champ 22 global,
+    // soit le 20e champ après comm (champ 3 = state).
+    after.split_whitespace().nth(19)?.parse().ok()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn proc_starttime(_pid: u32) -> Option<u64> {
+    None
+}
+
+/// Nom du processus (`/proc/<pid>/comm` sous Linux). `None` si mort.
+#[cfg(target_os = "linux")]
+fn proc_comm(pid: u32) -> Option<String> {
+    std::fs::read_to_string(format!("/proc/{pid}/comm"))
+        .ok()
+        .map(|s| s.trim().to_string())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn proc_comm(_pid: u32) -> Option<String> {
+    None
+}
+
+/// Le PID désigne-t-il bien le `llama-server` démarré par Zer0 ?
+///
+/// Vérifie, dans l'ordre :
+/// 1. le processus existe (`/proc/<pid>` sous Linux) ;
+/// 2. son nom est `llama-server` (ou `llama-server.exe`) — protège contre
+///    la réutilisation du PID par un processus quelconque ;
+/// 3. si un `starttime` est stocké, il correspond à celui du processus
+///    actuel — protège contre la réutilisation par un autre `llama-server`.
+fn is_owned_llama(pid: &OwnedPid) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        let Some(comm) = proc_comm(pid.pid) else {
+            return false;
+        };
+        let base = comm.trim_end_matches(".exe");
+        if base != "llama-server" {
+            return false;
+        }
+        if let Some(expected) = pid.starttime {
+            return proc_starttime(pid.pid) == Some(expected);
+        }
+        true
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        // Hors Linux : pas de `/proc` fiable ; on se contente du PID
+        // (comportement historique).
+        let _ = pid;
+        true
+    }
+}
+
+/// Nettoie un fichier PID périmé (processus mort, nom différent, ou
+/// `starttime` divergent). Retourne `true` si un fichier a été supprimé.
+pub fn cleanup_stale_pid() -> bool {
+    let Some(owned) = read_owned_pid() else {
+        // Fichier absent ou illisible : rien à nettoyer (un fichier
+        // illisible est supprimé par `stop_if_owned`).
+        return false;
+    };
+    if is_owned_llama(&owned) {
+        return false;
+    }
+    let _ = std::fs::remove_file(pid_path());
+    true
+}
+
 pub fn log_path() -> PathBuf {
     crate::config::data_dir().join("llama-server.log")
 }
@@ -155,6 +268,10 @@ pub async fn ensure(wanted: Option<&str>) -> Result<String> {
     // même temps : sans verrou, on lançait deux serveurs.
     static ENSURE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
     let _guard = ENSURE_LOCK.lock().await;
+    // PID périmé (serveur mort ou PID réutilisé) : on nettoie avant tout,
+    // sinon `stop_if_owned`/`restart_if_owned` croiraient posséder un
+    // serveur qui n'est plus le nôtre.
+    cleanup_stale_pid();
     if is_up().await {
         return Ok("serveur local déjà actif".to_string());
     }
@@ -242,7 +359,7 @@ pub async fn ensure(wanted: Option<&str>) -> Result<String> {
         .with_context(|| format!("démarrage de {}", bin.display()))?;
     let pid = child.id();
     if let Some(pid) = pid {
-        let _ = std::fs::write(pid_path(), format!("{pid}\n"));
+        write_owned_pid(pid);
     }
 
     // Attente de disponibilité : un 4B Q4 met ~30 s à charger sur ce CPU.
@@ -268,24 +385,67 @@ pub async fn ensure(wanted: Option<&str>) -> Result<String> {
     ))
 }
 
-/// Tue le serveur **uniquement s'il a été démarré par Zer0** (fichier PID).
-pub fn stop_if_owned() -> bool {
-    let Ok(raw) = std::fs::read_to_string(pid_path()) else {
-        return false;
-    };
-    let Ok(pid) = raw.trim().parse::<u32>() else {
-        let _ = std::fs::remove_file(pid_path());
-        return false;
-    };
-    #[cfg(unix)]
-    let killed = std::process::Command::new("kill")
-        .args(["-9", &pid.to_string()])
+/// Envoie un signal (`kill -TERM`/`-9`) ; `false` si le processus est déjà mort.
+#[cfg(unix)]
+fn signal(pid: u32, sig: &str) -> bool {
+    std::process::Command::new("kill")
+        .args([sig, &pid.to_string()])
         .status()
         .map(|s| s.success())
-        .unwrap_or(false);
+        .unwrap_or(false)
+}
+
+/// Le processus existe-t-il encore ? (`kill -0`, sans envoyer de signal)
+#[cfg(unix)]
+fn alive(pid: u32) -> bool {
+    std::process::Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Tue le serveur **uniquement s'il a été démarré par Zer0** (fichier PID).
+///
+/// Si le PID est périmé (mort, réutilisé par un autre processus, ou
+/// `starttime` divergent), le fichier est supprimé et **aucun signal n'est
+/// envoyé** — on ne tue jamais un processus qui n'est pas notre serveur.
+pub fn stop_if_owned() -> bool {
+    let Some(owned) = read_owned_pid() else {
+        // Fichier absent ou illisible/invalide : on le supprime s'il existe.
+        if pid_path().exists() {
+            let _ = std::fs::remove_file(pid_path());
+        }
+        return false;
+    };
+    if !is_owned_llama(&owned) {
+        let _ = std::fs::remove_file(pid_path());
+        return false;
+    }
+    let pid = owned.pid;
+    // Arrêt gracieux d'abord : SIGTERM, puis SIGKILL seulement si le
+    // processus est encore vivant après ~2 s. `kill -9` d'emblée ne laissait
+    // aucune chance au serveur de libérer VRAM/KV et de fermer son log.
+    #[cfg(unix)]
+    let killed = {
+        let term = signal(pid, "-TERM");
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while std::time::Instant::now() < deadline && alive(pid) {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        if alive(pid) {
+            signal(pid, "-9")
+        } else {
+            // SIGTERM suffit : succès même si `kill` a renvoyé un code non nul
+            // (course avec la sortie du processus).
+            let _ = term;
+            true
+        }
+    };
     #[cfg(windows)]
     let killed = std::process::Command::new("taskkill")
-        .args(["/PID", &pid.to_string(), "/F"])
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
         .status()
         .map(|s| s.success())
         .unwrap_or(false);
@@ -462,6 +622,62 @@ mod tests {
         assert!(LOCAL_SYSTEM.chars().count() <= 60, "trop long pour du CPU");
         assert!(LOCAL_SYSTEM.contains("Zer0"));
         assert_eq!(system_local(), LOCAL_SYSTEM);
+    }
+
+    #[test]
+    fn parse_owned_pid_accepts_old_and_new_formats() {
+        assert_eq!(
+            parse_owned_pid("442035\n"),
+            Some(OwnedPid {
+                pid: 442035,
+                starttime: None
+            })
+        );
+        assert_eq!(
+            parse_owned_pid("1305 1234567\n"),
+            Some(OwnedPid {
+                pid: 1305,
+                starttime: Some(1234567)
+            })
+        );
+        assert_eq!(parse_owned_pid(""), None);
+        assert_eq!(parse_owned_pid("abc\n"), None);
+        assert_eq!(
+            parse_owned_pid("0\n"),
+            Some(OwnedPid {
+                pid: 0,
+                starttime: None
+            })
+        );
+    }
+
+    #[test]
+    fn dead_pid_is_not_owned() {
+        // PID quasi certainement mort (au-delà de pid_max usuel).
+        let dead = OwnedPid {
+            pid: 4_194_303,
+            starttime: None,
+        };
+        #[cfg(target_os = "linux")]
+        assert!(!is_owned_llama(&dead));
+    }
+
+    #[test]
+    fn current_process_is_not_a_llama_server() {
+        // Notre propre processus de test ne s'appelle pas llama-server :
+        // même avec son vrai starttime, il ne doit pas être considéré
+        // comme notre serveur.
+        let me = std::process::id();
+        #[cfg(target_os = "linux")]
+        {
+            let owned = OwnedPid {
+                pid: me,
+                starttime: proc_starttime(me),
+            };
+            assert!(!is_owned_llama(&owned));
+        }
+        #[cfg(not(target_os = "linux"))]
+        let _ = me;
     }
 
     #[test]

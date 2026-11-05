@@ -423,6 +423,8 @@ enum KbAction {
     Rebuild,
     /// Retire de l'index les sources dont le fichier n'existe plus.
     Purge,
+    /// Fusionne les sources en double (chemin absolu vs relatif).
+    Dedupe,
     /// Retire de l'index les sources dont le chemin contient ce motif.
     Drop { source: String },
     /// Show the knowledge-injection log.
@@ -889,6 +891,7 @@ async fn kb_cmd(action: KbAction) -> Result<()> {
         }
         KbAction::Rebuild => commands::kb_rebuild()?,
         KbAction::Purge => commands::kb_purge()?,
+        KbAction::Dedupe => commands::kb_dedupe()?,
         KbAction::Drop { source } => commands::kb_drop(&source)?,
         KbAction::Log { lines } => commands::kb_log(lines),
     };

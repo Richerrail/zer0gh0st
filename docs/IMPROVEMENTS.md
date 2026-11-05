@@ -45,4 +45,5 @@ une capture, repérer un alignement cassé — demande :
 - exécution planifiée des tâches (M9 ne fait qu'un **rappel**) : nécessiterait
   un démon, donc un choix d'architecture ;
 - échéances en date absolue (`2026-11-02 09:00`) en plus de `+2h` ;
-- `read_image` : installer `tesseract-data-fra` pour le français.
+- `read_image` : le français est couvert (`tesseract-data-fra` installé) ;
+  d'autres langues se déclarent via `ZER0_TESSDATA`/paquet système.
