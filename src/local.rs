@@ -190,6 +190,7 @@ fn proc_comm(pid: u32) -> Option<String> {
 }
 
 #[cfg(not(target_os = "linux"))]
+#[allow(dead_code)] // pas de /proc : le repli n'appelle pas cette fonction
 fn proc_comm(_pid: u32) -> Option<String> {
     None
 }
