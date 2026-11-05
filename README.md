@@ -173,7 +173,7 @@ par `ZER0_EXEC_TIMEOUT` ou par appel (`timeout_secs`).
 | **Gratuit** | découverte des modèles `:free` (OpenRouter public), `select` par **benchmarks réels** |
 | **Rôles** | `main/code/reasoning/writing/vision/fast/utility/review`, sélection auto par catégorie · `/role off` = un seul modèle, sans bascule |
 | **Mémoire** | store JSONL, recherche sémantique optionnelle, **enveloppe d'honnêteté** |
-| **Connaissance** | base **SQLite + FTS5** (hybride), **injection auto** dans le prompt (+ outil `knowledge_search`) |
+| **Connaissance** | base **SQLite + FTS5** (hybride **si** un embedder est configuré, sinon FTS5 seul), **injection auto** dans le prompt (+ `knowledge_search`/`knowledge_add`/`knowledge_delete`) |
 | **Catalogue d'APIs** | `/apis <besoin>` — 2 000+ APIs publiques (source community, **datée**), avec colonne « clé requise » et filtre `keyless` |
 | **Zero-chan** | assistante vocale **intégrée à la TUI** : bloc d'état à droite du banner + boutons `0chan`/`micro` à droite de la saisie. **Réutilise le chat et l'input de l'agent**. STT = Whisper local. |
 | **Menu cliquable** | panneau **Commandes** à droite (entre zero-chan et le badge 0chan/mic) : tous les groupes/sous-commandes **cliquables** (dépliage, exécution, ou insertion dans la saisie). Molette pour défiler. |

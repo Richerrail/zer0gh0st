@@ -831,6 +831,13 @@ pub fn kb_purge() -> Result<Vec<String>> {
 }
 
 /// Retire de l'index les sources dont le chemin contient `pattern`.
+pub fn kb_dedupe() -> Result<Vec<String>> {
+    let n = crate::knowledge::dedupe_sources()?;
+    Ok(vec![format!(
+        "Connaissance : {n} source(s) fusionnée(s)/renommée(s)."
+    )])
+}
+
 pub fn kb_drop(pattern: &str) -> Result<Vec<String>> {
     if pattern.trim().is_empty() {
         return Err(anyhow!("usage: kb drop <motif de source>"));

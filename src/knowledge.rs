@@ -52,6 +52,156 @@ pub struct Hit {
 /// Version du schéma SQLite (`PRAGMA user_version`).
 const KB_SCHEMA_VERSION: i64 = 1;
 
+/// Normalise une `source` pour que le même fichier ne soit jamais indexé
+/// deux fois sous deux formes différentes (absolu vs relatif, `./`, `../`,
+/// symlinks…).
+///
+/// Les identifiants non-chemin (`note:projet-x`, `manuel:123`, URLs…) sont
+/// renvoyés tels quels. Les chemins sont résolus en absolu canonique
+/// (`canonicalize` si le fichier existe, sinon normalisation lexicale).
+pub fn canonical_source(source: &str) -> String {
+    let s = source.trim();
+    if s.is_empty() {
+        return s.to_string();
+    }
+    // Schéma URI / identifiant libre (`note:…`, `manuel:…`, `https://…`) :
+    // pas un chemin fichier. Exception : `C:\…` / `C:/…` (Windows).
+    if let Some(colon) = s.find(':') {
+        let is_windows_drive = colon == 1
+            && s[..1].chars().all(|c| c.is_ascii_alphabetic())
+            && s[colon + 1..].starts_with(['/', '\\']);
+        if !is_windows_drive {
+            let scheme = &s[..colon];
+            if !scheme.is_empty()
+                && scheme
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+            {
+                return s.to_string();
+            }
+        }
+    }
+    let p = Path::new(s);
+    // Chemin existant : forme canonique absolue (résout `.`/`..`/symlinks).
+    if let Ok(canon) = std::fs::canonicalize(p) {
+        return canon.to_string_lossy().to_string();
+    }
+    // Chemin inexistant : absolu lexical (cwd + nettoyage `.`/`..`).
+    let abs = if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(p)
+    };
+    lexical_clean(&abs).to_string_lossy().to_string()
+}
+
+/// Nettoie un chemin absolu sans toucher au disque : supprime `.`,
+/// résout `..` lexicalement.
+fn lexical_clean(p: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for comp in p.components() {
+        match comp {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            c => out.push(c.as_os_str()),
+        }
+    }
+    if out.as_os_str().is_empty() {
+        out.push("/");
+    }
+    out
+}
+
+/// Anciennes formes non canoniques d'un fichier : relatif depuis le cwd,
+/// relatif depuis la racine projet, `./…`. Utilisé pour purger les doublons
+/// historiques lors d'une ré-ingestion.
+fn legacy_source_forms(canon: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let p = Path::new(canon);
+    if let Ok(rel) = p.strip_prefix(std::env::current_dir().unwrap_or_default()) {
+        out.push(rel.to_string_lossy().to_string());
+    }
+    if let Ok(rel) = p.strip_prefix(crate::mods::project_root()) {
+        out.push(rel.to_string_lossy().to_string());
+    }
+    out
+}
+
+/// Fusionne les sources qui désignent le même fichier sous des formes
+/// différentes (ex. `base_connaissance/x.tsv` et
+/// `/home/…/base_connaissance/x.tsv`).
+///
+/// Pour chaque groupe de sources canoniquement identiques, on garde le
+/// groupe le plus récent (ids les plus élevés) et on supprime les autres ;
+/// le groupe gardé est renommé sous sa forme canonique. Retourne le nombre
+/// de sources supprimées/renommées.
+pub fn dedupe_sources_on(c: &Connection) -> Result<usize> {
+    let mut stmt = c.prepare("SELECT DISTINCT source FROM knowledge")?;
+    let sources: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, String>(0))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    drop(stmt);
+
+    // Groupe par forme canonique.
+    let mut groups: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    for src in &sources {
+        groups
+            .entry(canonical_source(src))
+            .or_default()
+            .push(src.clone());
+    }
+
+    let mut changed = 0usize;
+    for (canon, group) in &groups {
+        if group.len() == 1 && group[0] == *canon {
+            continue;
+        }
+        // Groupe le plus récent = max(id) le plus élevé.
+        let newest = group
+            .iter()
+            .map(|src| {
+                let max_id: i64 = c
+                    .query_row(
+                        "SELECT COALESCE(MAX(id), 0) FROM knowledge WHERE source = ?1",
+                        params![src],
+                        |r| r.get(0),
+                    )
+                    .unwrap_or(0);
+                (max_id, src.clone())
+            })
+            .max_by_key(|(id, _)| *id)
+            .map(|(_, src)| src);
+        let Some(keep) = newest else { continue };
+        for src in group {
+            if src == &keep {
+                continue;
+            }
+            c.execute("DELETE FROM knowledge WHERE source = ?1", params![src])?;
+            changed += 1;
+        }
+        if keep != *canon {
+            c.execute(
+                "UPDATE knowledge SET source = ?1 WHERE source = ?2",
+                params![canon, keep],
+            )?;
+            changed += 1;
+        }
+    }
+    if changed > 0 {
+        c.execute(
+            "INSERT INTO knowledge_fts(knowledge_fts) VALUES('rebuild')",
+            [],
+        )?;
+    }
+    Ok(changed)
+}
+
 /// Un fichier source existe-t-il encore ? Les anciens index peuvent contenir
 /// des chemins **relatifs** : on les résout depuis le cwd puis la racine projet.
 pub fn source_exists(src: &str) -> bool {
@@ -98,6 +248,13 @@ pub fn drop_source_on(c: &Connection, pattern: &str) -> Result<usize> {
         )?;
     }
     Ok(n)
+}
+
+/// Fusionne les sources non canoniques (absolu vs relatif, `./`, symlinks)
+/// dans une seule entrée par fichier. Retourne le nombre de lignes modifiées.
+pub fn dedupe_sources() -> Result<usize> {
+    let c = open()?;
+    dedupe_sources_on(&c)
 }
 
 pub fn drop_source(pattern: &str) -> Result<usize> {
@@ -645,9 +802,15 @@ pub async fn ingest_dir(dir: &Path, embed: bool) -> Result<(usize, usize)> {
         let Ok(text) = std::fs::read_to_string(f) else {
             continue;
         };
-        let source = f.to_string_lossy().to_string();
-        // remplace les entrées précédentes de ce fichier
+        let source = canonical_source(&f.to_string_lossy());
+        // remplace les entrées précédentes de ce fichier (toute forme de chemin)
         c.execute("DELETE FROM knowledge WHERE source = ?1", params![source])?;
+        // … y compris les anciennes formes non canoniques du même fichier
+        for old in legacy_source_forms(&source) {
+            if old != source {
+                c.execute("DELETE FROM knowledge WHERE source = ?1", params![old])?;
+            }
+        }
 
         let sujet = f
             .file_stem()
@@ -716,7 +879,7 @@ pub async fn add(source: &str, sujet: &str, text: &str, embed: bool) -> Result<(
     }
     let embedded = vectors.iter().any(|v| v.is_some());
 
-    let source = source.to_string();
+    let source = canonical_source(source);
     let sujet = sujet.to_string();
     let n = parts.len();
     let embedder = embedder.filter(|_| embedded);
@@ -908,6 +1071,72 @@ mod tests {
         assert_eq!(out.len(), 2);
         assert_eq!(out[0].id, 1);
         assert_eq!(out[1].id, 3);
+    }
+
+    #[test]
+    fn canonical_source_keeps_free_ids() {
+        assert_eq!(canonical_source("note:projet-x"), "note:projet-x");
+        assert_eq!(canonical_source("manuel:123"), "manuel:123");
+        assert_eq!(
+            canonical_source("https://example.com/x"),
+            "https://example.com/x"
+        );
+    }
+
+    #[test]
+    fn canonical_source_unifies_relative_and_absolute() {
+        // Même fichier, deux formes → une seule forme canonique.
+        let abs = canonical_source("/home/omar0/ZER0v1/base_connaissance/public-apis.tsv");
+        assert!(abs.starts_with('/'));
+        assert!(abs.ends_with("base_connaissance/public-apis.tsv"));
+        // Forme relative résolue depuis le cwd : si le cwd est la racine
+        // projet, elle doit retomber sur la même forme absolue.
+        let cwd = std::env::current_dir().unwrap_or_default();
+        if cwd.join("base_connaissance/public-apis.tsv").is_file() {
+            assert_eq!(canonical_source("base_connaissance/public-apis.tsv"), abs);
+        }
+        // `./` et `../` ne changent rien.
+        assert_eq!(canonical_source("./x/../y.txt"), canonical_source("y.txt"));
+    }
+
+    #[test]
+    fn dedupe_merges_relative_and_absolute_forms() {
+        let c = mem_db();
+        add(
+            &c,
+            "a",
+            "contenu absolu",
+            "/home/omar0/ZER0v1/base_connaissance/public-apis.tsv",
+        );
+        add(
+            &c,
+            "a",
+            "contenu relatif",
+            "base_connaissance/public-apis.tsv",
+        );
+        add(
+            &c,
+            "b",
+            "autre fichier",
+            "/home/omar0/ZER0v1/base_connaissance/autre.txt",
+        );
+        let changed = dedupe_sources_on(&c).unwrap();
+        assert!(changed >= 1, "au moins une source fusionnée");
+        let n: i64 = c
+            .query_row("SELECT COUNT(*) FROM knowledge", [], |r| r.get(0))
+            .unwrap();
+        // Le groupe le plus récent (relatif, ids plus élevés) est gardé,
+        // renommé en canonique ; l'autre fichier reste intact.
+        assert_eq!(n, 2);
+        let srcs: Vec<String> = c
+            .prepare("SELECT DISTINCT source FROM knowledge ORDER BY source")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        assert_eq!(srcs.len(), 2);
+        assert!(srcs.iter().all(|s| s.starts_with('/')));
     }
 
     #[test]

@@ -59,3 +59,5 @@ run-zer0-gw.ps1
 # Clone local du dépôt GitHub + notes de travail
 /gh0st
 /notes.html
+
+*.zer0.bak

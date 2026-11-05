@@ -528,6 +528,10 @@ Rebuild the FTS5 index
 
 Retire de l'index les sources dont le fichier n'existe plus
 
+#### `zer0 kb dedupe`
+
+Fusionne les sources en double (chemin absolu vs relatif)
+
 #### `zer0 kb drop`
 
 Retire de l'index les sources dont le chemin contient ce motif
