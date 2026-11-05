@@ -1102,31 +1102,23 @@ mod tests {
     #[test]
     fn dedupe_merges_relative_and_absolute_forms() {
         let c = mem_db();
-        add(
-            &c,
-            "a",
-            "contenu absolu",
-            "/home/omar0/ZER0v1/base_connaissance/public-apis.tsv",
-        );
-        add(
-            &c,
-            "a",
-            "contenu relatif",
-            "base_connaissance/public-apis.tsv",
-        );
-        add(
-            &c,
-            "b",
-            "autre fichier",
-            "/home/omar0/ZER0v1/base_connaissance/autre.txt",
-        );
+        // Chemins construits depuis le cwd réel : sur la CI, `/home/omar0/…`
+        // n'existe pas et le test échouait (absolu codé en dur).
+        let cwd = std::env::current_dir().unwrap();
+        let rel = "base_connaissance/public-apis.tsv";
+        let abs = cwd.join(rel);
+        let other = cwd.join("base_connaissance/autre.txt");
+        add(&c, "a", "contenu absolu", &abs.to_string_lossy());
+        add(&c, "a", "contenu relatif", rel);
+        add(&c, "b", "autre fichier", &other.to_string_lossy());
+
         let changed = dedupe_sources_on(&c).unwrap();
         assert!(changed >= 1, "au moins une source fusionnée");
         let n: i64 = c
             .query_row("SELECT COUNT(*) FROM knowledge", [], |r| r.get(0))
             .unwrap();
-        // Le groupe le plus récent (relatif, ids plus élevés) est gardé,
-        // renommé en canonique ; l'autre fichier reste intact.
+        // Le groupe le plus récent (relatif) est gardé, renommé en canonique ;
+        // l'autre fichier reste intact.
         assert_eq!(n, 2);
         let srcs: Vec<String> = c
             .prepare("SELECT DISTINCT source FROM knowledge ORDER BY source")
@@ -1136,7 +1128,10 @@ mod tests {
             .map(|r| r.unwrap())
             .collect();
         assert_eq!(srcs.len(), 2);
-        assert!(srcs.iter().all(|s| s.starts_with('/')));
+        assert!(
+            srcs.iter().all(|s| std::path::Path::new(s).is_absolute()),
+            "sources non absolues : {srcs:?}"
+        );
     }
 
     #[test]
