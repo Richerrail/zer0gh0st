@@ -1,4 +1,6 @@
-## Non publié
+## v0.7.30 — Tiroir néon + audit 2026-11-04 (2026-11-05)
+
+Contribution de **darkdober4** (PR #29) + corrections de l'audit du 4 nov.
 
 - **Poignée « tiroir » (thème `noir-rouge`)** : le menu déroulant se tire
   comme un tiroir de commode — rail vertical collé au côté droit de l'écran,
@@ -11,6 +13,17 @@
 - Couleurs ANSI 16 (`Red`/`LightRed`) : le néon s'affiche même sur un terminal
   sans truecolor, et la poignée n'utilise que de l'ASCII/box-drawing. Sur un
   terminal truecolor, l'onde passe en dégradé RGB continu.
+
+### Audit 2026-11-04
+
+- **B1 PID** : le fichier stocke `pid starttime` ; `is_owned_llama()` vérifie
+  `/proc/<pid>/comm` + starttime avant tout kill, nettoyage au démarrage.
+- **B2 KB** : `canonical_source()` (absolu canonique) à l'ingestion et à
+  `knowledge_add` ; `zer0 kb dedupe` fusionne les doublons absolu/relatif.
+- **B3** : arrêt SIGTERM → attente 2 s → SIGKILL seulement si vivant.
+- **R2** : `rust-version = "1.88"` ; tests et warnings corrigés hors Linux.
+- Docs : `tesseract-data-fra` installé (plus « à faire »), README précise que
+  l'hybride KB n'est actif qu'avec un embedder.
 
 ## v0.7.29 — zer0CL : kill, ANSI, limites (2026-11-03)
 
