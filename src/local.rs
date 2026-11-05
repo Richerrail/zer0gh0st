@@ -190,6 +190,7 @@ fn proc_comm(pid: u32) -> Option<String> {
 }
 
 #[cfg(not(target_os = "linux"))]
+#[allow(dead_code)] // pas de /proc : le repli n'appelle pas cette fonction
 fn proc_comm(_pid: u32) -> Option<String> {
     None
 }
@@ -653,13 +654,15 @@ mod tests {
 
     #[test]
     fn dead_pid_is_not_owned() {
-        // PID quasi certainement mort (au-delà de pid_max usuel).
-        let dead = OwnedPid {
-            pid: 4_194_303,
-            starttime: None,
-        };
         #[cfg(target_os = "linux")]
-        assert!(!is_owned_llama(&dead));
+        {
+            // PID quasi certainement mort (au-delà de pid_max usuel).
+            let dead = OwnedPid {
+                pid: 4_194_303,
+                starttime: None,
+            };
+            assert!(!is_owned_llama(&dead));
+        }
     }
 
     #[test]
@@ -667,17 +670,15 @@ mod tests {
         // Notre propre processus de test ne s'appelle pas llama-server :
         // même avec son vrai starttime, il ne doit pas être considéré
         // comme notre serveur.
-        let me = std::process::id();
         #[cfg(target_os = "linux")]
         {
+            let me = std::process::id();
             let owned = OwnedPid {
                 pid: me,
                 starttime: proc_starttime(me),
             };
             assert!(!is_owned_llama(&owned));
         }
-        #[cfg(not(target_os = "linux"))]
-        let _ = me;
     }
 
     #[test]

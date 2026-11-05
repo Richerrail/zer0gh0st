@@ -1085,15 +1085,25 @@ mod tests {
 
     #[test]
     fn canonical_source_unifies_relative_and_absolute() {
-        // Même fichier, deux formes → une seule forme canonique.
-        let abs = canonical_source("/home/omar0/ZER0v1/base_connaissance/public-apis.tsv");
-        assert!(abs.starts_with('/'));
-        assert!(abs.ends_with("base_connaissance/public-apis.tsv"));
-        // Forme relative résolue depuis le cwd : si le cwd est la racine
-        // projet, elle doit retomber sur la même forme absolue.
-        let cwd = std::env::current_dir().unwrap_or_default();
-        if cwd.join("base_connaissance/public-apis.tsv").is_file() {
-            assert_eq!(canonical_source("base_connaissance/public-apis.tsv"), abs);
+        // Même fichier, deux formes → une seule forme canonique. Les chemins
+        // sont construits depuis le cwd : `/home/omar0/...` n'existe pas sur
+        // la CI (et un chemin absolu Windows ne commence pas par `/`).
+        let cwd = std::env::current_dir().unwrap();
+        let rel = "base_connaissance/public-apis.tsv";
+        let abs_path = cwd.join(rel);
+        let abs = canonical_source(&abs_path.to_string_lossy());
+        assert!(
+            std::path::Path::new(&abs).is_absolute(),
+            "forme non absolue : {abs}"
+        );
+        assert_eq!(
+            std::path::Path::new(&abs)
+                .file_name()
+                .and_then(|n| n.to_str()),
+            Some("public-apis.tsv")
+        );
+        if abs_path.is_file() {
+            assert_eq!(canonical_source(rel), abs);
         }
         // `./` et `../` ne changent rien.
         assert_eq!(canonical_source("./x/../y.txt"), canonical_source("y.txt"));
