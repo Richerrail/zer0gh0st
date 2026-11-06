@@ -1,18 +1,11 @@
-# Build output
 /target
 /target0box
-
-# Python bytecode
 __pycache__/
 *.pyc
-
-# Windows debug/test artifacts (binaires de test clipboard, scripts temporaires)
 *.exe
 *.pdb
 !zer0-*.exe
 src/tui/mod.rs.bak
-
-# Artifacts de debug clipboard Windows (temporaires)
 check_ps1.rs
 debug_snippet.txt
 old_fn.txt
@@ -24,18 +17,12 @@ test_clipboard.bat
 test_unicode*.ps1
 fix_*.ps1
 write_ps1*.rs
-
-# Config / lanceurs locaux
 /gw.toml
 run-zer0-gw.bat
 run-zer0-gw.ps1
-
-# Models (never commit — download/build your own)
 /models
 *.gguf
 *.bin
-
-# Runtime / user data
 /data
 /0box-test
 /knowledge.db
@@ -44,24 +31,15 @@ run-zer0-gw.ps1
 /conversation.jsonl
 /memory.jsonl
 /.zer0
-
-# Personal content folders (placeholders kept empty)
 /base_connaissance/*
 !/base_connaissance/.gitkeep
 /music/*
 !/music/.gitkeep
-
-# Secrets
 .env
 *.key
 *_api_key*
-
-# Démo (générée par VHS ; non versionnée)
 /demo.gif
 /demo.mp4
-
-# Clone local du dépôt GitHub + notes de travail
 /gh0st
 /notes.html
-
 *.zer0.bak
