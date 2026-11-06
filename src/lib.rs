@@ -44,6 +44,7 @@ pub mod thermal;
 pub mod tools;
 pub mod tui;
 pub mod update;
+pub mod upgrade;
 pub mod util;
 pub mod vault;
 pub mod vote;

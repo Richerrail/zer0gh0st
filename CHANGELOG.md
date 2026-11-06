@@ -1,3 +1,15 @@
+## v0.7.33 — `/upgrade scan` (dev) (2026-11-05)
+
+- Commande **dev-only** (`Cargo.toml` + `.git`, ou `ZER0_DEV=1`), absente du
+  menu utilisateur.
+- `/upgrade scan` : audit **lecture seule** — unwrap/expect sur chemins chauds,
+  `unsafe`, TODO/FIXME, fichiers > 900 lignes, sauvegardes `.zer0.bak`,
+  sources de connaissance dupliquées, arbre git sale, périmètre depuis le
+  dernier tag.
+- Écrit `upgrade/audit-<date>.md` + `.json` dans le dossier de données ;
+  `/upgrade` (ou `status`) affiche le dernier audit.
+- Documenté dans `docs/UPGRADE.md`.
+
 ## v0.7.32 — Mods seuls, onde sur mod actif (2026-11-05)
 
 - **Rail `◀☰` et menu permanent retirés** : la palette `/` (et `F2`) suffit,
