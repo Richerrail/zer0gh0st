@@ -11,9 +11,7 @@
 
 use anyhow::{anyhow, Result};
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Thème de couleurs
-// ─────────────────────────────────────────────────────────────────────────────
 
 /// Sélectionne et persiste un thème de la TUI.
 pub fn set_theme(name: &str) -> Result<Vec<String>> {
@@ -28,9 +26,7 @@ pub fn set_theme(name: &str) -> Result<Vec<String>> {
     )])
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Tâches
-// ─────────────────────────────────────────────────────────────────────────────
 
 /// Commande `task`, indépendante de l'interface.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -133,9 +129,7 @@ pub fn task(cmd: TaskCmd) -> Result<Vec<String>> {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Modèle actif
-// ─────────────────────────────────────────────────────────────────────────────
 
 /// Définit le modèle actif (persisté dans la config globale).
 ///
@@ -173,9 +167,7 @@ pub fn set_model(id: &str) -> Result<Vec<String>> {
     Ok(vec![format!("Modèle actif: {id}")])
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Chaîne de routage (bascule)
-// ─────────────────────────────────────────────────────────────────────────────
 
 /// Chaîne de bascule effective, une ligne par endpoint.
 pub fn route_lines(settings: &crate::config::Settings) -> Vec<String> {
@@ -258,9 +250,7 @@ pub async fn route_auto(provider: &str, n: usize) -> Result<Vec<String>> {
     Ok(out)
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Quota
-// ─────────────────────────────────────────────────────────────────────────────
 
 pub async fn quota_report(provider: Option<&str>) -> Result<Vec<String>> {
     let settings = crate::config::resolve();
@@ -288,9 +278,7 @@ pub async fn quota_report(provider: Option<&str>) -> Result<Vec<String>> {
     Ok(out)
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // PDF
-// ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PdfCmd {
@@ -372,9 +360,7 @@ pub fn pdf(cmd: PdfCmd) -> Result<Vec<String>> {
     Ok(text.lines().map(|l| l.to_string()).collect())
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Catalogue d'API publiques
-// ─────────────────────────────────────────────────────────────────────────────
 
 /// Nombre de résultats par défaut (le CLI en affichait 10, la TUI 12).
 pub const APIS_DEFAULT_K: usize = 10;
@@ -418,9 +404,7 @@ pub fn apis_import(path: &str) -> Result<Vec<String>> {
     )])
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Personas
-// ─────────────────────────────────────────────────────────────────────────────
 
 pub fn persona_list() -> Vec<String> {
     let list = crate::personas::list();
@@ -459,9 +443,7 @@ pub fn persona_add(name: &str, content: &str) -> Result<Vec<String>> {
     )])
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Coffre
-// ─────────────────────────────────────────────────────────────────────────────
 
 pub fn vault_status() -> Vec<String> {
     vec![
@@ -483,9 +465,7 @@ pub fn vault_lock() -> Vec<String> {
     vec!["Coffre verrouillé.".to_string()]
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Embeddings
-// ─────────────────────────────────────────────────────────────────────────────
 
 pub fn embeddings_show() -> Vec<String> {
     match crate::config::load_global().embeddings {
@@ -536,9 +516,7 @@ pub fn embeddings_unset() -> Result<Vec<String>> {
     ])
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Providers
-// ─────────────────────────────────────────────────────────────────────────────
 
 /// Tableau des providers connus.
 ///
@@ -779,9 +757,7 @@ pub fn provider_remove(id: &str) -> Result<Vec<String>> {
     }])
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Base de connaissance (SQLite + FTS5)
-// ─────────────────────────────────────────────────────────────────────────────
 
 pub fn kb_stats() -> Result<Vec<String>> {
     Ok(crate::knowledge::stats()?
@@ -860,9 +836,7 @@ pub fn kb_log(n: usize) -> Vec<String> {
         .collect()
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Mémoire persistante
-// ─────────────────────────────────────────────────────────────────────────────
 
 /// Liste les entrées (les plus récentes d'abord) + l'état de l'embedder.
 pub fn memory_list(limit: usize) -> Vec<String> {
@@ -960,9 +934,7 @@ pub fn memory_forget(id: &str) -> Result<Vec<String>> {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Rôles
-// ─────────────────────────────────────────────────────────────────────────────
 
 /// Contenu effectif des rôles (données ; chaque interface met en forme).
 pub fn roles_snapshot() -> Vec<(&'static str, Option<String>)> {
@@ -1041,9 +1013,7 @@ pub async fn role_auto(provider: &str) -> Result<Vec<String>> {
     Ok(out)
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Recherche web
-// ─────────────────────────────────────────────────────────────────────────────
 
 /// Résultats de recherche, formatés pour l'affichage (`max` borné).
 pub async fn search(query: &str, max: usize) -> Result<Vec<String>> {
@@ -1059,9 +1029,7 @@ pub async fn search(query: &str, max: usize) -> Result<Vec<String>> {
     )])
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Sélection de modèle
-// ─────────────────────────────────────────────────────────────────────────────
 
 /// Avertissement unique (les deux interfaces en affichaient deux versions
 /// contradictoires : « benchmarks Artificial Analysis » vs « non benchmarké »).
@@ -1108,9 +1076,7 @@ pub async fn select_models(problem: &str, top: usize) -> Result<Vec<String>> {
     Ok(lines)
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Audit
-// ─────────────────────────────────────────────────────────────────────────────
 
 /// Les `n` dernières actions de l'agent, formatées en JSONL compact.
 pub fn audit_tail(n: usize) -> Vec<String> {
