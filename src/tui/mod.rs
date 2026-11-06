@@ -919,6 +919,56 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
         "/memory" => handle_memory(app, &args),
         "/embeddings" => handle_embeddings(app, &args),
         "/img" => handle_img(app, &args),
+        "/upgrade" => {
+            if !crate::upgrade::is_dev() {
+                app.messages.push(ChatMessage::notice(
+                    "commande dev : requiert un checkout (Cargo.toml + .git) ou ZER0_DEV=1",
+                ));
+                return;
+            }
+            match args.first().copied() {
+                None | Some("status") => {
+                    let dir = config::data_dir().join("upgrade");
+                    let newest = std::fs::read_dir(&dir).ok().and_then(|rd| {
+                        rd.flatten()
+                            .map(|e| e.path())
+                            .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("md"))
+                            .max_by_key(|p| p.metadata().and_then(|m| m.modified()).ok())
+                    });
+                    match newest {
+                        Some(p) => app.messages.push(ChatMessage::notice(format!(
+                            "dernier audit : {}\n\n/upgrade scan pour en refaire un.",
+                            p.display()
+                        ))),
+                        None => app.messages.push(ChatMessage::notice(
+                            "aucun audit. Lance `/upgrade scan` (dev).",
+                        )),
+                    }
+                }
+                Some("scan") => {
+                    let ui = ui_tx.clone();
+                    tokio::spawn(async move {
+                        let res = tokio::task::spawn_blocking(crate::upgrade::scan).await;
+                        match res {
+                            Ok(Ok(rep)) => {
+                                let _ = ui.send(UiEvent::Info(crate::upgrade::summary(&rep)));
+                            }
+                            Ok(Err(e)) => {
+                                let _ = ui.send(UiEvent::Error(format!("/upgrade scan : {e}")));
+                            }
+                            Err(e) => {
+                                let _ = ui.send(UiEvent::Error(format!(
+                                    "/upgrade scan interrompu : {e}"
+                                )));
+                            }
+                        }
+                    });
+                }
+                Some(other) => app.messages.push(ChatMessage::notice(format!(
+                    "usage: /upgrade [scan|status] (reçu: {other})"
+                ))),
+            }
+        }
         "/update" => cmd_update(app, &args, ui_tx),
         "/remember" => cmd_remember(&args, ui_tx),
         "/recall" => cmd_recall(&args, ui_tx),

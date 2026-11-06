@@ -360,6 +360,8 @@ mod tests {
         flatten(TREE, &mut listed);
 
         let src = include_str!("mod.rs");
+        // Commandes dev-only : absentes du menu utilisateur par choix.
+        const DEV_ONLY: &[&str] = &["/upgrade"];
         let mut missing = Vec::new();
         for line in src.lines() {
             let t = line.trim_start();
@@ -370,7 +372,8 @@ mod tests {
                 continue;
             };
             let cmd = &t[1..1 + end];
-            if cmd.starts_with('/') && !listed.iter().any(|c| c == cmd) {
+            if cmd.starts_with('/') && !DEV_ONLY.contains(&cmd) && !listed.iter().any(|c| c == cmd)
+            {
                 missing.push(cmd.to_string());
             }
         }
