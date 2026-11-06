@@ -1,3 +1,11 @@
+## v0.7.34 — `/upgrade scan` livré (2026-11-06)
+
+- `/upgrade scan` : audit lecture seule (git, unwrap/expect chauds, unsafe,
+  TODO, gros fichiers, `.zer0.bak`, doublons KB) ; rapport `audit-<date>.md`
+  + `.json` dans le dossier de données.
+- `/upgrade` / `/upgrade status` : dernier audit.
+- Dev-only (checkout ou `ZER0_DEV=1`), absent du menu utilisateur.
+
 ## v0.7.33 — `/upgrade scan` (dev) (2026-11-05)
 
 - Commande **dev-only** (`Cargo.toml` + `.git`, ou `ZER0_DEV=1`), absente du

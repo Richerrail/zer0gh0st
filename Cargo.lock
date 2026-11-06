@@ -2918,7 +2918,7 @@ dependencies = [
 
 [[package]]
 name = "zer0"
-version = "0.7.33"
+version = "0.7.34"
 dependencies = [
  "anyhow",
  "argon2",
