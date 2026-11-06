@@ -180,9 +180,18 @@ fn resolve_key(keys: &HashMap<String, String>, id: &str, pcfg: &ProviderCfg) -> 
     pcfg.key()
 }
 
+/// Verrouille un `Mutex` en récupérant d'un empoisonnement éventuel.
+///
+/// Un panic survenu dans un autre thread ne doit pas tuer la passerelle :
+/// on reprend le garde (`into_inner`) au lieu de paniquer à nouveau. Un
+/// gateway qui meurt = plus aucun accès aux modèles (DoS local).
+fn lock<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 impl AppState {
     fn key_for(&self, id: &str, pcfg: &ProviderCfg) -> Option<String> {
-        resolve_key(&self.keys.lock().expect("mutex"), id, pcfg)
+        resolve_key(&lock(&self.keys), id, pcfg)
     }
 }
 
@@ -361,7 +370,7 @@ async fn proxy(
 
     // 4) Rate-limit par provider.
     let rpm = state.cfg.limits.requests_per_minute;
-    if !window_allow(&mut state.windows.lock().expect("mutex"), provider_id, rpm) {
+    if !window_allow(&mut lock(&state.windows), provider_id, rpm) {
         return err(
             StatusCode::TOO_MANY_REQUESTS,
             "rate-limit zer0-gw (réessayez plus tard)",
@@ -502,7 +511,7 @@ async fn health(
     if let Some(r) = loopback_or_403(peer) {
         return r;
     }
-    let keys = state.keys.lock().expect("mutex");
+    let keys = lock(&state.keys);
     let providers: serde_json::Map<String, serde_json::Value> = state
         .cfg
         .providers
@@ -526,7 +535,7 @@ async fn admin_list(
     if let Some(r) = admin_guard(peer, &headers, state.admin_token.as_deref()) {
         return r;
     }
-    let keys = state.keys.lock().expect("mutex");
+    let keys = lock(&state.keys);
     let providers: serde_json::Map<String, serde_json::Value> = state
         .cfg
         .providers
@@ -578,7 +587,7 @@ async fn admin_set(
         return err(StatusCode::BAD_REQUEST, "api_key manquante ou invalide");
     };
     {
-        let mut keys = state.keys.lock().expect("mutex");
+        let mut keys = lock(&state.keys);
         keys.insert(id.clone(), key.to_string());
         if let Err(e) = save_keys(&state.keys_path, &keys) {
             log_line(
@@ -607,7 +616,7 @@ async fn admin_delete(
     }
     let id = provider.trim().to_ascii_lowercase();
     {
-        let mut keys = state.keys.lock().expect("mutex");
+        let mut keys = lock(&state.keys);
         keys.remove(&id);
         if let Err(e) = save_keys(&state.keys_path, &keys) {
             log_line(
@@ -731,6 +740,17 @@ async fn main() -> anyhow::Result<()> {
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn lock_recovers_from_a_poisoned_mutex() {
+    let m = std::sync::Mutex::new(7u8);
+    let _ = std::panic::catch_unwind(|| {
+        let _guard = m.lock().unwrap();
+        panic!("panic sous verrou");
+    });
+    // Le mutex est empoisonné : `lock()` doit quand même rendre la valeur.
+    assert_eq!(*lock(&m), 7);
+}
 
 #[cfg(test)]
 mod tests {
