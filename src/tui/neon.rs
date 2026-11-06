@@ -149,6 +149,7 @@ fn is_box_drawing(sym: &str) -> bool {
 ///
 /// `open = true` → le tiroir est sorti, on pousse vers l'autre sens (`<<`).
 /// Renvoie la zone de la poignée (pour l'onde et le clic).
+#[allow(dead_code)] // rail supprimé ; gardé pour un futur tiroir
 pub fn draw_handle(f: &mut Frame, column: Rect, open: bool) -> Rect {
     let inner = Rect {
         x: column.x + 1,
