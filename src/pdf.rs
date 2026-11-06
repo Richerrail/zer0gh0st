@@ -2,7 +2,6 @@ use anyhow::{anyhow, Result};
 use lopdf::{dictionary, Document, Object, ObjectId};
 use std::collections::BTreeMap;
 
-/// Basic PDF info.
 pub fn info(path: &str) -> Result<String> {
     let doc = Document::load(path)?;
     let pages = doc.get_pages().len();

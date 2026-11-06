@@ -2,7 +2,6 @@ use serde_json::json;
 
 use super::ToolSpec;
 
-/// Longueur maximale renvoyée au modèle.
 const MAX_CHARS: usize = 16_000;
 
 pub fn spec() -> ToolSpec {
@@ -22,8 +21,6 @@ pub fn spec() -> ToolSpec {
     }
 }
 
-/// Convertit du HTML en texte lisible (sans dépendance) : retire scripts,
-/// styles, balises et commentaires, décode les entités usuelles.
 pub fn html_to_text(html: &str) -> String {
     let mut out = String::with_capacity(html.len() / 2);
     let mut rest = html;
@@ -43,9 +40,8 @@ pub fn html_to_text(html: &str) -> String {
             break;
         }
 
-        // Balise : jusqu'au prochain '>'.
         let Some(end) = rest.find('>') else {
-            break; // balise non fermée : on ignore la fin
+            break;
         };
         let tag = &rest[1..end];
         rest = &rest[end + 1..];
@@ -57,7 +53,7 @@ pub fn html_to_text(html: &str) -> String {
             .next()
             .unwrap_or("");
         if lower.starts_with("--") || lower.starts_with('!') {
-            continue; // commentaire / doctype
+            continue;
         }
         if !lower.starts_with('/') {
             if name == "script" {
@@ -80,8 +76,6 @@ pub fn html_to_text(html: &str) -> String {
 }
 
 fn push_text(out: &mut String, s: &str) {
-    // Décodage des entités les plus courantes (`&amp;` en dernier pour ne pas
-    // décoder deux fois une entité échappée).
     let decoded = s
         .replace("&nbsp;", " ")
         .replace("&lt;", "<")

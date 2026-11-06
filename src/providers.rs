@@ -1,15 +1,10 @@
 use crate::config;
 
-/// Cost profile of a provider.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FreeKind {
-    /// Runs locally, no cost.
     Local,
-    /// Hosts explicit `:free` / $0 models (e.g. OpenRouter).
     FreeModels,
-    /// Offers a free tier / free credits on signup.
     FreeTier,
-    /// Paid only (may still have trial credits).
     Paid,
 }
 
@@ -24,20 +19,14 @@ impl FreeKind {
     }
 }
 
-/// A configured provider. Built-in ones come from the catalog; custom ones
-/// come from `~/.config/zer0/config.toml`.
 #[derive(Clone, Debug)]
 pub struct Provider {
     pub id: String,
     pub name: String,
-    /// Base URL including the API version prefix (contains `/chat/completions`).
     pub base_url: String,
-    /// Environment variable that can hold the API key.
     pub env_key: String,
-    /// Where to create a key (empty for custom providers).
     pub signup: String,
     pub free: FreeKind,
-    /// True when defined by the user rather than the built-in catalog.
     pub custom: bool,
 }
 
@@ -133,7 +122,6 @@ const BUILTINS: &[Builtin] = &[
     },
 ];
 
-/// The built-in catalog only.
 pub fn builtins() -> Vec<Provider> {
     BUILTINS
         .iter()
@@ -149,7 +137,6 @@ pub fn builtins() -> Vec<Provider> {
         .collect()
 }
 
-/// Built-in catalog + user-defined custom providers.
 pub fn all() -> Vec<Provider> {
     let mut v = builtins();
     for (id, cp) in config::load_global().custom {
@@ -169,7 +156,6 @@ pub fn all() -> Vec<Provider> {
     v
 }
 
-/// Resolve a provider by id, alias, or custom name.
 pub fn find(id: &str) -> Option<Provider> {
     let id = normalize(id);
     all().into_iter().find(|p| p.id == id)
@@ -177,8 +163,6 @@ pub fn find(id: &str) -> Option<Provider> {
 
 fn normalize(id: &str) -> String {
     let lower = id.trim().to_ascii_lowercase();
-    // Ancien schéma `gw-<id>` → `<id>` : un seul identifiant par provider
-    // (le transport passerelle/direct est décidé par `config::resolve`).
     let lower = lower.strip_prefix("gw-").unwrap_or(&lower).to_string();
     match lower.as_str() {
         "open-router" | "open_router" => "openrouter".into(),
@@ -193,7 +177,6 @@ fn normalize(id: &str) -> String {
     }
 }
 
-/// Sensible default model per provider.
 pub fn default_model(id: &str) -> Option<&'static str> {
     match id {
         "local" => Some("qwen3.5-4B-super-coder"),

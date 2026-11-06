@@ -1,15 +1,4 @@
-#!/usr/bin/env bash
-# update.sh — installe le DERNIER binaire zer0 publié sur les Releases GitHub.
-#
-# À quoi ça sert, si `zer0 update` existe déjà ? À installer/rafraîchir un
-# lanceur stable dans ~/.local/bin (utile quand tu construis aussi depuis les
-# sources : `cargo build` écrit dans target/release, pas dans ton PATH).
-#
-#   ./scripts/update.sh                 # → ~/.local/bin/zer0gh0st
-#   BIN_DIR=/usr/local/bin sudo ./scripts/update.sh
-#   NAME=zer0 ./scripts/update.sh       # autre nom de lanceur
-#
-# Vérifie le SHA256 si la release publie SHA256SUMS (sinon le dit).
+
 set -euo pipefail
 
 REPO="${REPO:-Richerrail/zer0gh0st}"

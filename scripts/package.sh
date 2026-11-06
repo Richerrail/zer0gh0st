@@ -1,15 +1,9 @@
-#!/usr/bin/env bash
-# Régénère le dossier public `gh0st/` : sources + docs + scripts, SANS modèles,
-# clés, données ni binaires. Prêt à pousser sur GitHub.
-#
-#   ./scripts/package.sh
-#
+
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/gh0st"
 
-# Préserve un éventuel dépôt git déjà initialisé dans gh0st/
 if [ -d "$OUT/.git" ]; then
   find "$OUT" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
 else
@@ -17,37 +11,31 @@ else
   mkdir -p "$OUT"
 fi
 cd "$ROOT"
-# Code et scripts
+
 cp -r src scripts "$OUT/"
 
-# CI (GitHub Actions)
 if [ -d .github ]; then
   cp -r .github "$OUT/"
 fi
 
-# Site web (GitHub Pages)
 if [ -d site ]; then
   cp -r site "$OUT/"
 fi
 
-# Sources / manifestes / licences / docs
 cp Cargo.toml Cargo.lock LICENSE config.example.toml \
    README.md SPEC.md SAFETY.md ARCHITECTURE.md ECOSYSTEM.md CHANGELOG.md \
    ROADMAP.md ROADMAP_FUN.md ROADMAP_PORT_SLASH.md BRAINSTORM_ZEROCHAN.md 0BOX-TEST.md \
    "$OUT/"
 
-# Images (capture d'écran + illustration hero), optionnelles
 for img in screenshot.png zer0-ghost.png; do
   if [ -f "$img" ]; then
     cp "$img" "$OUT/"
   fi
 done
 
-# Dossiers de contenu : gardés vides (placeholders)
 mkdir -p "$OUT/music" "$OUT/base_connaissance" "$OUT/mods"
 touch "$OUT/music/.gitkeep" "$OUT/base_connaissance/.gitkeep"
 
-# .gitignore public
 cat > "$OUT/.gitignore" <<'EOF'
 # Build output
 /target
@@ -84,7 +72,6 @@ cat > "$OUT/.gitignore" <<'EOF'
 /demo.mp4
 EOF
 
-# mods/README.md public
 cat > "$OUT/mods/README.md" <<'EOF'
 # `mods/` — modules externes (optionnels)
 
@@ -102,9 +89,6 @@ Si un module est absent, la commande affiche `introuvable` — le reste fonction
 Les modules **natifs** (`/radio`, `/bintime`, `/pong`) sont en Rust dans `src/fun/`.
 EOF
 
-# Genericise les chemins personnels dans la doc
-# ZER0|GH0ST vit dans son propre dossier de données (`zer0gh0st`), pas dans
-# celui de l'ancienne application Python (`zer0`) : on ne réécrit que le nôtre.
 sed -i 's#/home/[A-Za-z0-9_]*/\.local/share/zer0gh0st#~/.local/share/zer0gh0st#g' "$OUT"/*.md || true
 sed -i 's#/home/[A-Za-z0-9_]*/ZER0v1#~/ZER0v1#g' "$OUT"/*.md || true
 

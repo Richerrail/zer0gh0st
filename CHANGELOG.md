@@ -1,3 +1,14 @@
+## Non publié
+
+- **Code sans commentaires** : commentaires Rust (`//`, `/* */`), shell,
+  PowerShell, batch, Python, YAML, systemd, nftables et Tape retirés du dépôt
+  (~3 100 lignes). Aucun changement de comportement : l'aide du CLI est
+  conservée (les doc-comments clap sont devenus des attributs `about`/`help`,
+  `docs/COMMANDS.md` reste identique au binaire) et les heredocs/shebangs sont
+  préservés. Seuls subsistent les fichiers où le commentaire *est* le
+  contenu : `config.example.toml`, `deploy/gw.example.toml`,
+  `.github/PULL_REQUEST_TEMPLATE.md`.
+
 ## v0.7.31 — R1 : zer0-gw robuste (2026-11-05)
 
 - `zer0-gw` : plus de `expect("mutex")` en production — `lock()` récupère un

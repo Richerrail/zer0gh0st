@@ -12,8 +12,6 @@ use crate::llm::llama::ChatOptions;
 #[derive(Parser, Debug)]
 #[command(
     name = "zer0",
-    // L'usage affiché ne doit pas dépendre du nom du fichier téléchargé
-    // (`zer0-x86_64-unknown-linux-gnu` avant installation).
     bin_name = "zer0",
     version,
     about = "ZER0|GH0ST - agent IA en terminal (CLI/TUI)"
@@ -22,275 +20,304 @@ struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
 
-    /// Override the OpenAI-compatible base URL (includes `/v1`).
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Override the OpenAI-compatible base URL (includes `/v1`)"
+    )]
     server: Option<String>,
 
-    /// Override the model id.
-    #[arg(long)]
+    #[arg(long, help = "Override the model id")]
     model: Option<String>,
 
-    /// Override the built-in system prompt.
-    #[arg(long)]
+    #[arg(long, help = "Override the built-in system prompt")]
     system_prompt: Option<String>,
 
-    /// Start without any tools enabled.
-    #[arg(long, default_value_t = false)]
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Start without any tools enabled"
+    )]
     no_tools: bool,
 
-    /// Cap the number of tokens generated per model call.
-    /// Kept low by default: many providers count the *reserved* output against
-    /// the rate limit, so a huge value burns free-tier quota fast.
-    #[arg(long, default_value_t = 8192)]
+    #[arg(
+        long,
+        default_value_t = 8192,
+        help = "Cap the number of tokens generated per model call. Kept low by default: many providers count the *reserved* output against the rate limit, so a huge value burns free-tier quota fast"
+    )]
     max_tokens: u32,
 
-    /// Enable the model's reasoning/thinking mode (much slower on weak CPUs).
-    #[arg(long, default_value_t = false)]
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Enable the model's reasoning/thinking mode (much slower on weak CPUs)"
+    )]
     think: bool,
 
-    /// Start with the shell tool (`code_exec`, F4) enabled.
-    #[arg(long, default_value_t = false)]
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Start with the shell tool (`code_exec`, F4) enabled"
+    )]
     allow_exec: bool,
 
-    /// Reprendre la conversation active au démarrage (sinon : nouvelle conversation).
-    #[arg(long, default_value_t = false)]
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Reprendre la conversation active au démarrage (sinon : nouvelle conversation)"
+    )]
     resume: bool,
 
-    /// Run a single prompt headlessly, print the answer, then exit.
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Run a single prompt headlessly, print the answer, then exit"
+    )]
     once: Option<String>,
 
-    /// Headless: attach an image (PNG/JPEG/WebP/GIF) to the prompt (vision).
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Headless: attach an image (PNG/JPEG/WebP/GIF) to the prompt (vision)"
+    )]
     img: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    /// Manage providers and their API keys.
+    #[command(about = "Manage providers and their API keys")]
     Provider {
         #[command(subcommand)]
         action: ProviderAction,
     },
-    /// Update the binary from the GitHub Releases.
+    #[command(about = "Update the binary from the GitHub Releases")]
     Update {
-        /// Only check whether a newer version exists.
-        #[arg(long)]
+        #[arg(long, help = "Only check whether a newer version exists")]
         check: bool,
-        /// Reinstall even when the version is already current.
-        #[arg(long)]
+        #[arg(long, help = "Reinstall even when the version is already current")]
         force: bool,
     },
-    /// Moniteur système (CPU, RAM, températures, processus)
-    #[command(name = "t0p")]
+    #[command(
+        name = "t0p",
+        about = "Moniteur système (CPU, RAM, températures, processus)"
+    )]
     Top {
-        /// Rafraîchir en continu
-        #[arg(long)]
+        #[arg(long, help = "Rafraîchir en continu")]
         watch: bool,
-        /// Intervalle de rafraîchissement (secondes)
-        #[arg(long, default_value_t = 1)]
+        #[arg(
+            long,
+            default_value_t = 1,
+            help = "Intervalle de rafraîchissement (secondes)"
+        )]
         interval: u64,
     },
-    /// List the models of a provider.
+    #[command(about = "List the models of a provider")]
     Models {
-        /// Only show free (`:free` / $0) models.
-        #[arg(long)]
+        #[arg(long, help = "Only show free (`:free` / $0) models")]
         free: bool,
-        /// Provider id (defaults to the active provider).
-        #[arg(long)]
+        #[arg(long, help = "Provider id (defaults to the active provider)")]
         provider: Option<String>,
     },
-    /// Set the active model.
+    #[command(about = "Set the active model")]
     Model {
         #[command(subcommand)]
         action: ModelAction,
     },
-    /// Recommend free models for a given problem.
+    #[command(about = "Recommend free models for a given problem")]
     Select {
-        /// The problem statement.
+        #[arg(help = "The problem statement")]
         problem: Vec<String>,
     },
-    /// Ordered provider failover chain.
+    #[command(about = "Ordered provider failover chain")]
     Route {
         #[command(subcommand)]
         action: RouteAction,
     },
-    /// Named model presets (role -> provider/model).
+    #[command(about = "Named model presets (role -> provider/model)")]
     Role {
         #[command(subcommand)]
         action: RoleAction,
     },
-    /// Project configuration.
+    #[command(about = "Project configuration")]
     Project {
         #[command(subcommand)]
         action: ProjectAction,
     },
-    /// Persistent memory (honest store).
+    #[command(about = "Persistent memory (honest store)")]
     Memory {
         #[command(subcommand)]
         action: MemoryAction,
     },
-    /// Configure the embedding backend for semantic memory.
+    #[command(about = "Configure the embedding backend for semantic memory")]
     Embeddings {
         #[command(subcommand)]
         action: EmbeddingsAction,
     },
-    /// Catalogue of public APIs (source: public-apis/public-apis).
+    #[command(about = "Catalogue of public APIs (source: public-apis/public-apis)")]
     Apis {
         #[command(subcommand)]
         action: ApisAction,
     },
-    /// Markdown task list (division of work).
+    #[command(about = "Markdown task list (division of work)")]
     Task {
         #[command(subcommand)]
         action: TaskAction,
     },
-    /// Web search (DuckDuckGo).
+    #[command(about = "Web search (DuckDuckGo)")]
     Search {
         query: Vec<String>,
         #[arg(long)]
         max: Option<usize>,
     },
-    /// Personas (system-prompt presets).
+    #[command(about = "Personas (system-prompt presets)")]
     Whoami {
         #[command(subcommand)]
         action: WhoamiAction,
     },
-    /// Encrypted API-key vault.
+    #[command(about = "Encrypted API-key vault")]
     Vault {
         #[command(subcommand)]
         action: VaultAction,
     },
-    /// Local PDF tools.
+    #[command(about = "Local PDF tools")]
     Pdf {
         #[command(subcommand)]
         action: PdfAction,
     },
-    /// Calibrated code-quality score (rubric via the review role).
+    #[command(about = "Calibrated code-quality score (rubric via the review role)")]
     Jev { file: String },
-    /// Référence Markdown des commandes (générée depuis le CLI).
+    #[command(about = "Référence Markdown des commandes (générée depuis le CLI)")]
     Commands,
-    /// Journal d'audit des actions de l'agent (commandes exécutées, fichiers écrits).
+    #[command(
+        about = "Journal d'audit des actions de l'agent (commandes exécutées, fichiers écrits)"
+    )]
     Audit {
-        /// Nombre de lignes à afficher (les plus récentes).
-        #[arg(long, default_value_t = 50)]
+        #[arg(
+            long,
+            default_value_t = 50,
+            help = "Nombre de lignes à afficher (les plus récentes)"
+        )]
         tail: usize,
     },
-    /// Preview: CRT binary clock (full screen).
+    #[command(about = "Preview: CRT binary clock (full screen)")]
     Bintime,
-    /// Preview: Pong vs the agent (full screen).
+    #[command(about = "Preview: Pong vs the agent (full screen)")]
     Pong,
-    /// Hidden: dump one Pong frame (diagnostic).
-    #[command(hide = true)]
+    #[command(hide = true, about = "Hidden: dump one Pong frame (diagnostic)")]
     PongFrame,
-    /// Teste la transcription STT sur un fichier audio (WAV) — sans micro.
+    #[command(about = "Teste la transcription STT sur un fichier audio (WAV) — sans micro")]
     Stt { file: String },
-    /// Jimmy le cancre — répond « je sais pas ».
+    #[command(about = "Jimmy le cancre — répond « je sais pas »")]
     Jimmy { task: Vec<String> },
-    /// Jimmy d'abord, puis provoque un vrai agent (rôle `code` par défaut).
+    #[command(about = "Jimmy d'abord, puis provoque un vrai agent (rôle `code` par défaut)")]
     Provoke {
         #[arg(default_value = "code")]
         role: String,
         task: Vec<String>,
     },
-    /// Knowledge base (SQLite + FTS5).
+    #[command(about = "Knowledge base (SQLite + FTS5)")]
     Kb {
         #[command(subcommand)]
         action: KbAction,
     },
-    /// Bot Telegram : converse avec Zer0 à distance (long polling).
+    #[command(about = "Bot Telegram : converse avec Zer0 à distance (long polling)")]
     Telegram {
-        /// Token du bot (sinon config ou ZER0_TELEGRAM_TOKEN).
-        #[arg(long)]
+        #[arg(long, help = "Token du bot (sinon config ou ZER0_TELEGRAM_TOKEN)")]
         token: Option<String>,
-        /// Identifiants Telegram autorisés (sinon auto-claim du premier chat).
-        #[arg(long)]
+        #[arg(
+            long,
+            help = "Identifiants Telegram autorisés (sinon auto-claim du premier chat)"
+        )]
         allow: Vec<i64>,
     },
-    /// Débat séquentiel multi-agents (0box) — headless, sans TUI.
-    #[command(name = "0box", visible_alias = "zer0box")]
+    #[command(
+        name = "0box",
+        visible_alias = "zer0box",
+        about = "Débat séquentiel multi-agents (0box) — headless, sans TUI"
+    )]
     ZeroBox {
-        /// Le sujet du débat (une phrase).
+        #[arg(help = "Le sujet du débat (une phrase)")]
         topic: Vec<String>,
-        /// Perspectives du débat, séparées par des virgules (défaut : code,reasoning,main).
-        #[arg(long, value_delimiter = ',')]
+        #[arg(
+            long,
+            value_delimiter = ',',
+            help = "Perspectives du débat, séparées par des virgules (défaut : code,reasoning,main)"
+        )]
         perspectives: Vec<String>,
     },
-    /// Usage observé des modèles + solde de la clé si le provider le publie.
+    #[command(about = "Usage observé des modèles + solde de la clé si le provider le publie")]
     Quota {
-        /// Provider à interroger (défaut : provider actif).
-        #[arg(long)]
+        #[arg(long, help = "Provider à interroger (défaut : provider actif)")]
         provider: Option<String>,
     },
-    /// Vote pour zer0gh0st : le pouce haut = une star GitHub, le bas = son retrait.
+    #[command(
+        about = "Vote pour zer0gh0st : le pouce haut = une star GitHub, le bas = son retrait"
+    )]
     Vote {
-        /// Action : `up` (star), `down` (retrait), `status`, `login`, `logout`.
+        #[arg(help = "Action : `up` (star), `down` (retrait), `status`, `login`, `logout`")]
         action: Option<String>,
     },
 }
 
 #[derive(Subcommand, Debug)]
 enum ProviderAction {
-    /// List all known providers and whether a key is configured.
+    #[command(about = "List all known providers and whether a key is configured")]
     List,
-    /// Show where the keys live: zer0-gw gateway status (never the values).
+    #[command(about = "Show where the keys live: zer0-gw gateway status (never the values)")]
     Keys,
-    /// Store an API key for a known provider (reads $ENV if omitted).
+    #[command(about = "Store an API key for a known provider (reads $ENV if omitted)")]
     Add { id: String, key: Option<String> },
-    /// Define a custom OpenAI-compatible provider.
+    #[command(about = "Define a custom OpenAI-compatible provider")]
     AddCustom {
         id: String,
-        /// Base URL including `/v1` (or equivalent), e.g. https://host/v1
+        #[arg(help = "Base URL including `/v1` (or equivalent), e.g. https://host/v1")]
         base_url: String,
         #[arg(long)]
         name: Option<String>,
         #[arg(long)]
         env: Option<String>,
     },
-    /// Set the active provider.
+    #[command(about = "Set the active provider")]
     Use { id: String },
-    /// Remove a stored API key.
+    #[command(about = "Remove a stored API key")]
     Remove { id: String },
 }
 
 #[derive(Subcommand, Debug)]
 enum ModelAction {
-    /// Set the active model.
+    #[command(about = "Set the active model")]
     Use { id: String },
 }
 
 #[derive(Subcommand, Debug)]
 enum RouteAction {
-    /// Show the ordered failover chain.
+    #[command(about = "Show the ordered failover chain")]
     List,
-    /// Append a route: `zer0 route add openrouter/qwen/qwen3.8-27b:free`
+    #[command(about = "Append a route: `zer0 route add openrouter/qwen/qwen3.8-27b:free`")]
     Add { route: String },
-    /// Fill the chain from the provider's free models (ranked).
+    #[command(about = "Fill the chain from the provider's free models (ranked)")]
     Auto {
-        /// Provider to pull free models from (default: openrouter).
-        #[arg(long)]
+        #[arg(long, help = "Provider to pull free models from (default: openrouter)")]
         provider: Option<String>,
-        /// How many models to keep.
-        #[arg(long)]
+        #[arg(long, help = "How many models to keep")]
         top: Option<usize>,
     },
-    /// Remove all failover routes.
+    #[command(about = "Remove all failover routes")]
     Clear,
 }
 
 #[derive(Subcommand, Debug)]
 enum RoleAction {
-    /// Show roles and their models.
+    #[command(about = "Show roles and their models")]
     List,
-    /// Disable role routing: one model (the active provider) for everything.
+    #[command(about = "Disable role routing: one model (the active provider) for everything")]
     Off,
-    /// Re-enable automatic role routing.
+    #[command(about = "Re-enable automatic role routing")]
     On,
-    /// Associate a role with a model: `zer0 role set code openrouter/qwen/qwen3.8-27b:free`
+    #[command(
+        about = "Associate a role with a model: `zer0 role set code openrouter/qwen/qwen3.8-27b:free`"
+    )]
     Set { role: String, route: String },
-    /// Remove a role preset.
+    #[command(about = "Remove a role preset")]
     Unset { role: String },
-    /// Auto-assign each role to the best free model for its category.
+    #[command(about = "Auto-assign each role to the best free model for its category")]
     Auto {
         #[arg(long)]
         provider: Option<String>,
@@ -299,102 +326,102 @@ enum RoleAction {
 
 #[derive(Subcommand, Debug)]
 enum ProjectAction {
-    /// Show the current project config.
+    #[command(about = "Show the current project config")]
     Show,
-    /// Create a `.zer0/project.toml` template.
+    #[command(about = "Create a `.zer0/project.toml` template")]
     Init,
 }
 
 #[derive(Subcommand, Debug)]
 enum MemoryAction {
-    /// List stored entries.
+    #[command(about = "List stored entries")]
     List {
         #[arg(long)]
         limit: Option<usize>,
     },
-    /// Save a fact: `zer0 memory save "text" [--trigger "future query"]`
+    #[command(about = "Save a fact: `zer0 memory save \"text\" [--trigger \"future query\"]`")]
     Save {
         text: Vec<String>,
         #[arg(long)]
         trigger: Option<String>,
     },
-    /// Search memory: `zer0 memory search "query"`
+    #[command(about = "Search memory: `zer0 memory search \"query\"`")]
     Search {
         query: Vec<String>,
         #[arg(long)]
         k: Option<usize>,
     },
-    /// Show the store path and counts.
+    #[command(about = "Show the store path and counts")]
     Stats,
-    /// Delete an entry by id.
+    #[command(about = "Delete an entry by id")]
     Forget { id: String },
-    /// Delete all entries.
+    #[command(about = "Delete all entries")]
     Clear,
 }
 
 #[derive(Subcommand, Debug)]
 enum EmbeddingsAction {
-    /// Configure the embedding backend.
+    #[command(about = "Configure the embedding backend")]
     Set { provider: String, model: String },
-    /// Remove the embedding backend.
+    #[command(about = "Remove the embedding backend")]
     Unset,
-    /// Show the current embedding backend.
+    #[command(about = "Show the current embedding backend")]
     Show,
 }
 
 #[derive(Subcommand, Debug)]
 enum TaskAction {
-    /// List tasks.
+    #[command(about = "List tasks")]
     List,
-    /// Add a task.
+    #[command(about = "Add a task")]
     Add {
         text: Vec<String>,
         #[arg(long)]
         role: Option<String>,
     },
-    /// Mark a task as done.
+    #[command(about = "Mark a task as done")]
     Done { id: String },
-    /// Mark a task as in progress.
+    #[command(about = "Mark a task as in progress")]
     Claim { id: String },
-    /// Remove a task by id.
+    #[command(about = "Remove a task by id")]
     Rm { id: String },
-    /// Remove all completed ([x]) tasks.
+    #[command(about = "Remove all completed ([x]) tasks")]
     Clear,
 }
 
 #[derive(Subcommand, Debug)]
 enum WhoamiAction {
-    /// List available personas.
+    #[command(about = "List available personas")]
     List,
-    /// Show a persona's content.
+    #[command(about = "Show a persona's content")]
     Show { name: String },
-    /// Create a persona from a file (`-` for stdin).
+    #[command(about = "Create a persona from a file (`-` for stdin)")]
     Add { name: String, file: String },
 }
 
 #[derive(Subcommand, Debug)]
 enum VaultAction {
-    /// Show vault status.
+    #[command(about = "Show vault status")]
     Status,
-    /// Encrypt the keys from config.toml into the vault.
+    #[command(about = "Encrypt the keys from config.toml into the vault")]
     Setup,
-    /// Unlock the vault for this session.
+    #[command(about = "Unlock the vault for this session")]
     Unlock,
-    /// Lock the vault.
+    #[command(about = "Lock the vault")]
     Lock,
-    /// Delete the vault (keys stay forgotten).
+    #[command(about = "Delete the vault (keys stay forgotten)")]
     Reset,
 }
 
 #[derive(Subcommand, Debug)]
 enum PdfAction {
-    /// Page count and metadata.
+    #[command(about = "Page count and metadata")]
     Info { path: String },
-    /// Extract text.
+    #[command(about = "Extract text")]
     Text { path: String },
-    /// Merge: `zer0 pdf merge out.pdf a.pdf b.pdf`
+    #[command(about = "Merge: `zer0 pdf merge out.pdf a.pdf b.pdf`")]
     Merge { output: String, inputs: Vec<String> },
-    /// Keep pages first..=last: `zer0 pdf split in.pdf out.pdf 1 3`
+    #[command(about = "Keep pages first..=last: `zer0 pdf split in.pdf out.pdf 1 3`")]
     Split {
         path: String,
         output: String,
@@ -405,60 +432,53 @@ enum PdfAction {
 
 #[derive(Subcommand, Debug)]
 enum KbAction {
-    /// Show store statistics.
+    #[command(about = "Show store statistics")]
     Stats,
-    /// Search the knowledge base.
+    #[command(about = "Search the knowledge base")]
     Search {
         query: Vec<String>,
         #[arg(long)]
         k: Option<usize>,
     },
-    /// Index a directory (default: <ZER0v1>/base_connaissance).
+    #[command(about = "Index a directory (default: <ZER0v1>/base_connaissance)")]
     Ingest {
         dir: Option<String>,
         #[arg(long)]
         embed: bool,
     },
-    /// Rebuild the FTS5 index.
+    #[command(about = "Rebuild the FTS5 index")]
     Rebuild,
-    /// Retire de l'index les sources dont le fichier n'existe plus.
+    #[command(about = "Retire de l'index les sources dont le fichier n'existe plus")]
     Purge,
-    /// Fusionne les sources en double (chemin absolu vs relatif).
+    #[command(about = "Fusionne les sources en double (chemin absolu vs relatif)")]
     Dedupe,
-    /// Retire de l'index les sources dont le chemin contient ce motif.
+    #[command(about = "Retire de l'index les sources dont le chemin contient ce motif")]
     Drop { source: String },
-    /// Show the knowledge-injection log.
+    #[command(about = "Show the knowledge-injection log")]
     Log {
         #[arg(long, default_value_t = 15)]
         lines: usize,
     },
 }
 
-/// Catalogue d'APIs publiques (public-apis/public-apis).
 #[derive(Subcommand, Debug)]
 enum ApisAction {
-    /// Import a TSV catalogue (see scripts/kb-import-public-apis.sh).
+    #[command(about = "Import a TSV catalogue (see scripts/kb-import-public-apis.sh)")]
     Import { path: String },
-    /// Search the catalogue.
+    #[command(about = "Search the catalogue")]
     Search {
         query: Vec<String>,
         #[arg(long)]
         k: Option<usize>,
-        /// Only APIs usable without an API key.
-        #[arg(long)]
+        #[arg(long, help = "Only APIs usable without an API key")]
         keyless: bool,
     },
-    /// Categories and counts.
+    #[command(about = "Categories and counts")]
     Categories,
-    /// Catalogue status (count, source, import date).
+    #[command(about = "Catalogue status (count, source, import date)")]
     Stats,
 }
 
-/// Référence Markdown des commandes, **générée depuis clap**.
-///
-/// La doc des commandes était écrite à la main dans le README : elle dérivait à
-/// chaque ajout. Ici, la source est le CLI lui-même ; `docs/COMMANDS.md` est
-/// comparé à cette sortie par un test, donc toute divergence casse la CI.
 pub fn commands_markdown() -> String {
     use clap::CommandFactory;
     let mut cmd = Cli::command();
@@ -515,18 +535,11 @@ fn render_command(cmd: &mut clap::Command, path: &str, out: &mut String, level: 
     }
 }
 
-/// Point d'entrée du binaire `zer0` (CLI + TUI).
 pub async fn entry() -> Result<()> {
-    // Ancien schéma `gw-<id>` → identifiant simple (migration silencieuse, une fois).
     let _ = config::migrate_gateway_prefix();
-    // Une config illisible ne doit jamais être silencieuse : on sauvegarde, on
-    // refuse les écritures, et on le dit ici (avant toute commande).
     if let Some(msg) = config::corruption() {
         eprintln!("⚠ configuration : {msg}");
     }
-    // Alias binaire : une copie ou un lien dur de `zer0(.exe)` nommé `zer0box(.exe)`
-    // lance directement le débat — `zer0box "sujet"` == `zer0 0box "sujet"`.
-    // Créer le lien : New-Item -ItemType HardLink -Path zer0box.exe -Target zer0.exe
     let mut args: Vec<String> = std::env::args().collect();
     let invoked = std::path::Path::new(&args[0])
         .file_stem()
@@ -551,7 +564,6 @@ pub async fn entry() -> Result<()> {
         .system_prompt
         .unwrap_or_else(|| DEFAULT_SYSTEM.to_string());
     system = config::system_prompt_override().unwrap_or(system);
-    // Mode local : prompt court dédié, sauf si `--system` a été imposé.
     if !explicit_system && config::resolve().provider_id == "local" {
         system = config::local_system_prompt();
     }
@@ -578,8 +590,6 @@ pub async fn entry() -> Result<()> {
     }
 
     if let Some(prompt) = cli.once.clone() {
-        // Contexte runtime : l'outil `0box` (appelé par le modèle) a besoin des
-        // mêmes réglages que l'agent pour lancer un vrai débat.
         tools::set_runtime(tools::Runtime {
             settings: settings.clone(),
             system: system.clone(),
@@ -599,7 +609,6 @@ pub async fn entry() -> Result<()> {
         .await;
     }
 
-    // Même contexte pour la TUI (l'outil 0box y est atteignable par le modèle).
     tools::set_runtime(tools::Runtime {
         settings: settings.clone(),
         system: system.clone(),
@@ -620,7 +629,6 @@ pub async fn entry() -> Result<()> {
     .await
 }
 
-/// Accept both `http://host:port` and `http://host:port/v1` forms.
 fn normalize_server(s: &str) -> String {
     let s = s.trim_end_matches('/');
     if s.contains("/v1") || s.contains("/v1beta") || s.contains("/compatible-mode") {
@@ -693,18 +701,12 @@ async fn run_command(cmd: Command) -> Result<()> {
                     println!("{}", crate::vote::act(crate::vote::Action::Down).await);
                 }
                 "login" | "connect" => {
-                    // Device flow OAuth : l'utilisateur valide un code dans son
-                    // navigateur, une fois. Le jeton est ensuite rangé dans le
-                    // coffre → les votes suivants sont automatiques.
                     let creds = crate::vote::device_login(|code, url| {
                         println!("Ouvre {url} et saisis le code : {code}");
                     })
                     .await?;
                     crate::vault::put("github", &creds.access)?;
                     match creds.refresh {
-                        // App à jetons expirables : on garde aussi le refresh
-                        // token (chiffré) → le vote reste automatique après
-                        // expiration (8 h). **Opt-in** : absent = rien à faire.
                         Some(rt) => {
                             crate::vault::put("github_refresh", &rt)?;
                             println!("✅ Jeton GitHub enregistré (chiffré) — avec renouvellement automatique.");
@@ -750,7 +752,6 @@ async fn jimmy_cmd(task: Vec<String>) -> Result<()> {
 }
 
 async fn provoke_cmd(role: String, task: Vec<String>) -> Result<()> {
-    // Le 1er mot n'est un rôle que s'il est connu ; sinon il fait partie de la tâche.
     let (role, t) = if route::KNOWN_ROLES.contains(&role.as_str()) {
         (role, task.join(" "))
     } else {
@@ -787,9 +788,6 @@ async fn provoke_cmd(role: String, task: Vec<String>) -> Result<()> {
     Ok(())
 }
 
-/// Débat 0box en mode headless : les mêmes règles que la TUI (`/0box`), sans interface.
-/// Permet de tester/scripter le module de débat (0BOX-TEST l'exigeait — jusqu'ici
-/// le débat n'était exécutable qu'interactivement, donc invérifiable en CI).
 async fn zerobox_cmd(topic: Vec<String>, perspectives: Vec<String>) -> Result<()> {
     use std::io::Write;
 
@@ -815,9 +813,6 @@ async fn zerobox_cmd(topic: Vec<String>, perspectives: Vec<String>) -> Result<()
         );
     }
     let system = config::system_prompt_override().unwrap_or_else(|| DEFAULT_SYSTEM.to_string());
-    // Même enrichissement que la TUI (tui:172) et --once : sans le bloc Environnement
-    // (OS, dossiers), les modèles croyaient être sous Linux et perdaient leurs
-    // itérations sur `cat`/`ls -la`/`mkdir -p` sous cmd.exe.
     let system = enrich_system(system);
     let options = ChatOptions {
         max_tokens: 8192,
@@ -828,7 +823,6 @@ async fn zerobox_cmd(topic: Vec<String>, perspectives: Vec<String>) -> Result<()
         local: false,
     };
 
-    // En headless, tous les outils sont armés (même politique que --once).
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<UiEvent>();
     tokio::spawn(async move {
         tui::run_0box_debate(
@@ -838,8 +832,8 @@ async fn zerobox_cmd(topic: Vec<String>, perspectives: Vec<String>) -> Result<()
                 settings,
                 system,
                 options,
-                read_write: true, // text_editor
-                code_exec: true,  // code_exec
+                read_write: true,
+                code_exec: true,
                 all_tools: tools::all(),
                 ui: tx,
             },
@@ -958,7 +952,6 @@ async fn jev_cmd(file: String) -> Result<()> {
     Ok(())
 }
 
-/// If a vault exists and is locked, try env then an interactive prompt.
 fn ensure_vault() {
     if !vault::enabled() || vault::is_unlocked() {
         return;
@@ -982,9 +975,6 @@ fn ensure_vault() {
 }
 
 fn vault_cmd(action: VaultAction) -> Result<()> {
-    // `setup`/`unlock`/`reset` exigent une saisie de passphrase : impossible en
-    // TUI, donc ils restent pilotés par le CLI. La logique (vault::*) est
-    // commune ; seul l'affichage de `status`/`lock` est partagé.
     let lines = match action {
         VaultAction::Status => commands::vault_status(),
         VaultAction::Lock => commands::vault_lock(),
@@ -1021,8 +1011,6 @@ fn whoami_cmd(action: WhoamiAction) -> Result<()> {
         WhoamiAction::List => commands::persona_list(),
         WhoamiAction::Show { name } => commands::persona_show(&name)?,
         WhoamiAction::Add { name, file } => {
-            // Lecture du contenu (fichier ou stdin) : spécifique au CLI, mais la
-            // validation et l'écriture sont partagées.
             let content = if file == "-" {
                 use std::io::Read;
                 let mut s = String::new();
@@ -1047,7 +1035,6 @@ async fn search_cmd(query: Vec<String>, max: Option<usize>) -> Result<()> {
     Ok(())
 }
 fn task_cmd(action: TaskAction) -> Result<()> {
-    // Un seul chemin : `commands::task`, le même que `/task` dans la TUI.
     let cmd = match action {
         TaskAction::List => commands::TaskCmd::List,
         TaskAction::Add { text, role } => commands::TaskCmd::Add {
@@ -1065,7 +1052,6 @@ fn task_cmd(action: TaskAction) -> Result<()> {
     Ok(())
 }
 fn provider_cmd(action: ProviderAction) -> Result<()> {
-    // Une seule implémentation : la même que `/provider` dans la TUI.
     let lines = match action {
         ProviderAction::List => commands::provider_list(),
         ProviderAction::Keys => commands::provider_keys(),
@@ -1248,7 +1234,6 @@ async fn select_cmd(problem: Vec<String>) -> Result<()> {
     }
     Ok(())
 }
-/// Headless single-turn mode: prints streamed tokens to stdout.
 async fn run_once(
     settings: config::Settings,
     system: String,
@@ -1261,14 +1246,11 @@ async fn run_once(
 
     let mut system = enrich_system(system);
     let local_mode = settings.provider_id == "local";
-    // Local = chat pur : aucun outil envoyé.
     let all_tools = if local_mode { Vec::new() } else { all_tools };
     let mut options = options;
-    // Le réglage `/stream` (config globale) vaut aussi pour `--once`.
     options.stream = crate::config::stream_enabled();
     options.local = local_mode;
 
-    // Liste explicite des outils disponibles dans le prompt.
     if !all_tools.is_empty() {
         system.push_str(
             "\n\n## Outils disponibles (utilise-les pour AGIR — ne dis jamais « je ne peux pas exécuter » quand un outil le permet)\n",
@@ -1278,8 +1260,6 @@ async fn run_once(
         }
     }
 
-    // Connaissance locale : même bloc que la TUI (`crate::knowledge_block`).
-    // Pas en local : tokens de préfill inutiles pour un chat.
     if !local_mode {
         if let Some((block, srcs)) = crate::knowledge_block(&prompt).await {
             system.push_str(&block);
@@ -1287,7 +1267,6 @@ async fn run_once(
         }
     }
 
-    // Mode local : démarrer llama-server si besoin (sinon tout échoue).
     if settings.provider_id == "local" {
         eprintln!("⏳ mode local : vérification de llama-server…");
         crate::local::ensure(Some(&settings.model)).await?;
@@ -1313,8 +1292,6 @@ async fn run_once(
                 print!("{t}");
                 std::io::stdout().flush().ok();
             }
-            // Sans ce bras, un modèle qui ne produit que du raisonnement
-            // affichait **rien** en headless (cas d'un llama-server « thinking »).
             UiEvent::Reasoning(t) => {
                 print!("{t}");
                 std::io::stdout().flush().ok();
@@ -1341,12 +1318,8 @@ async fn run_once(
 mod tests {
     use super::*;
 
-    /// Anti-dérive : la référence commitée doit être exactement la sortie du CLI.
-    /// Si ce test casse, régénère : `zer0 commands > docs/COMMANDS.md`.
     #[test]
     fn docs_commands_is_up_to_date() {
-        // Comparaison insensible aux fins de ligne : un checkout Windows peut
-        // convertir le fichier en CRLF, ce qui n'est pas une désynchronisation.
         let norm = |s: &str| s.replace("\r\n", "\n").trim_end().to_string();
         assert_eq!(
             norm(&commands_markdown()),

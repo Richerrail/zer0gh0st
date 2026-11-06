@@ -2,7 +2,6 @@ use crate::agent::history::ChatMessage;
 use crate::llm::llama::{ChatError, ChatOptions};
 use crate::route::Endpoint;
 
-/// Rough token estimate (chars / 4).
 pub fn estimate_tokens(messages: &[ChatMessage]) -> usize {
     let chars: usize = messages
         .iter()
@@ -12,19 +11,15 @@ pub fn estimate_tokens(messages: &[ChatMessage]) -> usize {
     chars / 4
 }
 
-/// Why a compaction did or did not happen.
 #[derive(Debug, Clone)]
 pub enum CompactOutcome {
     Compacted,
-    /// Not enough messages to bother.
     Skipped,
-    /// No utility endpoint available.
     NoModel,
     Failed(String),
 }
 
 impl CompactOutcome {
-    /// Human-readable message for the UI.
     pub fn message(&self) -> String {
         match self {
             CompactOutcome::Compacted => "Historique compacté.".to_string(),
@@ -37,9 +32,6 @@ impl CompactOutcome {
     }
 }
 
-/// Summarize the older part of the conversation, keeping `keep_recent` messages.
-///
-/// Tries each endpoint of the utility chain in order (failover).
 pub async fn compact_now(
     utility: Vec<Endpoint>,
     system: &str,
@@ -84,7 +76,6 @@ pub async fn compact_now(
         local: false,
     };
 
-    // Quiet channel: compaction tokens never reach the chat.
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     let mut last_err = String::new();
 
@@ -113,7 +104,6 @@ pub async fn compact_now(
             Err(ChatError::Mid(e)) => {
                 last_err = format!("{}: {e}", ep.label);
             }
-            // Quota de compte : passer au modèle suivant ne changerait rien.
             Err(ChatError::Quota { detail }) => {
                 last_err = format!("{}: quota épuisé — {detail}", ep.label);
                 break;

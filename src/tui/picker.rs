@@ -1,8 +1,3 @@
-//! Menu de sélection (overlay) pour `/model` et `/provider`.
-//!
-//! Logique volontairement pure (filtre, déplacement, sélection) pour être
-//! testable sans terminal ; le rendu est dans `draw`.
-
 use ratatui::prelude::*;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
@@ -11,13 +6,9 @@ use crate::theme;
 
 #[derive(Clone, Debug)]
 pub struct Item {
-    /// Valeur appliquée si on valide (id de modèle, id de provider).
     pub id: String,
-    /// Texte principal affiché.
     pub label: String,
-    /// Information secondaire (contexte, transport, état de clé…).
     pub note: String,
-    /// Petits aperçus de couleurs (utilisés par le menu des thèmes).
     pub swatches: Vec<Color>,
 }
 
@@ -25,15 +16,12 @@ pub struct Item {
 pub enum Kind {
     Model,
     Provider,
-    /// Palette de commandes (déclenchée en tapant `/`).
     Command,
-    /// Sélecteur de thème de couleurs.
     Theme,
 }
 
 #[derive(Debug)]
 pub struct Picker {
-    /// Cible optionnelle (ex. nom de rôle pour `/role set <role>`).
     pub target: Option<String>,
     pub title: String,
     pub items: Vec<Item>,
@@ -55,7 +43,6 @@ impl Picker {
         }
     }
 
-    /// Indices visibles : filtre insensible à la casse sur id/label/note.
     pub fn visible(&self) -> Vec<usize> {
         let f = self.filter.trim().to_lowercase();
         self.items
@@ -71,12 +58,10 @@ impl Picker {
             .collect()
     }
 
-    /// Position du curseur dans la liste visible (0 si absent).
     fn cursor(&self, vis: &[usize]) -> usize {
         vis.iter().position(|&i| i == self.sel).unwrap_or(0)
     }
 
-    /// Déplace la sélection de `delta` (cyclique) dans la liste filtrée.
     pub fn move_sel(&mut self, delta: isize) {
         let vis = self.visible();
         if vis.is_empty() {
@@ -103,9 +88,6 @@ impl Picker {
     }
 
     pub fn selected(&self) -> Option<&Item> {
-        // `sel` est un index dans `items`, mais il n'a de sens que s'il fait
-        // partie des visibles. Sans ce contrôle, taper une commande inconnue
-        // puis Entrée exécutait le **premier** élément de la liste.
         let vis = self.visible();
         if !vis.contains(&self.sel) {
             return None;
@@ -122,7 +104,6 @@ fn truncate(s: &str, max: usize) -> String {
     }
 }
 
-/// Affiche l'overlay (centré) : titre + filtre, liste, aide.
 pub fn draw(f: &mut Frame, area: Rect, p: &Picker) {
     let w = (area.width * 3 / 4).clamp(40, 110).min(area.width);
     let h = (area.height * 2 / 3).clamp(8, 28).min(area.height);
@@ -217,9 +198,9 @@ mod tests {
         let mut p = Picker::new("t", items(&["glm-4.6", "llama-3.3", "qwen3"]), Kind::Model);
         assert_eq!(p.visible().len(), 3);
         p.push_char('l');
-        assert_eq!(p.visible(), vec![0, 1]); // glm + llama
+        assert_eq!(p.visible(), vec![0, 1]);
         p.push_char('l');
-        assert_eq!(p.visible(), vec![1]); // llama
+        assert_eq!(p.visible(), vec![1]);
         p.pop_char();
         p.pop_char();
         assert_eq!(p.visible().len(), 3);
@@ -238,7 +219,7 @@ mod tests {
     #[test]
     fn filter_resets_selection_to_first_visible() {
         let mut p = Picker::new("t", items(&["a", "b", "c"]), Kind::Model);
-        p.move_sel(2); // c
+        p.move_sel(2);
         p.push_char('b');
         assert_eq!(p.selected().map(|i| i.id.as_str()), Some("b"));
     }
@@ -248,9 +229,7 @@ mod tests {
         let mut p = Picker::new("t", items(&["a"]), Kind::Model);
         p.push_char('z');
         assert!(p.visible().is_empty());
-        p.move_sel(1); // ne panique pas
-                       // Régression : `selected()` renvoyait l'élément 0 malgré un filtre vide,
-                       // donc Entrée exécutait une commande que l'utilisateur n'avait pas choisie.
+        p.move_sel(1);
         assert!(p.selected().is_none());
     }
 }

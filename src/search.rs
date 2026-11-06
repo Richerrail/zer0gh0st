@@ -1,18 +1,7 @@
-//! Recherche web sans clé API.
-//!
-//! Un seul moteur ne suffit pas : DuckDuckGo renvoie régulièrement une page de
-//! vérification (202, anti-bot) à un client scripté, et l'API « Instant Answer »
-//! ne contient presque jamais de résultats pour une requête générale. D'où une
-//! **chaîne de repli** : DDG HTML → DDG Lite → Mojeek → DDG Lite via `curl`
-//! (l'empreinte TLS de curl passe parfois là où reqwest est filtré) → Instant
-//! Answer. Le premier moteur qui renvoie des résultats gagne, et son nom est
-//! remonté pour que l'utilisateur sache d'où vient la réponse.
-
 use crate::http_client;
 use anyhow::Result;
 use serde::Deserialize;
 
-/// A single web search result.
 #[derive(Debug, Clone)]
 pub struct SearchHit {
     pub title: String,
@@ -20,18 +9,15 @@ pub struct SearchHit {
     pub url: String,
 }
 
-/// UA de navigateur réel : un UA « bot » déclenche la page anti-robot de DDG.
 const UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) \
                   Chrome/124.0.0.0 Safari/537.36";
 const ACCEPT_LANG: &str = "fr-FR,fr;q=0.9,en;q=0.8";
 const ACCEPT: &str = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
 
-/// Recherche web ; garde la signature historique (liste de résultats).
 pub async fn web_search(query: &str, max: usize) -> Result<Vec<SearchHit>> {
     Ok(web_search_with_backend(query, max).await?.0)
 }
 
-/// Recherche web avec le nom du moteur qui a répondu (`"aucun"` si vide).
 pub async fn web_search_with_backend(
     query: &str,
     max: usize,
@@ -39,26 +25,21 @@ pub async fn web_search_with_backend(
     let max = max.clamp(1, 20);
     let q = urlencoding::encode(query);
 
-    // 1. DuckDuckGo HTML (POST : c'est ce qu'utilise le formulaire du site).
     if let Some(hits) = ddg_html(&q, max).await {
         if !hits.is_empty() {
             return Ok((hits, "duckduckgo"));
         }
     }
-    // 2. DuckDuckGo Lite (markup différent, souvent moins filtré).
     if let Some(hits) = ddg_lite(&q, max).await {
         if !hits.is_empty() {
             return Ok((hits, "duckduckgo-lite"));
         }
     }
-    // 3. Mojeek : index indépendant, pas de clé, page simple à parser.
     if let Some(hits) = mojeek(&q, max).await {
         if !hits.is_empty() {
             return Ok((hits, "mojeek"));
         }
     }
-    // 4. Repli via `curl` : autre pile TLS, autre empreinte → parfois accepté là
-    //    où reqwest est bloqué. Mêmes parseurs.
     if let Some(body) = curl_fetch(&format!("https://lite.duckduckgo.com/lite/?q={q}")).await {
         let hits = parse_ddg_lite(&body, max);
         if !hits.is_empty() {
@@ -71,7 +52,6 @@ pub async fn web_search_with_backend(
             return Ok((hits, "mojeek (curl)"));
         }
     }
-    // 5. Instant Answer : utile pour les entités, pas pour une vraie requête.
     if let Ok(hits) = instant_answer(query, max).await {
         if !hits.is_empty() {
             return Ok((hits, "ddg-instant"));
@@ -80,7 +60,6 @@ pub async fn web_search_with_backend(
     Ok((Vec::new(), "aucun"))
 }
 
-/// Format hits as plain text for a tool result or command output.
 pub fn format_hits(hits: &[SearchHit]) -> String {
     if hits.is_empty() {
         return "Aucun résultat web.".to_string();
@@ -97,8 +76,6 @@ pub fn format_hits(hits: &[SearchHit]) -> String {
     }
     s
 }
-
-// --------------------------------------------------------------- transport
 
 fn request_headers(req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
     req.header("User-Agent", UA)
@@ -117,7 +94,6 @@ async fn get_text(url: &str) -> Option<String> {
     resp.text().await.ok()
 }
 
-/// Repli `curl` (binaire système). Retourne le corps HTML si le code est 0.
 async fn curl_fetch(url: &str) -> Option<String> {
     let out = tokio::process::Command::new("curl")
         .args([
@@ -140,8 +116,6 @@ async fn curl_fetch(url: &str) -> Option<String> {
     }
     Some(String::from_utf8_lossy(&out.stdout).to_string())
 }
-
-// ------------------------------------------------------------ DuckDuckGo
 
 async fn ddg_html(q: &str, max: usize) -> Option<Vec<SearchHit>> {
     let resp = request_headers(http_client::HTTP_CLIENT.post("https://html.duckduckgo.com/html/"))
@@ -166,9 +140,6 @@ async fn mojeek(q: &str, max: usize) -> Option<Vec<SearchHit>> {
     Some(parse_mojeek(&body, max))
 }
 
-// --------------------------------------------------------------- parsing
-
-/// Strip tags and decode the main HTML entities.
 fn clean(s: &str) -> String {
     let mut out = String::new();
     let mut in_tag = false;
@@ -192,7 +163,6 @@ fn clean(s: &str) -> String {
         .join(" ")
 }
 
-/// Lit un attribut `key="…"` ou `key='…'`.
 fn attr_any(s: &str, key: &str) -> Option<String> {
     for quote in ['"', '\''] {
         let pat = format!("{key}={quote}");
@@ -206,14 +176,12 @@ fn attr_any(s: &str, key: &str) -> Option<String> {
     None
 }
 
-/// Texte entre le premier `>` et la première occurrence de `close`.
 fn between(s: &str, open: char, close: &str) -> Option<String> {
     let start = s.find(open)? + 1;
     let end = s[start..].find(close)? + start;
     Some(s[start..end].to_string())
 }
 
-/// DDG wraps links in `//duckduckgo.com/l/?uddg=<encoded>`.
 fn real_url(href: &str) -> String {
     if let Some(pos) = href.find("uddg=") {
         let rest = &href[pos + 5..];
@@ -240,11 +208,6 @@ fn dedupe(hits: &mut Vec<SearchHit>, max: usize) {
     hits.truncate(max);
 }
 
-/// Parseur commun : repère un marqueur de résultat, remonte au début de la
-/// balise (`<`), puis lit `href`, le titre et le résumé.
-///
-/// Remonter au `<` est indispensable : selon le moteur, `href` peut être écrit
-/// **avant** ou **après** la classe (`<a href=… class=…>` vs `<a class=… href=…>`).
 fn parse_results(
     html: &str,
     max: usize,
@@ -285,15 +248,12 @@ fn parse_results(
                 url,
             });
         }
-        // Avancer **après** le marqueur, sinon on reparse le même résultat en
-        // boucle (et `dedupe` le réduisait à un seul).
         search_from = marker_pos + marker.len();
     }
     dedupe(&mut hits, max);
     hits
 }
 
-/// Page HTML classique : `class="result__a"` + `class="result__snippet"`.
 fn parse_ddg(html: &str, max: usize) -> Vec<SearchHit> {
     parse_results(
         html,
@@ -305,17 +265,13 @@ fn parse_ddg(html: &str, max: usize) -> Vec<SearchHit> {
     )
 }
 
-/// Page « Lite » : `class='result-link'` puis `class='result-snippet'`.
 fn parse_ddg_lite(html: &str, max: usize) -> Vec<SearchHit> {
     parse_results(html, max, "result-link", "</a>", "result-snippet", "</td>")
 }
 
-/// Mojeek : `<h2><a class="ob" href="…">Titre</a></h2>` + `<p class="s">résumé</p>`.
 fn parse_mojeek(html: &str, max: usize) -> Vec<SearchHit> {
     parse_results(html, max, "class=\"ob\"", "</a>", "class=\"s\"", "</p>")
 }
-
-// ------------------------------------------------------- Instant Answer API
 
 #[derive(Deserialize)]
 struct DdgResponse {

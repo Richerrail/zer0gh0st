@@ -1,39 +1,17 @@
-//! Suivi d'usage des modèles — **cette session, sans devinette**.
-//!
-//! Les API ne publient pas leur quota restant : Cline n'expose aucun champ ni
-//! en-tête, et OpenRouter ne révèle ses limites (`X-RateLimit-Limit` /
-//! `X-RateLimit-Remain`) que dans le **corps des réponses 429**. Zer0 ne peut
-//! donc pas afficher un quota qu'on ne lui donne pas — il comptabilise ce qu'il
-//! **observe lui-même** : appels réussis (200), refus réels (429), et les limites
-//! quand un fournisseur les révèle au passage.
-//!
-//! Ce qui n'est pas observé n'est pas affiché (principe d'honnêteté du projet).
-//! Les compteurs de session vivent en mémoire ; un **cumul par jour** est
-//! persisté dans `<données>/quota.json` (14 jours), pour que `/quota` et
-//! `zer0 quota` montrent ce qui a réellement été consommé aujourd'hui — même
-//! après un redémarrage. Sans cette persistance, un 429 journalier était
-//! indiscernable d'une rafale passagère.
-
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
-/// Un point d'observation : un endpoint `provider/modèle` réellement appelé.
 #[derive(Default, Clone)]
 struct Usage {
-    /// Appels HTTP réussis (2xx) — zéro n'est pas « indisponible », c'est « pas appelé ».
     ok_calls: u64,
     last_ok: Option<Instant>,
-    /// Dernier 429 observé ; effacé par un succès ultérieur.
     last_429: Option<Instant>,
-    /// Limites révélées par le fournisseur dans le corps d'un 429 (OpenRouter).
     limit: Option<u64>,
     remain: Option<u64>,
-    /// Message d'erreur tronqué du dernier 429 (ex. `free-models-per-day`).
     note: Option<String>,
 }
 
-/// Cumul persisté pour un endpoint, un jour donné.
 #[derive(Default, Clone, serde::Serialize, serde::Deserialize)]
 struct DayLabel {
     #[serde(default)]
@@ -48,14 +26,12 @@ struct DayLabel {
     note: Option<String>,
 }
 
-/// Fichier `quota.json` : `jours -> endpoint -> cumul`.
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 struct Store {
     #[serde(default)]
     days: BTreeMap<String, BTreeMap<String, DayLabel>>,
 }
 
-/// Jours conservés (au-delà, purge).
 const KEEP_DAYS: usize = 14;
 
 fn store_path() -> std::path::PathBuf {
@@ -86,7 +62,6 @@ fn save_to(path: &std::path::Path, st: &Store) {
     }
 }
 
-/// Purge les jours les plus anciens (fonction pure, testable).
 fn prune(st: &mut Store, keep: usize) {
     let mut days: Vec<String> = st.days.keys().cloned().collect();
     if days.len() <= keep {
@@ -140,7 +115,6 @@ fn persisted() -> &'static Mutex<Store> {
     S.get_or_init(|| Mutex::new(load_from(&store_path())))
 }
 
-/// Écrit le cumul sur disque, au plus une fois toutes les 2 s (force = 429).
 fn maybe_persist(force: bool) {
     static LAST: Mutex<Option<Instant>> = Mutex::new(None);
     let now = Instant::now();
@@ -165,8 +139,6 @@ fn registry() -> &'static Mutex<BTreeMap<String, Usage>> {
     R.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
-/// Label canonique d'un endpoint, identique à `route::Endpoint::label`
-/// (`provider_id/model`). L'hôte sert de repli pour un endpoint hors catalogue.
 pub fn label_for(base_url: &str, model: &str) -> String {
     let base = base_url.trim_end_matches('/');
     let pid = crate::providers::all()
@@ -186,13 +158,11 @@ fn host_of(url: &str) -> String {
         .to_string()
 }
 
-/// À appeler sur chaque réponse 2xx : l'endpoint a consommé de l'usage.
 pub fn record_success(label: &str) {
     if let Ok(mut m) = registry().lock() {
         let u = m.entry(label.to_string()).or_default();
         u.ok_calls += 1;
         u.last_ok = Some(Instant::now());
-        // Un succès après un 429 prouve que le quota n'est pas épuisé.
         u.last_429 = None;
     }
     let date = today();
@@ -203,8 +173,6 @@ pub fn record_success(label: &str) {
     maybe_persist(false);
 }
 
-/// À appeler sur chaque 429. `body` est le corps brut de la réponse ; les
-/// limites n'en sont extraites que si le fournisseur les y a mises.
 pub fn record_rate_limited(label: &str, body: &str) {
     let (limit, remain, note) = parse_429_body(body);
     if let Ok(mut m) = registry().lock() {
@@ -223,12 +191,9 @@ pub fn record_rate_limited(label: &str, body: &str) {
         bump_429(&mut st, &date, label, note.as_deref());
         prune(&mut st, KEEP_DAYS);
     }
-    // Un 429 est l'information la plus utile : on l'écrit tout de suite.
     maybe_persist(true);
 }
 
-/// Limites révélées par les **en-têtes** d'une réponse (200 ou 429) — quand le
-/// fournisseur les envoie, c'est la valeur la plus fraîche possible.
 pub fn record_limits(label: &str, limit: Option<u64>, remain: Option<u64>) {
     if limit.is_none() && remain.is_none() {
         return;
@@ -249,7 +214,6 @@ pub fn record_limits(label: &str, limit: Option<u64>, remain: Option<u64>) {
     maybe_persist(false);
 }
 
-/// Lit un compteur dans les en-têtes (plusieurs noms acceptés, insensible à la casse).
 pub fn header_u64(headers: &reqwest::header::HeaderMap, names: &[&str]) -> Option<u64> {
     names.iter().find_map(|n| {
         headers
@@ -266,7 +230,6 @@ pub const REMAIN_HEADERS: &[&str] = &[
     "x-ratelimit-remain",
 ];
 
-/// Format demandé : « 0/50 (0 %) » — None si inconnu (on n'invente rien).
 pub fn fmt_remaining(limit: Option<u64>, remain: Option<u64>) -> Option<String> {
     match (limit, remain) {
         (Some(l), Some(r)) if l > 0 => {
@@ -277,9 +240,6 @@ pub fn fmt_remaining(limit: Option<u64>, remain: Option<u64>) -> Option<String> 
     }
 }
 
-/// Extrait les limites du corps d'un 429 façon OpenRouter :
-/// `{"error":{"message":"…","metadata":{"headers":{"X-RateLimit-Limit":"50","X-RateLimit-Remain":"0"}}}}`
-/// Inconnu ou dans un autre format ⇒ `(None, None, None)` — pas de valeur inventée.
 fn parse_429_body(body: &str) -> (Option<u64>, Option<u64>, Option<String>) {
     let Ok(v) = serde_json::from_str::<serde_json::Value>(body) else {
         return (None, None, None);
@@ -298,12 +258,9 @@ fn parse_429_body(body: &str) -> (Option<u64>, Option<u64>, Option<String>) {
     (limit, remain, note)
 }
 
-/// Badge court pour les listes de modèles. `None` = rien d'observé cette
-/// session : on ne raconte pas ce qu'on ne sait pas.
 pub fn badge(label: &str) -> Option<String> {
     let m = registry().lock().ok()?;
     let u = m.get(label)?;
-    // Épuisé (429 réel ou reste == 0 révélé) — chiffre exact quand connu.
     let remain_str = fmt_remaining(u.limit, u.remain);
     if let Some(t) = u.last_429 {
         let mins = t.elapsed().as_secs() / 60;
@@ -331,7 +288,6 @@ pub fn badge(label: &str) -> Option<String> {
     None
 }
 
-/// Rapport complet pour `/quota` : tout ce que Zer0 a observé, avec ses limites.
 pub fn report() -> String {
     let Ok(m) = registry().lock() else {
         return "Registre d'usage indisponible.".into();
@@ -401,7 +357,6 @@ pub fn report() -> String {
     s
 }
 
-/// Section « aujourd'hui » issue du cumul persisté (tous processus confondus).
 fn today_section() -> String {
     let date = today();
     let Ok(st) = persisted().lock() else {
@@ -430,11 +385,6 @@ fn today_section() -> String {
     s
 }
 
-// ----------------------------------------------------------------- solde live
-
-/// Interroge le fournisseur pour un solde **réel et à jour** — pour l'instant
-/// OpenRouter seulement (`GET /auth/key` ; Cline ne publie rien : 404 sur tous
-/// les endpoints testés). Retourne None quand le provider n'expose rien.
 pub async fn fetch_live(provider_id: &str, key: Option<&str>) -> Option<String> {
     if provider_id != "openrouter" {
         return None;
@@ -453,7 +403,6 @@ pub async fn fetch_live(provider_id: &str, key: Option<&str>) -> Option<String> 
     Some(parse_auth_key(&v))
 }
 
-/// Parse la réponse `/auth/key` d'OpenRouter en lignes lisibles (testable).
 pub fn parse_auth_key(v: &serde_json::Value) -> String {
     let d = &v["data"];
     let num = |x: &serde_json::Value| x.as_f64().unwrap_or(0.0);
@@ -517,7 +466,6 @@ mod tests {
         let back = load_from(&path);
         assert_eq!(back.days["2026-10-24"]["openrouter/x:free"].ok, 2);
 
-        // purge : on ne garde que les N jours les plus récents
         for d in 1..=20 {
             bump_ok(&mut st, &format!("2026-09-{d:02}"), "m");
         }
@@ -542,7 +490,6 @@ mod tests {
 
     #[test]
     fn parse_429_ignores_unknown_formats() {
-        // Cline renvoie du texte brut ou un JSON sans metadata : rien n'est inventé.
         assert_eq!(parse_429_body("Too Many Requests"), (None, None, None));
         assert_eq!(
             parse_429_body(r#"{"error":{"message":"rate limited"}}"#),
@@ -553,7 +500,6 @@ mod tests {
 
     #[test]
     fn label_uses_provider_catalog() {
-        // Provider connu ⇒ son id ; sinon l'hôte fait foi.
         assert_eq!(label_for("http://127.0.0.1:8080/v1/", "qwen"), "local/qwen");
         assert_eq!(label_for("https://exemple.io/v1", "m"), "exemple.io/m");
     }
@@ -573,15 +519,13 @@ mod tests {
             fmt_remaining(Some(50), Some(25)),
             Some("25/50 (50 %)".into())
         );
-        // Inconnu ⇒ rien (jamais de chiffre inventé)
         assert_eq!(fmt_remaining(None, Some(3)), None);
         assert_eq!(fmt_remaining(Some(50), None), None);
-        assert_eq!(fmt_remaining(Some(0), Some(0)), None); // limite nulle : non interprétable
+        assert_eq!(fmt_remaining(Some(0), Some(0)), None);
     }
 
     #[test]
     fn parse_auth_key_with_and_without_limit() {
-        // Cas réel observé : free tier, limite de dépense illimitée.
         let v: serde_json::Value = serde_json::from_str(
             r#"{"data":{"usage":0.0,"usage_daily":0.0,"usage_monthly":0.0,
                  "limit":null,"limit_remaining":null,"is_free_tier":true}}"#,
@@ -592,7 +536,6 @@ mod tests {
         assert!(s.contains("usage total : 0.00 $"));
         assert!(s.contains("illimité"), "{s}");
 
-        // Clé avec budget : reste + pourcentage.
         let v: serde_json::Value = serde_json::from_str(
             r#"{"data":{"usage":7.5,"usage_daily":1.0,"usage_monthly":7.5,
                  "limit":10.0,"limit_remaining":2.5,"is_free_tier":false}}"#,

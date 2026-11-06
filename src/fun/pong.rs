@@ -6,15 +6,13 @@ use ratatui::Frame;
 
 const W: i16 = 60;
 const H: i16 = 18;
-const PADDLE: i16 = 3; // half-height
+const PADDLE: i16 = 3;
 
-/// Grid-based Pong against the agent (right paddle). Integer positions, one
-/// step per fixed tick — no sub-cell rounding, so no tearing/ghosting.
 pub struct Pong {
     bx: i16,
     by: i16,
-    dx: i16,    // -1 / +1
-    ystep: i16, // -1 / +1, applied every other tick
+    dx: i16,
+    ystep: i16,
     tick: u32,
     player: i16,
     agent: i16,
@@ -53,7 +51,6 @@ impl Pong {
         *self = Pong::new();
     }
 
-    /// Start moving the player paddle; the direction persists a few ticks.
     pub fn set_dir(&mut self, d: i16) {
         self.player_dir = d.signum();
         self.dir_ticks = 4;
@@ -72,7 +69,6 @@ impl Pong {
         }
         self.tick = self.tick.wrapping_add(1);
 
-        // player
         if self.dir_ticks > 0 {
             self.dir_ticks -= 1;
             self.player = (self.player + self.player_dir).clamp(PADDLE, H - 1 - PADDLE);
@@ -80,14 +76,12 @@ impl Pong {
             self.player_dir = 0;
         }
 
-        // agent AI: follow the ball, one cell per tick
         let diff = self.by - self.agent;
         if diff.abs() > 1 {
             self.agent += diff.signum();
             self.agent = self.agent.clamp(PADDLE, H - 1 - PADDLE);
         }
 
-        // ball
         self.bx += self.dx;
         if self.tick.is_multiple_of(2) {
             self.by += self.ystep;
@@ -102,20 +96,17 @@ impl Pong {
             self.ystep = -self.ystep.abs();
         }
 
-        // player paddle
         if self.bx <= 1 && self.dx < 0 && (self.by - self.player).abs() <= PADDLE {
             self.bx = 1;
             self.dx = self.dx.abs();
             let s = (self.by - self.player).signum();
             self.ystep = if s == 0 { 1 } else { s };
         }
-        // agent paddle
         if self.bx >= W - 2 && self.dx > 0 && (self.by - self.agent).abs() <= PADDLE {
             self.bx = W - 2;
             self.dx = -self.dx.abs();
         }
 
-        // scoring
         if self.bx < 0 {
             self.ascore += 1;
             self.reset_ball(true);

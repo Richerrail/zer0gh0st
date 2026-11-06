@@ -1,13 +1,3 @@
-//! Mod « zer0CL » : un shell dans le panneau latéral.
-//!
-//! Aucune dépendance : on réutilise le shell de la plateforme
-//! (`platform::shell_command`), celui-là même que `code_exec` utilise. Sous
-//! Windows, le shell hérité du lancement est préféré (PowerShell si zer0 a été
-//! lancé depuis PowerShell, bash si lancé depuis Git Bash).
-//!
-//! Sécurité : les commandes sont **tapées par l'utilisateur**, jamais générées
-//! par le modèle. Elles tournent avec ses droits, comme `code_exec`.
-
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -34,7 +24,6 @@ pub struct Term {
     hist_pos: Option<usize>,
     lines: Arc<Mutex<Vec<String>>>,
     running: Arc<AtomicBool>,
-    /// PID du shell en cours (0 = aucun). Tué à la fermeture du panneau.
     pid: Arc<AtomicU32>,
     scroll: usize,
 }
@@ -131,7 +120,6 @@ impl Term {
         self.running.load(Ordering::Relaxed)
     }
 
-    /// Exécute la ligne courante (ou `cd`/`clear`).
     pub fn run(&mut self) {
         let line = self.input.trim().to_string();
         if line.is_empty() {
@@ -171,7 +159,6 @@ impl Term {
             return;
         }
 
-        // Une seule commande à la fois : la précédente est tuée.
         self.stop();
         self.push_line(format!("{}{}", self.prompt(), line));
         self.scroll = 0;
@@ -195,12 +182,9 @@ impl Term {
                     return;
                 }
             };
-            // Mémorise le PID pour pouvoir le tuer à la fermeture.
             if let Some(id) = child.id() {
                 pid.store(id, Ordering::Relaxed);
             }
-            // stdout et stderr sont deux types distincts : on les efface
-            // derrière `dyn AsyncRead` pour les traiter dans la même boucle.
             let mut pipes: Vec<Box<dyn tokio::io::AsyncRead + Unpin + Send>> = Vec::new();
             if let Some(o) = child.stdout.take() {
                 pipes.push(Box::new(o));
@@ -234,7 +218,6 @@ impl Term {
         });
     }
 
-    /// Tue le processus en cours (0 = rien à faire).
     pub fn stop(&self) {
         let pid = self.pid.swap(0, Ordering::Relaxed);
         if pid == 0 {
@@ -281,7 +264,6 @@ impl Term {
             ])
             .split(inner);
 
-        // Sortie : on garde les dernières lignes, moins le décalage de molette.
         let all: Vec<String> = self.lines.lock().map(|v| v.clone()).unwrap_or_default();
         let h = rows[0].height as usize;
         let total = all.len();
@@ -307,7 +289,6 @@ impl Term {
             rows[0],
         );
 
-        // Saisie.
         let cursor = Span::styled(
             "▏",
             Style::default()
@@ -336,12 +317,10 @@ impl Term {
 
 impl Drop for Term {
     fn drop(&mut self) {
-        // Quitter la TUI ne doit pas laisser un build tourner en fond.
         self.stop();
     }
 }
 
-/// Retire les séquences ANSI (couleurs, curseur) : le panneau est du texte.
 pub fn strip_ansi(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut chars = s.chars().peekable();
@@ -353,7 +332,6 @@ pub fn strip_ansi(s: &str) -> String {
         match chars.peek().copied() {
             Some('[') => {
                 chars.next();
-                // CSI : jusqu'au byte final 0x40..=0x7e
                 for n in chars.by_ref() {
                     if ('@'..='~').contains(&n) {
                         break;
@@ -362,7 +340,6 @@ pub fn strip_ansi(s: &str) -> String {
             }
             Some(']') => {
                 chars.next();
-                // OSC : jusqu'à BEL ou ST (ESC \)
                 for n in chars.by_ref() {
                     if n == '\x07' {
                         break;

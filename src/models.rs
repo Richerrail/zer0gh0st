@@ -3,7 +3,6 @@ use serde::Deserialize;
 
 use crate::providers::Provider;
 
-/// One model entry as returned by an OpenAI-compatible `/models` endpoint.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ModelEntry {
     pub id: String,
@@ -20,7 +19,6 @@ pub struct ModelEntry {
     pub architecture: Option<Architecture>,
 }
 
-/// Capability indices published by OpenRouter (Artificial Analysis).
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Benchmarks {
     #[serde(default)]
@@ -62,7 +60,6 @@ struct ModelsResponse {
     data: Vec<ModelEntry>,
 }
 
-/// Query a provider's model list.
 pub async fn list(
     http: &reqwest::Client,
     provider: &Provider,
@@ -70,8 +67,6 @@ pub async fn list(
 ) -> Result<Vec<ModelEntry>> {
     let url = format!("{}/models", provider.base_url.trim_end_matches('/'));
 
-    // Mode local : le serveur n'expose que le modèle chargé. On liste les GGUF
-    // du dossier, sinon `/model` n'affiche rien ou un seul nom de chemin.
     if provider.id == "local" {
         let models = crate::local::scan_models();
         if !models.is_empty() {
@@ -89,7 +84,6 @@ pub async fn list(
         }
     }
 
-    // Google's OpenAI-compat endpoint has no usable /models; use the native one.
     if provider.id == "google" {
         return list_google(http, key).await;
     }
@@ -103,8 +97,6 @@ pub async fn list(
     if let Some(k) = key {
         req = req.bearer_auth(k);
     }
-    // Distinguer trois cas, sinon un serveur éteint était annoncé « URL invalide » :
-    // 1) URL mal formée (builder) ; 2) injoignable (connect/timeout) ; 3) autre.
     let resp = req.send().await.map_err(|e| {
         if e.is_builder() {
             anyhow!(
@@ -137,7 +129,6 @@ pub async fn list(
     Ok(parsed.data)
 }
 
-/// A model is considered free if its id says so or both prices are zero.
 pub fn is_free(m: &ModelEntry) -> bool {
     if m.id.ends_with(":free") || m.id.ends_with("/free") {
         return true;
@@ -155,7 +146,6 @@ fn is_zero(v: &Option<String>) -> bool {
     )
 }
 
-/// Google Gemini native model list (`/v1beta/models?key=…`).
 async fn list_google(http: &reqwest::Client, key: Option<&str>) -> Result<Vec<ModelEntry>> {
     let key = key.ok_or_else(|| anyhow!("clé Google requise (GEMINI_API_KEY)"))?;
     let url =

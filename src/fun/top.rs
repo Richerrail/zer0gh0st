@@ -1,8 +1,3 @@
-//! Mod « t0p » : moniteur système dans le panneau latéral (comme radio/bintime).
-//!
-//! Le relevé est rafraîchi **une fois par seconde** : inutile de redessiner à
-//! 45 Hz pour des compteurs qui ne bougent pas, et ça évite de chauffer.
-
 use std::time::{Duration, Instant};
 
 use ratatui::layout::Rect;
@@ -30,7 +25,6 @@ impl Top {
         }
     }
 
-    /// Rafraîchit au plus une fois par seconde.
     pub fn tick(&mut self) {
         if self.last.elapsed() >= Duration::from_secs(1) {
             self.mon.refresh();

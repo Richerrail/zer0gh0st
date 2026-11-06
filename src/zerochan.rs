@@ -1,9 +1,3 @@
-//! Zero-chan — assistante vocale intégrée à la TUI de l'agent.
-//!
-//! Choix de conception : **pas de boîte chat ni de barre dédiées**. Zero-chan
-//! réutilise la chat et l'input de l'agent. Il n'ajoute qu'un petit bloc d'état
-//! (à droite du banner) et deux boutons (à droite de la barre de saisie).
-
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStderr, Command, Stdio};
@@ -45,12 +39,6 @@ fn has(cmd: &str) -> bool {
     crate::platform::has(cmd)
 }
 
-/// Commande d'enregistrement WAV mono 16 kHz, selon l'écosystème audio dispo :
-/// PipeWire (`pw-record`) → PulseAudio (`parecord`) → ALSA (`arecord`) → SoX.
-///
-/// Windows : `sox_ng` est préféré à l'ancien `sox`. Le paquet WinGet
-/// `sox_ng.sox_ng` sait réellement ouvrir le périphérique d'enregistrement
-/// Windows, alors que SoX 14.4 peut répondre « no default audio device ».
 fn recorder(path: &Path) -> Option<(Command, &'static str)> {
     if has("pw-record") {
         let mut c = Command::new("pw-record");
@@ -80,14 +68,12 @@ fn recorder(path: &Path) -> Option<(Command, &'static str)> {
         return Some((sox_recorder("sox_ng", path), "sox_ng"));
     }
 
-    // macOS / Windows (et Linux sans PipeWire/PulseAudio) : SoX.
     if has("sox") {
         return Some((sox_recorder("sox", path), "sox"));
     }
     None
 }
 
-/// Commande SoX commune à `sox` et `sox_ng`.
 fn sox_recorder(exe: &str, path: &Path) -> Command {
     let mut c = Command::new(exe);
     c.args([
@@ -107,7 +93,6 @@ fn sox_recorder(exe: &str, path: &Path) -> Command {
     c
 }
 
-/// Message d'installation adapté à la plateforme.
 fn recorder_hint() -> &'static str {
     if cfg!(windows) {
         "installer SoX_ng (`winget install sox_ng.sox_ng`), puis redémarrer le terminal"
@@ -116,7 +101,6 @@ fn recorder_hint() -> &'static str {
     }
 }
 
-/// Lit une sortie d'erreur d'un enregistreur sans la laisser polluer le TUI.
 fn stderr_text(mut stderr: Option<ChildStderr>) -> String {
     let Some(mut stderr) = stderr.take() else {
         return String::new();
@@ -126,12 +110,6 @@ fn stderr_text(mut stderr: Option<ChildStderr>) -> String {
     s.trim().chars().take(400).collect()
 }
 
-/// Drains `stderr` **pendant** l'enregistrement, dans un thread.
-///
-/// Sans ça, le tube (64 Ko) peut se remplir si l'enregistreur écrit beaucoup :
-/// le processus se bloque, l'enregistrement s'arrête sans le dire. Le thread
-/// se termine à la fermeture du tube (processus tué), et `stop_rec` récupère le
-/// texte avec `join`.
 fn drain_stderr(stderr: Option<ChildStderr>) -> Option<std::thread::JoinHandle<String>> {
     stderr.map(|mut e| {
         std::thread::spawn(move || {
@@ -142,12 +120,6 @@ fn drain_stderr(stderr: Option<ChildStderr>) -> Option<std::thread::JoinHandle<S
     })
 }
 
-/// Répare les tailles RIFF/data d'un WAV interrompu brutalement.
-///
-/// Windows ne permet pas d'envoyer SIGINT comme Unix. L'arrêt du processus
-/// SoX termine donc le fichier avant sa finalisation : les tailles RIFF et data
-/// restent provisionales, alors que les échantillons PCM sont présents. On
-/// recalcule ces deux tailles à partir de la longueur réelle du fichier.
 fn repair_wav(path: &Path) -> std::io::Result<()> {
     use std::io::{Error, ErrorKind};
 
@@ -498,13 +470,7 @@ pub async fn transcribe(path: &PathBuf) -> anyhow::Result<String> {
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-/// Deux boutons à droite de la barre de saisie : 0chan et micro.
-/// Retourne leurs rectangles (pour la détection de clic).
 pub fn draw_buttons(f: &mut Frame, area: Rect, zc: &ZeroChan) -> (Option<Rect>, Option<Rect>) {
-    // Petit encadré compact :
-    //   ┌ 0chan/mic ┐
-    //   │ off / off │
-    //   └───────────┘
     if area.width < 13 || area.height < 3 {
         return (None, None);
     }
@@ -567,7 +533,6 @@ pub fn draw_buttons(f: &mut Frame, area: Rect, zc: &ZeroChan) -> (Option<Rect>, 
     };
     f.render_widget(Paragraph::new(vec![top, mid, bottom]), block_area);
 
-    // Régions cliquables : « off » (0chan) à gauche, « off » (mic) à droite.
     let r1 = Rect {
         x: area.x + 2,
         y: area.y + 1,
@@ -583,7 +548,6 @@ pub fn draw_buttons(f: &mut Frame, area: Rect, zc: &ZeroChan) -> (Option<Rect>, 
     (Some(r1), Some(r2))
 }
 
-/// Zone du bloc d'état à droite du banner (largeur fixe).
 pub fn block_layout(banner_area: Rect, on: bool) -> (Rect, Rect) {
     if on && banner_area.width >= 96 {
         let cols = Layout::default()

@@ -1,21 +1,5 @@
-//! Commandes du noyau — **une seule implémentation** pour le CLI et la TUI.
-//!
-//! Avant : chaque commande existait deux fois, une dans `cli.rs` (`println!`)
-//! et une dans `tui/mod.rs` (`UiEvent::Info`). Elles avaient déjà divergé :
-//! `select` gardait 8 modèles d'un côté, 5 de l'autre, avec deux avertissements
-//! différents ; `task add` acceptait `--role` en CLI mais pas en TUI.
-//!
-//! Règle : ce module ne connaît **ni** `println!`, **ni** `ratatui`. Il renvoie
-//! des lignes de texte et des erreurs ; chaque interface les rend à sa façon.
-//! Toute nouvelle commande s'ajoute ici d'abord.
-
 use anyhow::{anyhow, Result};
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Thème de couleurs
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Sélectionne et persiste un thème de la TUI.
 pub fn set_theme(name: &str) -> Result<Vec<String>> {
     let selected = crate::theme::resolve(name)?;
     let mut global = crate::config::load_global();
@@ -28,11 +12,6 @@ pub fn set_theme(name: &str) -> Result<Vec<String>> {
     )])
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Tâches
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Commande `task`, indépendante de l'interface.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskCmd {
     List,
@@ -43,11 +22,6 @@ pub enum TaskCmd {
     Clear,
 }
 
-/// Parse les arguments d'une commande `task` (`["add", "texte", "--role", "code"]`).
-///
-/// La TUI (`/task …`) et le CLI s'en servent : c'est ce qui garantit qu'ils
-/// acceptent exactement la même syntaxe. `usage` dans l'erreur est neutre
-/// (pas de préfixe `/`, que le CLI ne connaît pas).
 pub fn parse_task(args: &[&str]) -> Result<TaskCmd> {
     const USAGE: &str =
         "usage: task [list|add <texte> [--role <r>]|done <id>|claim <id>|rm <id>|clear]";
@@ -86,7 +60,6 @@ fn task_id(args: &[&str], sub: &str) -> Result<String> {
     }
 }
 
-/// Exécute une commande `task` et renvoie les lignes à afficher.
 pub fn task(cmd: TaskCmd) -> Result<Vec<String>> {
     use crate::tasks::{self, Status, Update};
 
@@ -133,17 +106,6 @@ pub fn task(cmd: TaskCmd) -> Result<Vec<String>> {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Modèle actif
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Définit le modèle actif (persisté dans la config globale).
-///
-/// Refuse les modèles d'embedding/rerank : ils ne répondent que sur
-/// `/embeddings`, donc les sélectionner casse le chat avec un 400 opaque.
-/// Le CLI et la TUI partageaient déjà ce contrôle, mais avec deux textes
-/// différents et deux façons de propager (ou d'avaler) l'erreur.
-/// Retire un préfixe `{provider}/` redondant (voir `route::normalize_model`).
 pub fn strip_route_prefix(provider_id: &str, id: &str) -> String {
     id.strip_prefix(&format!("{provider_id}/"))
         .filter(|rest| !rest.is_empty())
@@ -156,8 +118,6 @@ pub fn set_model(id: &str) -> Result<Vec<String>> {
     if id.is_empty() {
         return Err(anyhow!("usage: model use <id>"));
     }
-    // On stocke un identifiant **nu** : `openrouter/minimax/…` deviendrait un
-    // modèle inexistant une fois préfixé par le provider au moment de l'appel.
     let active = crate::config::resolve().provider_id;
     let id = strip_route_prefix(&active, id);
     let id = id.as_str();
@@ -173,11 +133,6 @@ pub fn set_model(id: &str) -> Result<Vec<String>> {
     Ok(vec![format!("Modèle actif: {id}")])
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Chaîne de routage (bascule)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Chaîne de bascule effective, une ligne par endpoint.
 pub fn route_lines(settings: &crate::config::Settings) -> Vec<String> {
     let chain = crate::route::build_chain(settings);
     let mut out = vec!["Chaîne de routage (ordre de bascule):".to_string()];
@@ -209,8 +164,6 @@ pub fn route_clear() -> Result<Vec<String>> {
     Ok(vec!["Routes de bascule effacées.".to_string()])
 }
 
-/// Arguments de `route auto` : `[provider] [n]`, `[n]`, ou rien.
-/// (`/route auto 4` et `/route auto openrouter 4` sont équivalents.)
 pub fn parse_auto_args(args: &[&str]) -> (String, usize) {
     let mut provider = "openrouter".to_string();
     let mut n = 4usize;
@@ -231,7 +184,6 @@ pub fn parse_auto_args(args: &[&str]) -> (String, usize) {
     (provider, n.clamp(1, 12))
 }
 
-/// Remplit la chaîne de bascule avec les modèles `:free` du provider.
 pub async fn route_auto(provider: &str, n: usize) -> Result<Vec<String>> {
     let provider = if provider.trim().is_empty() {
         "openrouter"
@@ -257,10 +209,6 @@ pub async fn route_auto(provider: &str, n: usize) -> Result<Vec<String>> {
     }
     Ok(out)
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Quota
-// ─────────────────────────────────────────────────────────────────────────────
 
 pub async fn quota_report(provider: Option<&str>) -> Result<Vec<String>> {
     let settings = crate::config::resolve();
@@ -288,10 +236,6 @@ pub async fn quota_report(provider: Option<&str>) -> Result<Vec<String>> {
     Ok(out)
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// PDF
-// ─────────────────────────────────────────────────────────────────────────────
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PdfCmd {
     Info(String),
@@ -311,7 +255,6 @@ pub enum PdfCmd {
 const PDF_USAGE: &str =
     "usage: pdf info <f> | text <f> | merge <sortie> <entrée…> | split <entrée> <sortie> <première> <dernière>";
 
-/// Parse les arguments d'une commande `pdf` (mêmes règles pour CLI et TUI).
 pub fn parse_pdf_args(args: &[&str]) -> Result<PdfCmd> {
     match args.first().copied().unwrap_or("") {
         "" => Err(anyhow!("{PDF_USAGE}")),
@@ -372,11 +315,6 @@ pub fn pdf(cmd: PdfCmd) -> Result<Vec<String>> {
     Ok(text.lines().map(|l| l.to_string()).collect())
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Catalogue d'API publiques
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Nombre de résultats par défaut (le CLI en affichait 10, la TUI 12).
 pub const APIS_DEFAULT_K: usize = 10;
 
 pub fn apis_stats() -> Result<Vec<String>> {
@@ -418,10 +356,6 @@ pub fn apis_import(path: &str) -> Result<Vec<String>> {
     )])
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Personas
-// ─────────────────────────────────────────────────────────────────────────────
-
 pub fn persona_list() -> Vec<String> {
     let list = crate::personas::list();
     let mut out = vec![format!("Dossier : {}", crate::personas::dir().display())];
@@ -459,10 +393,6 @@ pub fn persona_add(name: &str, content: &str) -> Result<Vec<String>> {
     )])
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Coffre
-// ─────────────────────────────────────────────────────────────────────────────
-
 pub fn vault_status() -> Vec<String> {
     vec![
         format!(
@@ -482,10 +412,6 @@ pub fn vault_lock() -> Vec<String> {
     crate::vault::lock();
     vec!["Coffre verrouillé.".to_string()]
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Embeddings
-// ─────────────────────────────────────────────────────────────────────────────
 
 pub fn embeddings_show() -> Vec<String> {
     match crate::config::load_global().embeddings {
@@ -536,16 +462,6 @@ pub fn embeddings_unset() -> Result<Vec<String>> {
     ])
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Providers
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Tableau des providers connus.
-///
-/// Deux colonnes distinctes : `transport` (direct ou via `zer0-gw`) et `clé`
-/// (présence d'une clé **dans l'agent**). Avant, la colonne unique affichait
-/// « zer0-gw » à la place de la clé, ce qui laissait croire qu'une clé était
-/// déposée alors que `provider keys` répondait « — ».
 pub fn provider_list() -> Vec<String> {
     provider_list_with(
         crate::config::load_global().provider.as_deref(),
@@ -553,9 +469,6 @@ pub fn provider_list() -> Vec<String> {
     )
 }
 
-/// Variante **pure** (provider actif et passerelle fournis) : c'est elle que les
-/// tests exercent, pour ne pas dépendre de la config de la machine — un runner
-/// CI vierge n'a aucun provider actif.
 pub fn provider_list_with(active_id: Option<&str>, gw: bool) -> Vec<String> {
     let mut out = vec![format!(
         "{:<3}{:<14}{:<26}{:<13}{:<11}{}",
@@ -616,9 +529,6 @@ pub fn provider_keys() -> Vec<String> {
     }
 }
 
-/// Cas particulier `cline` : c'est un endpoint OpenAI-compatible, pas une clé.
-/// `url` absent → Ollama local. La clé est optionnelle (stockée localement, ou
-/// déposée sur la passerelle comme les autres providers).
 pub fn provider_add_cline(url: Option<&str>, key: Option<&str>) -> Result<Vec<String>> {
     let url = url
         .map(str::trim)
@@ -649,8 +559,6 @@ pub fn provider_add_cline(url: Option<&str>, key: Option<&str>) -> Result<Vec<St
     )])
 }
 
-/// Ajoute la clé d'un provider intégré : dépôt sur zer0-gw si elle répond,
-/// sinon repli local **avec avertissement**.
 pub fn provider_add(id: &str, key: Option<&str>) -> Result<Vec<String>> {
     if id.eq_ignore_ascii_case("cline") {
         return provider_add_cline(key, None);
@@ -766,7 +674,6 @@ pub fn provider_use(id: &str) -> Result<Vec<String>> {
 
 pub fn provider_remove(id: &str) -> Result<Vec<String>> {
     let p = crate::providers::find(id).ok_or_else(|| anyhow!("provider inconnu: {id}"))?;
-    // Oublie aussi côté passerelle (si elle tourne) : sinon la clé survit là-bas.
     let _ = crate::gwclient::delete_key(&p.id);
     let mut g = crate::config::load_global();
     g.keys.remove(&p.id);
@@ -778,10 +685,6 @@ pub fn provider_remove(id: &str) -> Result<Vec<String>> {
         format!("Clé supprimée pour {}", p.name)
     }])
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Base de connaissance (SQLite + FTS5)
-// ─────────────────────────────────────────────────────────────────────────────
 
 pub fn kb_stats() -> Result<Vec<String>> {
     Ok(crate::knowledge::stats()?
@@ -802,11 +705,8 @@ pub async fn kb_search(query: &str, k: usize) -> Result<Vec<String>> {
         .collect())
 }
 
-/// Indexe un dossier (défaut : `base_connaissance`).
 pub async fn kb_ingest(dir: Option<std::path::PathBuf>, embed: bool) -> Result<Vec<String>> {
     let d = dir.unwrap_or_else(crate::knowledge::default_dir);
-    // Vérifié avant d'ouvrir la base : « dossier inexistant » ne doit pas créer
-    // une base vide au passage.
     if !d.exists() {
         return Err(anyhow!("dossier introuvable: {}", d.display()));
     }
@@ -822,7 +722,6 @@ pub async fn kb_ingest(dir: Option<std::path::PathBuf>, embed: bool) -> Result<V
     Ok(out)
 }
 
-/// Supprime de l'index les sources dont le fichier n'existe plus.
 pub fn kb_purge() -> Result<Vec<String>> {
     let n = crate::knowledge::purge_missing()?;
     Ok(vec![format!(
@@ -830,7 +729,6 @@ pub fn kb_purge() -> Result<Vec<String>> {
     )])
 }
 
-/// Retire de l'index les sources dont le chemin contient `pattern`.
 pub fn kb_dedupe() -> Result<Vec<String>> {
     let n = crate::knowledge::dedupe_sources()?;
     Ok(vec![format!(
@@ -860,11 +758,6 @@ pub fn kb_log(n: usize) -> Vec<String> {
         .collect()
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Mémoire persistante
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Liste les entrées (les plus récentes d'abord) + l'état de l'embedder.
 pub fn memory_list(limit: usize) -> Vec<String> {
     let entries = crate::memory::load();
     let n = limit.clamp(1, 500);
@@ -942,7 +835,6 @@ pub async fn memory_search(query: &str, k: usize) -> Result<Vec<String>> {
         .collect())
 }
 
-/// Vide le magasin de mémoire (irréversible).
 pub fn memory_clear() -> Result<Vec<String>> {
     crate::memory::clear()?;
     Ok(vec!["Mémoire vidée.".to_string()])
@@ -960,11 +852,6 @@ pub fn memory_forget(id: &str) -> Result<Vec<String>> {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Rôles
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Contenu effectif des rôles (données ; chaque interface met en forme).
 pub fn roles_snapshot() -> Vec<(&'static str, Option<String>)> {
     let roles = crate::config::effective_roles();
     crate::route::KNOWN_ROLES
@@ -999,7 +886,6 @@ fn validate_route(route: &str) -> Result<()> {
     }
 }
 
-/// Active/désactive le routage par rôle.
 pub fn set_roles(on: bool) -> Result<Vec<String>> {
     crate::config::set_roles_enabled(on)?;
     Ok(vec![if on {
@@ -1017,12 +903,10 @@ pub fn role_set(role: &str, route: &str) -> Result<Vec<String>> {
 }
 
 pub fn role_unset(role: &str) -> Result<Vec<String>> {
-    // Pas de validation ici : on doit pouvoir retirer un rôle devenu inconnu.
     crate::config::unset_role(role, false)?;
     Ok(vec![format!("Rôle {role} supprimé")])
 }
 
-/// Assigne chaque rôle au meilleur modèle `:free` du provider.
 pub async fn role_auto(provider: &str) -> Result<Vec<String>> {
     let provider = if provider.trim().is_empty() {
         "openrouter"
@@ -1041,11 +925,6 @@ pub async fn role_auto(provider: &str) -> Result<Vec<String>> {
     Ok(out)
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Recherche web
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Résultats de recherche, formatés pour l'affichage (`max` borné).
 pub async fn search(query: &str, max: usize) -> Result<Vec<String>> {
     let q = query.trim();
     if q.is_empty() {
@@ -1059,21 +938,10 @@ pub async fn search(query: &str, max: usize) -> Result<Vec<String>> {
     )])
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Sélection de modèle
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Avertissement unique (les deux interfaces en affichaient deux versions
-/// contradictoires : « benchmarks Artificial Analysis » vs « non benchmarké »).
 pub const SELECT_DISCLAIMER: &str = "⚠ Classement heuristique : indices publiés quand ils \
      existent (Artificial Analysis), sinon mots-clés du nom — ce n'est pas une garantie de \
      qualité. Applique avec `model use <id>` (CLI : `zer0 model use <id>`).";
 
-/// Classe les modèles `:free` pour un problème donné.
-///
-/// Source du catalogue : OpenRouter (liste publique, sans clé). Une seule
-/// implémentation pour le CLI et la TUI, donc un seul nombre de résultats et
-/// un seul texte d'avertissement.
 pub async fn select_models(problem: &str, top: usize) -> Result<Vec<String>> {
     let problem = problem.trim();
     if problem.is_empty() {
@@ -1108,11 +976,6 @@ pub async fn select_models(problem: &str, top: usize) -> Result<Vec<String>> {
     Ok(lines)
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Audit
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Les `n` dernières actions de l'agent, formatées en JSONL compact.
 pub fn audit_tail(n: usize) -> Vec<String> {
     let lines = crate::audit::tail(n.clamp(1, 1000));
     if lines.is_empty() {
@@ -1138,7 +1001,6 @@ mod tests {
 
     #[test]
     fn task_add_accepts_a_role() {
-        // Divergence corrigée : le CLI acceptait `--role`, la TUI non.
         let cmd = parse_task(&["add", "écrire", "les", "tests", "--role", "code"]).unwrap();
         assert_eq!(
             cmd,
@@ -1207,10 +1069,8 @@ mod tests {
         assert!(parse_pdf_args(&[]).is_err());
         assert!(parse_pdf_args(&["info"]).is_err());
         assert!(parse_pdf_args(&["frob"]).is_err());
-        // merge : sortie + au moins une entrée
         assert!(parse_pdf_args(&["merge", "out.pdf"]).is_err());
         assert!(parse_pdf_args(&["merge", "out.pdf", "a.pdf", "b.pdf"]).is_ok());
-        // split : bornes numériques cohérentes
         assert!(parse_pdf_args(&["split", "a.pdf", "out", "x", "3"]).is_err());
         assert!(parse_pdf_args(&["split", "a.pdf", "out", "5", "2"]).is_err());
         assert!(parse_pdf_args(&["split", "a.pdf", "out", "2", "5"]).is_ok());
@@ -1237,7 +1097,6 @@ mod tests {
         assert!(provider_add("provider-qui-nexiste-pas", Some("k")).is_err());
         assert!(provider_use("inconnu").is_err());
         assert!(provider_remove("inconnu").is_err());
-        // base_url qui est en réalité une clé API
         assert!(provider_add_custom("monapi", "sk-abc123", None, None).is_err());
         assert!(provider_add_custom("openrouter", "https://x/v1", None, None).is_err());
         assert!(provider_add_custom("", "https://x/v1", None, None).is_err());
@@ -1261,7 +1120,6 @@ mod tests {
             .expect("google absent du catalogue");
         assert!(!other.starts_with('*'), "provider inactif marqué : {other}");
 
-        // Aucun provider actif (cas d'un runner vierge) : aucune étoile.
         let none = provider_list_with(None, false);
         assert!(none.iter().all(|l| !l.starts_with('*')));
         assert!(none.iter().any(|l| l.contains("transport")));
@@ -1271,7 +1129,6 @@ mod tests {
     fn kb_commands_validate_before_touching_the_database() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         assert!(rt.block_on(kb_search("   ", 5)).is_err());
-        // Dossier inexistant : erreur avant ouverture de la base.
         let missing = std::path::PathBuf::from("/tmp/zer0-kb-inexistant-xyz");
         let e = rt
             .block_on(kb_ingest(Some(missing), false))
@@ -1290,7 +1147,6 @@ mod tests {
 
     #[test]
     fn role_validation_rejects_unknown_roles_and_routes() {
-        // Erreurs pures : aucune écriture de config n'est atteinte.
         assert!(validate_role("code").is_ok());
         assert!(validate_role("inconnu").is_err());
         assert!(validate_route("openrouter/qwen/qwen3.8-27b:free").is_ok());
@@ -1309,14 +1165,12 @@ mod tests {
             parse_auto_args(&["moonshot", "3"]),
             ("moonshot".to_string(), 3)
         );
-        // bornes
         assert_eq!(parse_auto_args(&["99"]).1, 12);
         assert_eq!(parse_auto_args(&["0"]).1, 1);
     }
 
     #[test]
     fn route_add_validates_the_format() {
-        // Validation seule : on ne touche pas à la vraie config dans un test.
         assert!(route_add("").is_err());
         assert!(route_add("   ").is_err());
         assert!(route_add("sans-slash").is_err());
@@ -1340,7 +1194,6 @@ mod tests {
             strip_route_prefix("nvidia", "nvidia/mistralai/foo"),
             "mistralai/foo"
         );
-        // Un préfixe seul ne doit pas produire un identifiant vide.
         assert_eq!(
             strip_route_prefix("openrouter", "openrouter/"),
             "openrouter/"
@@ -1349,7 +1202,6 @@ mod tests {
 
     #[test]
     fn set_model_refuses_embeddings_and_empty_ids() {
-        // Refus avant toute lecture/écriture de config : testable sans disque.
         let e = set_model("text-embedding-3-large").unwrap_err().to_string();
         assert!(e.contains("embedding"), "{e}");
         assert!(set_model("   ").unwrap_err().to_string().contains("usage"));

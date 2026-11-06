@@ -9,8 +9,6 @@ use ratatui::Frame;
 
 const EXTS: &[&str] = &["mp3", "wav", "ogg", "flac", "m4a", "opus", "aac", "wma"];
 
-/// A terminal "8-bit radio": track list + external audio player + ASCII bars.
-/// Can open a folder, an audio file, or a stream URL.
 pub struct Radio {
     pub tracks: Vec<PathBuf>,
     pub selected: usize,
@@ -20,13 +18,11 @@ pub struct Radio {
     pub error: Option<String>,
 }
 
-/// Default music folder: `$ZER0_MUSIC_DIR`, else `<projet>/music` (à côté du binaire).
 pub fn default_music_dir() -> PathBuf {
     if let Ok(d) = std::env::var("ZER0_MUSIC_DIR") {
         return PathBuf::from(d);
     }
     if let Ok(exe) = std::env::current_exe() {
-        // target/release/zer0 → target/release → target → <projet>
         if let Some(root) = exe
             .parent()
             .and_then(|p| p.parent())
@@ -82,7 +78,6 @@ impl Radio {
         r
     }
 
-    /// Replace the track list with the audio files of `dir` (non-recursive).
     pub fn load_dir(&mut self, dir: &Path) {
         let mut tracks = Vec::new();
         if let Ok(rd) = std::fs::read_dir(dir) {
@@ -103,7 +98,6 @@ impl Radio {
         self.selected = 0;
     }
 
-    /// Append a single audio file to the list.
     pub fn add_file(&mut self, path: PathBuf) {
         if !self.tracks.contains(&path) {
             self.tracks.push(path.clone());
@@ -125,14 +119,12 @@ impl Radio {
         }
     }
 
-    /// Next track and play it (n).
     pub fn next_play(&mut self) {
         if !self.tracks.is_empty() {
             self.next();
             self.play_selected();
         }
     }
-    /// Previous track and play it (p).
     pub fn prev_play(&mut self) {
         if !self.tracks.is_empty() {
             self.prev();
@@ -185,7 +177,6 @@ impl Radio {
         }
     }
 
-    /// Open a folder, a file, or a stream URL.
     pub fn open(&mut self, arg: &str) {
         if is_url(arg) {
             self.play_target(arg, arg.to_string());
@@ -210,7 +201,6 @@ impl Radio {
         };
         if ended {
             self.playing = None;
-            // Playlist: enchaîne automatiquement sur la piste suivante.
             if !self.tracks.is_empty() {
                 self.next();
                 self.play_selected();
@@ -296,7 +286,6 @@ impl Radio {
     }
 }
 
-/// Minimal `~` expansion (avoids a dependency).
 fn shellexpand(s: &str) -> String {
     if let Some(rest) = s.strip_prefix("~/") {
         let home = crate::platform::home();

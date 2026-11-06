@@ -1,6 +1,5 @@
 use crate::models::ModelEntry;
 
-/// Rough task categories used to rank models.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Category {
     Code,
@@ -26,7 +25,6 @@ impl Category {
     }
 }
 
-/// Whole-word (boundary) match, so `api` does not match inside `rapide`.
 fn contains_word(hay: &str, needle: &str) -> bool {
     let bytes = hay.as_bytes();
     let mut start = 0;
@@ -43,7 +41,6 @@ fn contains_word(hay: &str, needle: &str) -> bool {
     false
 }
 
-/// Keyword-based task classifier (French + English).
 pub fn classify(problem: &str) -> Category {
     let p = problem.to_ascii_lowercase();
     let has = |words: &[&str]| words.iter().any(|w| contains_word(&p, w));
@@ -140,7 +137,6 @@ pub fn classify(problem: &str) -> Category {
     Category::General
 }
 
-/// Published capability indices (0 when absent).
 fn bench(m: &ModelEntry) -> (f64, f64, f64) {
     match m
         .benchmarks
@@ -164,7 +160,6 @@ fn has_image_input(m: &ModelEntry) -> bool {
         .unwrap_or(false)
 }
 
-/// Heuristique de secours (nom du modèle) quand le catalogue n'est pas disponible.
 pub fn supports_images_by_name(model_id: &str) -> bool {
     let id = model_id.to_ascii_lowercase();
     [
@@ -180,7 +175,6 @@ pub fn supports_images_by_name(model_id: &str) -> bool {
     .any(|k| id.contains(k))
 }
 
-/// Preference keywords per category (tie-break only; benchmarks dominate).
 fn keyword_bonus(id: &str, cat: Category) -> i64 {
     let prefs: &[&str] = match cat {
         Category::Code => &[
@@ -219,14 +213,6 @@ fn keyword_bonus(id: &str, cat: Category) -> i64 {
     s
 }
 
-/// Score one model for a category. Higher is better.
-///
-/// When OpenRouter publishes Artificial Analysis indices, they dominate the
-/// score; keyword preferences are only a fallback / tie-break.
-/// `true` si le modèle n'est pas utilisable en chat (embedding ou reranker).
-/// Ces modèles ne répondent que sur `/embeddings` ; les envoyer à
-/// `/chat/completions` produit un **400** (constaté avec
-/// `liquid/lfm-2.5-embedding-350m:free`).
 pub fn is_embedding_or_rerank(id: &str) -> bool {
     id.contains("embedding") || id.contains("rerank")
 }
@@ -236,19 +222,16 @@ pub fn score(m: &ModelEntry, cat: Category) -> i64 {
     let (intel, code, agentic) = bench(m);
 
     let mut s = match cat {
-        // No latency data available: use naming heuristics, not intelligence.
         Category::Fast => fast_score(&id),
         Category::Code => (code.max(agentic) * 4.0) as i64,
         _ => (intel * 4.0) as i64,
     };
     s += keyword_bonus(&id, cat);
 
-    // modality constraints
     if cat == Category::Vision && !has_image_input(m) {
         s -= 300;
     }
 
-    // never useful as a chat/agent model
     if is_embedding_or_rerank(&id) {
         s -= 1000;
     }
@@ -267,7 +250,6 @@ pub fn score(m: &ModelEntry, cat: Category) -> i64 {
     s
 }
 
-/// Naming-based heuristic for "fast" models (no latency data in the catalog).
 fn fast_score(id: &str) -> i64 {
     let mut s = 0i64;
     for k in [
@@ -301,7 +283,6 @@ fn fast_score(id: &str) -> i64 {
     s
 }
 
-/// Rank models for a problem, best first.
 pub fn rank(
     problem: &str,
     models: &[ModelEntry],
@@ -318,7 +299,6 @@ pub fn rank(
     (cat, scored)
 }
 
-/// Human-readable capability summary for a model.
 pub fn capability_note(m: &ModelEntry) -> String {
     let (intel, code, agentic) = bench(m);
     if intel == 0.0 && code == 0.0 && agentic == 0.0 {

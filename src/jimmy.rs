@@ -1,13 +1,6 @@
-//! **Jimmy** — le cancre.
-//!
-//! Un faux agent volontairement inutile : il ne réfléchit pas, ne code pas, et
-//! répond « je sais pas » / « hein ?? » / « ZzZzzZzzz… ». Il sert de **faire-valoir**
-//! (`/provoke`) pour provoquer les vrais agents — et de gag.
-
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const LINES: &[&str] = &[
-    // ── Le cancre ──
     "je sais pas.",
     "hein ?? quoi ??",
     "ZzZzzZzzz… 💤",
@@ -20,7 +13,6 @@ const LINES: &[&str] = &[
     "j'étais parti chercher un café.",
     "euh… on peut pas faire ça demain ?",
     "réponse : 42. (j'ai rien compris)",
-    // ── Les gags « j'ai tout cassé » ──
     "j'ai arrangé ton code : y'avait trop de lignes, j'en ai effacé 300.",
     "j'ai supprimé les warnings en supprimant le code. 👍",
     "j'ai commenté tout le fichier, comme ça plus de bugs.",
@@ -44,7 +36,6 @@ const LINES: &[&str] = &[
     "j'ai fait `git reset --hard`, t'avais rien commité de toute façon ?",
 ];
 
-/// Une réplique de Jimmy (pseudo-aléatoire).
 pub fn reply() -> &'static str {
     let n = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -53,7 +44,6 @@ pub fn reply() -> &'static str {
     LINES[n % LINES.len()]
 }
 
-/// Délai « fainéant » (quelques secondes) pour jouer le cancre qui traîne.
 pub fn lazy_delay() -> u64 {
     3 + (reply().len() as u64 % 6)
 }

@@ -15,7 +15,6 @@ RATE = 44100
 OUT = os.path.join(os.path.dirname(__file__), "..", "assets", "sfx", "castle")
 random.seed(1993)
 
-
 def write(name, samples, vol=0.28):
     path = os.path.join(OUT, name)
     peak = max(1e-9, max(abs(s) for s in samples))
@@ -29,13 +28,11 @@ def write(name, samples, vol=0.28):
         )
     print(f"{name}: {len(samples) / RATE:.2f}s, {os.path.getsize(path)} octets")
 
-
 def env(i, n, attack=0.005, decay=1.0):
     a = int(RATE * attack) or 1
     if i < a:
         return i / a
     return max(0.0, 1.0 - (i - a) / max(1, n - a)) ** decay
-
 
 def square(freq, dur, vol=1.0, decay=1.5, sweep=None, duty=0.5):
     n = int(RATE * dur)
@@ -44,11 +41,10 @@ def square(freq, dur, vol=1.0, decay=1.5, sweep=None, duty=0.5):
     for i in range(n):
         f = freq if sweep is None else freq + (sweep - freq) * (i / max(1, n - 1))
         phase += f / RATE
-        # bruit de quantification léger pour un grain « 8 bits »
+
         s = 1.0 if (phase % 1.0) < duty else -1.0
         out.append(s * vol * env(i, n, decay=decay))
     return out
-
 
 def noise(dur, vol=1.0, decay=2.0, lowpass=0.0):
     n = int(RATE * dur)
@@ -62,10 +58,8 @@ def noise(dur, vol=1.0, decay=2.0, lowpass=0.0):
         out.append(v * vol * env(i, n, decay=decay))
     return out
 
-
 def silence(dur):
     return [0.0] * int(RATE * dur)
-
 
 def mix(*tracks):
     n = max(len(t) for t in tracks)
@@ -74,23 +68,18 @@ def mix(*tracks):
         out.append(sum(t[i] for t in tracks if i < len(t)))
     return out
 
-
 def concat(*tracks):
     out = []
     for t in tracks:
         out.extend(t)
     return out
 
-
 os.makedirs(OUT, exist_ok=True)
 
-# Navigation : petit clic sec.
 write("tick.wav", square(950, 0.035, decay=3.0))
 
-# Validation : interrupteur métallique (bruit + chute de pitch).
 write("select.wav", mix(noise(0.09, 0.7, decay=3.0, lowpass=0.5), square(320, 0.09, 0.6, sweep=110)))
 
-# Signature du thème : lourde porte + chaîne.
 write(
     "theme_castle.wav",
     concat(
@@ -102,15 +91,11 @@ write(
     ),
 )
 
-# Ouverture d'un panneau/mod.
 write("panel_open.wav", mix(noise(0.16, 0.6, decay=2.2, lowpass=0.6), square(180, 0.16, 0.5, sweep=90)))
 
-# Interrupteurs.
 write("toggle_on.wav", concat(square(440, 0.05, 0.6), square(660, 0.06, 0.6)))
 write("toggle_off.wav", concat(square(660, 0.05, 0.6), square(440, 0.06, 0.6)))
 
-# Erreur.
 write("error.wav", square(200, 0.2, 0.7, sweep=90, decay=1.0, duty=0.3))
 
-# Fin de tour : deux clics « reload ».
 write("done.wav", concat(noise(0.05, 0.7, decay=3.0, lowpass=0.5), silence(0.06), noise(0.06, 0.7, decay=3.0, lowpass=0.5)))

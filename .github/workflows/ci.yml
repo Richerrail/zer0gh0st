@@ -40,15 +40,12 @@ jobs:
       - name: Build (release)
         run: cargo build --release
 
-      # Clippy : un warning échoue le build (le code est maintenu sans warning).
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
 
       - name: Tests
         run: cargo test --all-targets
 
-      # Formatage : bloquant. Le code est rustfmt-clean depuis l'extraction de
-      # `src/lib.rs` ; laisser ce job « informatif » garantissait la dérive.
       - name: Format
         run: cargo fmt --all -- --check
 

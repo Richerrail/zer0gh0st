@@ -1,8 +1,3 @@
-//! Historique de conversation persisté (JSONL).
-//!
-//! Une ligne par message (`role`, `content`, `tool_calls`…). Rechargé au
-//! démarrage (`--resume`) ou par l'écran des conversations (F6).
-
 use anyhow::Result;
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -15,22 +10,15 @@ pub fn path() -> PathBuf {
     config::data_dir().join("conversation.jsonl")
 }
 
-/// Charge les `max` derniers messages (0 = tout), **sans** réparation.
 pub fn load(max: usize) -> Vec<ChatMessage> {
     load_from_path(&path(), max)
 }
 
-/// Charge et **répare** l'historique (à utiliser pour `--resume` / F6).
 pub fn load_repaired(max: usize) -> Vec<ChatMessage> {
     let msgs = load_from_path(&path(), 0);
     take_last(repair(msgs), max)
 }
 
-/// Écrit l'historique actif en entier (atomique : tmp + rename).
-///
-/// Utilisé après une compaction : sinon la version résumée n'existait qu'en
-/// mémoire, et un redémarrage rechargeait l'historique complet (contexte perdu
-/// ou re-compacté à chaque lancement).
 pub fn rewrite(msgs: &[ChatMessage]) -> Result<()> {
     let p = path();
     if let Some(dir) = p.parent() {
@@ -48,7 +36,6 @@ pub fn rewrite(msgs: &[ChatMessage]) -> Result<()> {
     Ok(())
 }
 
-/// Ajoute un message à l'historique.
 pub fn append(msg: &ChatMessage) -> Result<()> {
     let p = path();
     if let Some(dir) = p.parent() {
@@ -59,7 +46,6 @@ pub fn append(msg: &ChatMessage) -> Result<()> {
     Ok(())
 }
 
-/// Charge les messages depuis un chemin arbitraire (0 = tout).
 pub fn load_from_path(p: &std::path::Path, max: usize) -> Vec<ChatMessage> {
     let Ok(s) = std::fs::read_to_string(p) else {
         return Vec::new();
@@ -79,33 +65,22 @@ fn take_last(msgs: Vec<ChatMessage>, max: usize) -> Vec<ChatMessage> {
     }
 }
 
-/// Rend un historique **acceptable par un provider OpenAI-compatible**.
-///
-/// Deux règles, apprises à la dure : couper un JSONL « au milieu » produit des
-/// historiques que la spec refuse (400, puis « tous les endpoints ont échoué »).
-///
-/// 1. l'historique commence sur un `user` (jamais sur un `tool` orphelin) ;
-/// 2. un `tool` sans `tool_calls` parent est supprimé, et un `assistant` dont
-///    les `tool_calls` n'ont pas (tous) leur résultat est supprimé.
 pub fn repair(msgs: Vec<ChatMessage>) -> Vec<ChatMessage> {
     let mut out: Vec<ChatMessage> = Vec::with_capacity(msgs.len());
-    // Identifiants d'appels en attente de résultat.
     let mut pending: Vec<String> = Vec::new();
 
     for m in msgs {
         match m.role.as_str() {
             "tool" => {
                 let Some(id) = m.tool_call_id.as_ref() else {
-                    continue; // résultat sans identifiant : inutilisable
+                    continue;
                 };
                 if pending.iter().any(|p| p == id) {
                     pending.retain(|p| p != id);
                     out.push(m);
                 }
-                // Sinon : orphelin (le parent a été coupé) → jeté.
             }
             "assistant" => {
-                // Les appels précédents non résolus restent non résolus.
                 pending.clear();
                 if let Some(calls) = &m.tool_calls {
                     pending = calls.iter().map(|c| c.id.clone()).collect();
@@ -119,7 +94,6 @@ pub fn repair(msgs: Vec<ChatMessage>) -> Vec<ChatMessage> {
         }
     }
 
-    // Un dernier assistant dont les appels n'ont pas de résultat est invalide.
     while matches!(out.last().map(|m| m.role.as_str()), Some("assistant")) {
         let has_calls = out.last().and_then(|m| m.tool_calls.as_ref()).is_some();
         if has_calls {
@@ -129,19 +103,16 @@ pub fn repair(msgs: Vec<ChatMessage>) -> Vec<ChatMessage> {
         }
     }
 
-    // 1) commencer sur un `user` : sinon le modèle répond à un contexte tronqué.
     if let Some(first_user) = out.iter().position(|m| m.role == "user") {
         out.drain(..first_user);
     } else {
         out.clear();
     }
 
-    // 2) les `notice` ne sont jamais persistées, mais on purge par sécurité.
     out.retain(|m| m.role != "notice");
     out
 }
 
-/// Archive et efface l'historique actif.
 pub fn clear() -> Result<()> {
     let p = path();
     if p.exists() {
@@ -185,7 +156,6 @@ mod tests {
 
     #[test]
     fn repair_drops_orphan_tool_result() {
-        // La coupe a mangé l'assistant qui demandait l'outil.
         let msgs = vec![
             ChatMessage::tool_result("call_1", "sortie".into()),
             user("bonjour"),
@@ -247,7 +217,6 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let p = dir.join("c.jsonl");
         let msgs = vec![user("un"), ChatMessage::assistant("deux".into(), vec![])];
-        // On réutilise la même sérialisation que `rewrite`.
         let mut s = String::new();
         for m in &msgs {
             s.push_str(&serde_json::to_string(m).unwrap());

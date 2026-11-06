@@ -1,16 +1,3 @@
-# Étoile → trace visible + mesure de conversion.
-#
-# But : on ne peut pas *exiger* une étoile pour cloner — un clone anonyme
-# n'a pas d'identité, il n'y a donc rien à exiger. On peut en revanche
-# **mesurer** ce que devient le trafic : chaque étoile est un clone
-# « converti ».
-#
-# Événement : `watch` = quelqu'un met une étoile sur le dépôt
-# (l'événement `star` de GitHub ne concerne que les issues).
-#
-# Ce workflow est volontairement minimal et sans permission particulière :
-# il journalise chaque nouvelle étoile. Tu peux ensuite l'étendre (ouvrir
-# une discussion, notifier,…) si tu le trouves utile.
 
 name: ⭐ Étoile
 

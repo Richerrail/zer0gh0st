@@ -1,9 +1,4 @@
-#!/usr/bin/env bash
-# Génère la vidéo de démo de ZER0│GH0ST avec VHS (github.com/charmbracelet/vhs).
-#
-#   ./scripts/demo.sh
-#
-# Produit le fichier indiqué par `Output` dans scripts/demo.tape (demo.gif).
+
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -20,7 +15,6 @@ EOF
   exit 1
 fi
 
-# Le binaire doit exister (sinon on compile).
 if [ ! -x target/release/zer0 ]; then
   echo "→ compilation release…"
   cargo build --release

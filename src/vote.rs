@@ -1,68 +1,35 @@
-//! Vote de l'utilisateur sur zer0gh0st — 👍 = une star GitHub, 👎 = on la retire.
-//!
-//! ## Ce que « upvote » veut dire
-//!
-//! GitHub n'a pas de vote : il a des **stars**. Un vote positif est donc une
-//! star sur `Richerrail/zer0gh0st`, et un vote négatif est son retrait
-//! (`DELETE /user/starred/{owner}/{repo}`).
-//!
-//! Deux façons de la poser, dans cet ordre :
-//!
-//! 1. **Avec un jeton GitHub** (`ZER0_GITHUB_TOKEN`, `GITHUB_TOKEN`, `GH_TOKEN`,
-//!    ou la clé `github` dans la config / le coffre) : l'API est appelée
-//!    directement — `PUT /user/starred/{owner}/{repo}`. Jeton *fine-grained* :
-//!    permission « Starring » en écriture + « Metadata » en lecture ; jeton
-//!    *classique* : scope `public_repo`. Une star posée, une star retirée.
-//! 2. **Sans jeton** : on ouvre la page du dépôt dans le navigateur, là où se
-//!    trouve le bouton « ★ Star » — l'étoile est alors posée à la main.
-//!    Aucun mensonge : le message dit exactement ce qui s'est passé.
-//!
-//! Le compteur affiché vient de l'API **publique**
-//! (`GET /repos/{owner}/{repo}/stargazers/count`), mis en cache 10 minutes :
-//! l'API GitHub sans jeton est plafonnée à 60 requêtes/heure.
-
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
 
-/// Le dépôt votable (même source que les releases).
 pub const REPO: &str = "Richerrail/zer0gh0st";
 
-/// Base de l'API GitHub.
 const API: &str = "https://api.github.com";
 
-/// En-tête `User-Agent` : **obligatoire** sur l'API GitHub (sans lui : 403
-/// « Request forbidden by administrative rules »).
 fn user_agent() -> String {
     format!("zer0/{}", crate::update::current_version())
 }
 
-/// Durée de vie du compteur de stars en cache (API publique : 60 req/h).
 const CACHE_TTL: Duration = Duration::from_secs(600);
 
-/// Compteur observé : (nombre, moment de l'observation).
 fn cache() -> &'static Mutex<Option<(u64, Instant)>> {
     static C: OnceLock<Mutex<Option<(u64, Instant)>>> = OnceLock::new();
     C.get_or_init(|| Mutex::new(None))
 }
 
-/// Le dernier compteur connu, sans réseau.
 pub fn cached_stars() -> Option<u64> {
     cache().lock().ok().and_then(|c| c.map(|(n, _)| n))
 }
 
-/// Page du dépôt — c'est là qu'est le bouton « ★ Star ».
 pub fn repo_url() -> String {
     format!("https://github.com/{REPO}")
 }
 
-/// Page listant les stargazers.
 pub fn stargazers_url() -> String {
     format!("{}/stargazers", repo_url())
 }
 
-/// Jeton GitHub optionnel : variable d'env → coffre → config.
 pub fn token() -> Option<String> {
     for var in ["ZER0_GITHUB_TOKEN", "GITHUB_TOKEN", "GH_TOKEN"] {
         if let Ok(v) = std::env::var(var) {
@@ -83,25 +50,16 @@ pub fn token() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-/// Combien de fois l'invitation GitHub a deja ete proposee a cet utilisateur.
-///
-/// Au-dela, on ne propose plus : on se contente du rappel discret.
 const MAX_INVITATIONS: u32 = 3;
 
-/// L'utilisateur a-t-il deja eu droit a l'invitation de connexion GitHub ?
 fn invitation_deja_vue() -> bool {
     crate::config::load_global().github_prompted
 }
 
-/// Nombre de rappels deja effectues (pour la config).
 fn rappels_effectues() -> u32 {
     crate::config::load_global().github_prompt_count
 }
 
-/// Incremente le compteur de rappels et marque l'invitation comme vue.
-///
-/// Ecrit dans la config : l'utilisateur n'est donc pas relance a chaque
-/// demarrage.
 pub fn note_rappel() {
     let mut g = crate::config::load_global();
     g.github_prompt_count = g.github_prompt_count.saturating_add(1);
@@ -109,23 +67,13 @@ pub fn note_rappel() {
     let _ = crate::config::save_global(&g);
 }
 
-/// Ce qu'on dit a l'utilisateur au demarrage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Invitation {
-    /// Rien a dire : deja connecte, ou rappels epuises.
     Rien,
-    /// Premiere fois : invitation claire, avec la marche a suivre.
     Claire,
-    /// Deja propose : rappel discret, on n'importune plus.
     Rappel,
 }
 
-/// Decide quoi dire au demarrage (logique pure, testable).
-///
-/// - deja connecte -> `Rien` (le vote est deja automatique) ;
-/// - jamais propose et moins de `MAX_INVITATIONS` rappels -> `Claire` ;
-/// - deja propose -> `Rappel` (discret) ;
-/// - rappels epuises -> `Rien` (on laisse l'utilisateur tranquille).
 pub fn invitation_pour(deja_vue: bool, rappels: u32, connecte: bool) -> Invitation {
     if connecte {
         return Invitation::Rien;
@@ -140,19 +88,6 @@ pub fn invitation_pour(deja_vue: bool, rappels: u32, connecte: bool) -> Invitati
     }
 }
 
-/// Message a proposer au demarrage, selon la situation.
-///
-/// - **jamais connecte** et invitation disponible -> invitation claire
-///   (une fois, puis elle devient un rappel discret) ;
-/// - **deja connecte** -> rien (le vote est deja automatique) ;
-/// - **rappels epuises** -> plus d'invitation, seulement un rappel discret.
-///
-/// Commande à taper pour réutiliser **ce** binaire.
-///
-/// Le nom « zer0 » codé en dur pouvait désigner un autre programme (chez
-/// moi, `zer0` est une ancienne appli Python sans commande `vote`) : on
-/// affiche donc le chemin réel de l'exécutant en cours — toujours
-/// copiable et toujours juste.
 pub fn self_cmd() -> String {
     self_cmd_from(
         std::env::var("ZER0_CMD_NAME").ok(),
@@ -160,8 +95,6 @@ pub fn self_cmd() -> String {
     )
 }
 
-/// Version **pure** de `self_cmd` (testable sans toucher à l'environnement :
-/// les tests Rust tournent en parallèle, et muter l'env y est une course).
 pub fn self_cmd_from(env_name: Option<String>, exe: Option<std::path::PathBuf>) -> String {
     if let Some(v) = env_name {
         let v = v.trim();
@@ -173,7 +106,6 @@ pub fn self_cmd_from(env_name: Option<String>, exe: Option<std::path::PathBuf>) 
         .unwrap_or_else(|| "zer0".to_string())
 }
 
-/// `None` = rien a dire (l'utilisateur est deja connecte).
 pub fn invitation_startup() -> Option<String> {
     let connecte = token().is_some();
     let cmd = self_cmd();
@@ -193,26 +125,13 @@ directement, sans plus jamais de manipulation."
     }
 }
 
-/// Extrait le compteur d'un corps JSON `{"count": 42}`.
 pub fn parse_count(body: &str) -> Option<u64> {
     let v: serde_json::Value = serde_json::from_str(body).ok()?;
     v.get("count").and_then(|c| c.as_u64())
 }
 
-/// `client_id` de l'application OAuth *Zer0* (device flow du vote).
-///
-/// C'est un **identifiant public** : GitHub l'affiche publiquement sur la page
-/// de l'application, et le device flow n'a besoin d'aucun `client_secret`.
-/// Il permet à tout utilisateur de connecter son compte en un clic
-/// (`{cmd} vote login`) sans rien configurer.
 pub const DEFAULT_CLIENT_ID: &str = "Ov23lioyZzAN5wtt0j0o";
 
-/// Client ID de l'application OAuth du projet (device flow).
-///
-/// L'application OAuth est créée par le mainteneur du dépôt ; son `client_id`
-/// est public par nature (c'est un identifiant, pas un secret). Il peut être
-/// fourni par `ZER0_GITHUB_CLIENT_ID` ou stocké dans la config ; à défaut on
-/// utilise celui de l'application *Zer0* (constante ci-dessus).
 pub fn client_id() -> Option<String> {
     client_id_from(
         std::env::var("ZER0_GITHUB_CLIENT_ID").ok(),
@@ -220,8 +139,6 @@ pub fn client_id() -> Option<String> {
     )
 }
 
-/// Version **pure** de `client_id` (testable sans l'environnement : les tests
-/// tournent en parallèle, muter l'env y serait une course).
 pub fn client_id_from(env: Option<String>, cfg: Option<String>) -> Option<String> {
     if let Some(v) = env {
         let v = v.trim();
@@ -234,7 +151,6 @@ pub fn client_id_from(env: Option<String>, cfg: Option<String>) -> Option<String
         .or_else(|| Some(DEFAULT_CLIENT_ID.to_string()))
 }
 
-/// Réponse du device flow : le code à saisir et l'URL de vérification.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeviceCode {
     pub user_code: String,
@@ -244,10 +160,6 @@ pub struct DeviceCode {
     pub interval: u64,
 }
 
-/// Demande un code de device flow à GitHub.
-///
-/// `scope = "public_repo"` : c'est le scope qui autorise à **starrer** un
-/// dépôt public (documenté par GitHub). C'est le minimum qui permet le vote.
 pub async fn request_device_code(client_id: &str) -> Result<DeviceCode> {
     let r = crate::http_client::HTTP_CLIENT
         .post("https://github.com/login/device/code")
@@ -266,8 +178,6 @@ pub async fn request_device_code(client_id: &str) -> Result<DeviceCode> {
     let v: serde_json::Value =
         serde_json::from_str(&body).map_err(|_| anyhow!("réponse GitHub illisible"))?;
     if let Some(err) = v.get("error").and_then(|e| e.as_str()) {
-        // `not_enabled` = la case « Enable Device Flow » n'est pas cochée sur
-        // la page de l'application OAuth.
         let hint = if err == "not_enabled" {
             " — active « Enable Device Flow » dans les réglages de l'application OAuth"
         } else {
@@ -294,35 +204,23 @@ pub async fn request_device_code(client_id: &str) -> Result<DeviceCode> {
     Ok(dc)
 }
 
-/// Résultat d'un échange de code contre un jeton.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PollOutcome {
-    /// Jeton obtenu. `refresh` n'est présent que si l'app OAuth a l'option
-    /// « Expire user access tokens » (support **opt-in**).
     Token {
         access: String,
         refresh: Option<String>,
     },
-    /// L'utilisateur n'a pas encore validé le code.
     Pending,
-    /// Le code a expiré.
     Expired,
 }
 
-/// Clé de coffre où vit le jeton d'accès.
 const KEY_ACCESS: &str = "github";
-/// Clé de coffre où vit le jeton de rafraîchissement (**opt-in**).
 const KEY_REFRESH: &str = "github_refresh";
 
-/// Jeton de rafraîchissement, s'il y en a un (app à jetons expirables).
 pub fn refresh_token() -> Option<String> {
     crate::vault::get_unlocked(KEY_REFRESH).filter(|s| !s.trim().is_empty())
 }
 
-/// Renouvelle le jeton d'accès à partir du jeton de rafraîchissement.
-///
-/// Ne fait **rien** si l'app n'a pas de jetons expirables (pas de refresh
-/// token stocké) : le comportement par défaut est donc inchangé.
 pub async fn refresh_access_token() -> Option<String> {
     let rt = refresh_token()?;
     let cid = client_id()?;
@@ -344,7 +242,6 @@ pub async fn refresh_access_token() -> Option<String> {
     if access.is_empty() {
         return None;
     }
-    // Un nouveau refresh_token peut être fourni (rotation) : on le remplace.
     if let Some(new_rt) = v.get("refresh_token").and_then(|t| t.as_str()) {
         let _ = crate::vault::put(KEY_REFRESH, new_rt);
     }
@@ -352,7 +249,6 @@ pub async fn refresh_access_token() -> Option<String> {
     Some(access)
 }
 
-/// Échange le `device_code` contre un jeton (interroge le service de jetons).
 pub async fn poll_device_token(client_id: &str, device_code: &str) -> Result<PollOutcome> {
     let r = crate::http_client::HTTP_CLIENT
         .post("https://github.com/login/oauth/access_token")
@@ -389,19 +285,12 @@ pub async fn poll_device_token(client_id: &str, device_code: &str) -> Result<Pol
     }
 }
 
-/// Jeton obtenu après le device flow.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Credentials {
-    /// Jeton d'accès (à utiliser pour l'API).
     pub access: String,
-    /// Jeton de rafraîchissement — **seulement** si l'app OAuth a l'option
-    /// « Expire user access tokens ». `None` = comportement historique
-    /// (jeton sans expiration, support du refresh désactivé).
     pub refresh: Option<String>,
 }
 
-/// Connexion complète (device flow) : affiche le code, attend la validation,
-/// puis renvoie les identifiants. `on_prompt` reçoit le code et l'URL à montrer.
 pub async fn device_login<F>(on_prompt: F) -> Result<Credentials>
 where
     F: Fn(&str, &str),
@@ -427,11 +316,6 @@ where
     Err(anyhow!("délai dépassé — code expiré"))
 }
 
-/// Compteur de stars observé (API publique, cache 10 min).
-///
-/// `force` ignore le cache (après un vote). En cas d'échec réseau, la
-/// dernière valeur connue est renvoyée (elle peut être datée : le message
-/// indique alors qu'elle est ancienne).
 pub async fn stars(force: bool) -> Option<u64> {
     if !force {
         if let Ok(c) = cache().lock() {
@@ -456,8 +340,6 @@ async fn fetch_stars() -> Option<u64> {
         .get(format!("{API}/repos/{REPO}/stargazers/count"))
         .header("Accept", "application/vnd.github+json")
         .header("User-Agent", user_agent())
-        // Le CDN de GitHub met ce endpoint en cache 60 s : sans cette demande,
-        // le compteur affiché peut être périmé après un vote.
         .header("Cache-Control", "no-cache")
         .send()
         .await
@@ -468,7 +350,6 @@ async fn fetch_stars() -> Option<u64> {
     parse_count(&r.text().await.ok()?)
 }
 
-/// Le compte authentifié a-t-il starré le dépôt ? (jeton requis)
 pub async fn is_starred(token: &str) -> Result<bool> {
     let r = crate::http_client::HTTP_CLIENT
         .get(format!("{API}/user/starred/{REPO}"))
@@ -484,14 +365,12 @@ pub async fn is_starred(token: &str) -> Result<bool> {
     }
 }
 
-/// Pose une star (`PUT /user/starred/…`).
 pub async fn star(token: &str) -> Result<()> {
     let r = crate::http_client::HTTP_CLIENT
         .put(format!("{API}/user/starred/{REPO}"))
         .bearer_auth(token)
         .header("Accept", "application/vnd.github+json")
         .header("User-Agent", user_agent())
-        // L'API exige Content-Length: 0 sur un PUT sans corps.
         .body(Vec::new())
         .send()
         .await?;
@@ -503,7 +382,6 @@ pub async fn star(token: &str) -> Result<()> {
     }
 }
 
-/// Retire une star (`DELETE /user/starred/…`).
 pub async fn unstar(token: &str) -> Result<()> {
     let r = crate::http_client::HTTP_CLIENT
         .delete(format!("{API}/user/starred/{REPO}"))
@@ -520,15 +398,12 @@ pub async fn unstar(token: &str) -> Result<()> {
     }
 }
 
-/// Le vote : `Up` = star, `Down` = retrait de star.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     Up,
     Down,
 }
 
-/// Exécute le vote et renvoie le message à montrer à l'utilisateur.
-/// Vote « Up » : pose la star (et met à jour le compteur affiché).
 async fn vote_up(deja_starre: bool) -> String {
     if deja_starre {
         return "⭐ Zer0 est déjà starré par ton compte GitHub.".to_string();
@@ -547,7 +422,6 @@ async fn vote_up(deja_starre: bool) -> String {
     }
 }
 
-/// Vote « Down » : retire la star.
 async fn vote_down() -> String {
     let Some(tok) = token() else {
         return "Aucun jeton GitHub.".to_string();
@@ -563,19 +437,10 @@ async fn vote_down() -> String {
     }
 }
 
-/// Exécute le vote et renvoie le message à montrer à l'utilisateur.
-///
-/// **Rafraîchissement (opt-in)** : si l'API répond 401 (jeton expiré) et
-/// qu'un jeton de rafraîchissement est stocké (app OAuth « Expire user access
-/// tokens »), on renouvelle le jeton et on rejoue une fois. Sans refresh
-/// token, le comportement est inchangé.
 pub async fn act(action: Action) -> String {
     let Some(tok) = token() else {
-        // Pas de jeton : on ouvre la page où se trouve le bouton ★ Star.
         let url = repo_url();
         let opened = crate::platform::open_url(&url).is_ok();
-        // Le programme lancé a pu rendre le mode « souris » à la console :
-        // on le réactive, sinon le TUI ne recevrait plus aucun clic.
         crate::platform::restore_mouse_capture();
         return match action {
             Action::Up => {
@@ -627,12 +492,10 @@ pub async fn act(action: Action) -> String {
     }
 }
 
-/// `true` si l'erreur est un 401 (jeton expiré ou sans permission).
 fn is_unauthorized(e: &anyhow::Error) -> bool {
     e.to_string().contains("401")
 }
 
-/// État du vote : compteur de stars observé + star du compte (si jeton).
 pub async fn state() -> (Option<u64>, Option<bool>) {
     let stars = stars(false).await;
     let starred = match token() {
@@ -642,7 +505,6 @@ pub async fn state() -> (Option<u64>, Option<bool>) {
     (stars, starred)
 }
 
-/// État des lieux : compteur, star de ton compte, jeton, URL du vote.
 pub async fn status() -> String {
     let mut s = String::new();
     match stars(false).await {
@@ -665,21 +527,14 @@ pub async fn status() -> String {
     s
 }
 
-// ------------------------------------------------------------------ rendu TUI
-
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
-/// Largeur du bloc de vote (bas à droite de l'écran principal).
 pub const WIDTH: u16 = 11;
 
-/// Dessine le bloc 👍 / 👎 et renvoie les zones cliquables.
-///
-/// `stars` : compteur observé (`None` = inconnu → on affiche « ? »).
-/// `starred` : ton compte a-t-il starré ? (`None` = inconnu, pas de jeton).
 pub fn draw(
     f: &mut Frame,
     area: Rect,
@@ -699,8 +554,6 @@ pub fn draw(
     } else {
         Style::default().fg(Color::Gray)
     };
-    // Les largeurs sont calculées à partir des spans : un emoji peut occuper
-    // 1 ou 2 colonnes selon le terminal — la zone cliquable suit.
     let s_up = Span::styled("👍", up_style);
     let s_cnt = Span::styled(format!(" {count}"), Style::default().fg(Color::DarkGray));
     let s_dn = Span::styled("👎", Style::default().fg(Color::DarkGray));
@@ -714,9 +567,6 @@ pub fn draw(
     let line = Line::from(vec![s_up, s_cnt, s_dn]);
     f.render_widget(Paragraph::new(line).alignment(Alignment::Right), area);
 
-    // Zones cliquables : le pouce haut et le pouce bas.
-    // On élargit la zone d'un cheveu de chaque côté : un emoji peut occuper
-    // 1 ou 2 cellules selon le terminal, et un clic « à côté » doit compter.
     let x0 = area.x + area.width - total;
     let up = Rect {
         x: x0.saturating_sub(1),
@@ -748,15 +598,11 @@ mod tests {
 
     #[test]
     fn self_cmd_prefers_the_launcher_name() {
-        // Version **pure** : pas de mutation d'environnement (course en
-        // parallèle → la CI devenait instable).
         assert_eq!(self_cmd_from(Some("zer0gh0st".into()), None), "zer0gh0st");
-        // Valeur vide → chemin réel de l'exécutant.
         assert_eq!(
             self_cmd_from(Some("   ".into()), Some("/usr/local/bin/zer0".into())),
             "/usr/local/bin/zer0"
         );
-        // Sans rien : le nom générique.
         assert_eq!(self_cmd_from(None, None), "zer0");
     }
 
@@ -764,7 +610,6 @@ mod tests {
     fn parse_count_reads_the_public_endpoint() {
         assert_eq!(parse_count(r#"{"count": 42}"#), Some(42));
         assert_eq!(parse_count(r#"{"count": 0}"#), Some(0));
-        // Rien n'est inventé : un corps inattendu ne donne pas de chiffre.
         assert_eq!(parse_count("not json"), None);
         assert_eq!(parse_count(r#"{"count": "x"}"#), None);
         assert_eq!(parse_count(""), None);
@@ -772,27 +617,19 @@ mod tests {
 
     #[test]
     fn default_client_id_is_embedded() {
-        // Sans client_id, `{cmd} vote login` est impossible : le device flow
-        // est le seul moyen d'obtenir un jeton sans configuration.
         assert!(!DEFAULT_CLIENT_ID.is_empty());
-        // Test sur la version **pure** : on ne touche PAS à l'environnement
-        // (les tests tournent en parallèle → muter l'env est une course, et
-        // cela rendait la CI instable).
         assert_eq!(
             client_id_from(None, None).as_deref(),
             Some(DEFAULT_CLIENT_ID)
         );
-        // La variable d'env prime sur la config.
         assert_eq!(
             client_id_from(Some("ENV_ID".into()), Some("CFG_ID".into())).as_deref(),
             Some("ENV_ID")
         );
-        // Sinon la config, sinon le défaut.
         assert_eq!(
             client_id_from(None, Some("CFG_ID".into())).as_deref(),
             Some("CFG_ID")
         );
-        // Une valeur vide est ignorée.
         assert_eq!(
             client_id_from(Some("  ".into()), Some("CFG_ID".into())).as_deref(),
             Some("CFG_ID")
@@ -801,12 +638,7 @@ mod tests {
 
     #[test]
     fn refresh_is_opt_in() {
-        // Sans jeton de rafraîchissement stocké, le renouvellement est
-        // inactif (comportement historique) : `refresh_token()` est None
-        // tant que l'app OAuth n'a pas été configurée avec
-        // « Expire user access tokens ».
         assert!(refresh_token().is_none() || !refresh_token().unwrap().is_empty());
-        // Et les clés de coffre sont distinctes (accès ≠ rafraîchissement).
         assert_ne!(KEY_ACCESS, KEY_REFRESH);
     }
 
@@ -836,14 +668,12 @@ mod tests {
         })
         .unwrap();
 
-        // Les deux pouces sont cliquables, ordonnés, et à droite de l'écran.
         let up = up.expect("pouce haut absent");
         let down = down.expect("pouce bas absent");
         assert!(up.x > 60, "pouce haut trop à gauche : {up:?}");
         assert!(down.x > up.x, "les pouces ne sont pas ordonnés");
         assert!(down.x + down.width <= 80, "déborde à droite : {down:?}");
 
-        // Le compteur observé est affiché.
         let buf = term.backend().buffer();
         let line: String = (0..80).map(|x| buf[(x, 23)].symbol()).collect();
         assert!(line.contains("42"), "compteur absent : {line}");
@@ -856,18 +686,14 @@ mod tests_prompt {
 
     #[test]
     fn invitation_decision() {
-        // Deja connecte : on ne dit rien.
         assert_eq!(invitation_pour(false, 0, true), Invitation::Rien);
         assert_eq!(invitation_pour(true, 5, true), Invitation::Rien);
 
-        // Jamais propose : invitation claire.
         assert_eq!(invitation_pour(false, 0, false), Invitation::Claire);
         assert_eq!(invitation_pour(false, 1, false), Invitation::Claire);
 
-        // Deja propose : rappel discret (une seule ligne).
         assert_eq!(invitation_pour(true, 1, false), Invitation::Rappel);
 
-        // Rappels epuises : silence, on n'importune plus.
         assert_eq!(
             invitation_pour(false, MAX_INVITATIONS, false),
             Invitation::Rien

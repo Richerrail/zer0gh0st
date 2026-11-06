@@ -1,26 +1,14 @@
-//! Catalogue d'APIs publiques — source : <https://github.com/public-apis/public-apis>
-//!
-//! Le catalogue est **structuré** (une table SQLite dédiée), ce qui permet un
-//! rendu en tableau avec la colonne « clé requise » — bien plus exploitable
-//! qu'un chunk de Markdown.
-//!
-//! Honnêteté : le catalogue est un **instantané d'une liste communautaire**.
-//! Beaucoup d'APIs meurent ; la date d'import est affichée avec chaque
-//! résultat, et le rappel « à vérifier » est explicite.
-
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
 use std::path::Path;
 
 use crate::knowledge;
 
-/// Une entrée du catalogue.
 #[derive(Debug, Clone)]
 pub struct ApiEntry {
     pub name: String,
     pub description: String,
     pub url: String,
-    /// `No`, `apiKey`, `OAuth`… (colonne « Auth » du catalogue source).
     pub auth: String,
     pub https: String,
     pub cors: String,
@@ -28,13 +16,11 @@ pub struct ApiEntry {
 }
 
 impl ApiEntry {
-    /// `true` si l'API s'utilise sans clé.
     pub fn keyless(&self) -> bool {
         self.auth.trim().eq_ignore_ascii_case("no")
     }
 }
 
-/// Métadonnées de l'import courant (source + date).
 #[derive(Debug, Clone, Default)]
 pub struct Meta {
     pub source: String,
@@ -65,15 +51,11 @@ fn init(c: &Connection) -> Result<()> {
 }
 
 fn conn() -> Result<Connection> {
-    // Même fichier SQLite que la base de connaissance (tables FTS5 + les
-    // nôtres) : on réutilise sa connexion initialisée.
     let c = knowledge::open()?;
     init(&c)?;
     Ok(c)
 }
 
-/// Importe un catalogue TSV (en-tête `name\tdescription\turl\tauth\thttps\tcors\tcategory`).
-/// Les lignes commençant par `#` sont des commentaires (source, date).
 pub fn import_tsv(path: &Path) -> Result<(usize, Meta)> {
     let raw =
         std::fs::read_to_string(path).with_context(|| format!("lecture de {}", path.display()))?;
@@ -83,7 +65,6 @@ pub fn import_tsv(path: &Path) -> Result<(usize, Meta)> {
     for line in raw.lines() {
         let l = line.trim_end_matches(['\r', '\n']);
         if l.starts_with('#') {
-            // Commentaire d'en-tête : « # source: … | imported: … »
             let body = l.trim_start_matches('#').trim();
             if let Some((k, v)) = body.split_once(':') {
                 match k.trim() {
@@ -164,7 +145,6 @@ pub fn import_tsv(path: &Path) -> Result<(usize, Meta)> {
     Ok((rows.len(), meta))
 }
 
-/// Métadonnées de l'import courant.
 pub fn meta() -> Result<Meta> {
     let c = conn()?;
     let mut m = Meta::default();
@@ -183,9 +163,6 @@ pub fn meta() -> Result<Meta> {
     Ok(m)
 }
 
-/// Recherche dans le catalogue (nom, description, catégorie).
-/// Tri : correspondance exacte du nom d'abord, puis nom, puis description.
-/// `keyless` ne garde que les APIs utilisables **sans clé**.
 pub fn search_opts(query: &str, limit: usize, keyless: bool) -> Result<Vec<ApiEntry>> {
     let c = conn()?;
     let q = query.trim();
@@ -226,13 +203,11 @@ pub fn search_opts(query: &str, limit: usize, keyless: bool) -> Result<Vec<ApiEn
     Ok(out)
 }
 
-/// Recherche (toutes les APIs) — raccourci.
 #[allow(dead_code)]
 pub fn search(query: &str, limit: usize) -> Result<Vec<ApiEntry>> {
     search_opts(query, limit, false)
 }
 
-/// Catégories et nombre d'APIs par catégorie.
 pub fn categories() -> Result<Vec<(String, usize)>> {
     let c = conn()?;
     let mut st = c.prepare(
@@ -246,11 +221,8 @@ pub fn categories() -> Result<Vec<(String, usize)>> {
     Ok(out)
 }
 
-/// Rendu lisible (TUI + CLI).
 pub fn format_entries(entries: &[ApiEntry], meta: &Meta) -> String {
     if entries.is_empty() {
-        // Distingue « catalogue vide » de « aucun résultat » : le message
-        // doit être vrai dans les deux cas.
         if meta.count == 0 {
             return "Catalogue d'APIs publiques vide.\n\
                     Importe-le : scripts/kb-import-public-apis.sh"
@@ -295,7 +267,6 @@ pub fn format_entries(entries: &[ApiEntry], meta: &Meta) -> String {
     s
 }
 
-/// État du catalogue (pour `/apis` sans argument).
 pub fn stats() -> Result<String> {
     let m = meta()?;
     let cats = categories()?;

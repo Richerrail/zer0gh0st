@@ -3,7 +3,6 @@ use ratatui::text::{Line, Span};
 
 use crate::theme::{self, BannerStyle};
 
-/// 5-row block glyphs for the big banner.
 fn glyph(c: char) -> [&'static str; 5] {
     match c {
         'A' => [" ███ ", "█   █", "█████", "█   █", "█   █"],
@@ -15,9 +14,7 @@ fn glyph(c: char) -> [&'static str; 5] {
         'T' => ["█████", "  █  ", "  █  ", "  █  ", "  █  "],
         'Z' => ["█████", "   █ ", "  █  ", " █   ", "█████"],
         'R' => ["████ ", "█   █", "████ ", "█  █ ", "█   █"],
-        // 'O' sert aussi de '0' (ZER0, GH0ST)
         'O' | '0' => [" ███ ", "█   █", "█   █", "█   █", " ███ "],
-        // séparateur
         '|' | '│' | '¦' => ["│", "│", "│", "│", "│"],
         ' ' => ["  ", "  ", "  ", "  ", "  "],
         _ => ["     ", "     ", "     ", "     ", "     "],
@@ -27,12 +24,10 @@ fn glyph(c: char) -> [&'static str; 5] {
 const TEXT: &str = "ZER0│GH0ST";
 const TAGLINE: &str = "ghost in the shell";
 
-/// Idle banner: static cyan → blue gradient.
 pub fn lines() -> Vec<Line<'static>> {
     render(false, 0)
 }
 
-/// Animated banner: rainbow gradient that scrolls with `phase`.
 pub fn lines_animated(phase: u16) -> Vec<Line<'static>> {
     render(true, phase)
 }
@@ -137,7 +132,6 @@ fn color_at(x: usize, w: usize, animated: bool, phase: u16) -> Color {
     }
 }
 
-/// h in [0,360), s and v in [0,1].
 fn hsv_to_rgb(h: f32, s: f32, v: f32) -> Color {
     let c = v * s;
     let hp = h / 60.0;

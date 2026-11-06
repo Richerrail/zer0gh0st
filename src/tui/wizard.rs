@@ -1,14 +1,3 @@
-//! Assistant de première connexion.
-//!
-//! Objectif : qu'un nouvel utilisateur puisse aller de « je viens d'installer »
-//! à « l'agent répond » sans lire six documents. Huit étapes, chacune
-//! expliquant **pourquoi** avant **comment**, avec reprise possible (`Échap`
-//! enregistre l'étape, `/setup` reprend).
-//!
-//! Règles : `code_exec` reste désactivé par défaut (choix explicite), les
-//! secrets sont saisis en mode masqué, et le coffre reste au CLI (la passphrase
-//! ne transite pas par le buffer de la TUI).
-
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Modifier, Style};
@@ -40,7 +29,6 @@ pub enum Step {
 }
 
 impl Step {
-    /// Index persisté dans `config.toml` (`None` = terminé).
     pub fn idx(self) -> u8 {
         match self {
             Step::Inference => 0,
@@ -48,7 +36,6 @@ impl Step {
             Step::ApiKey => 2,
             Step::Model => 3,
             Step::Telegram => 4,
-            // sous-étape : on reprend à l'écran Telegram, jamais au token
             Step::TelegramToken => 4,
             Step::Thinking => 5,
             Step::Exec => 6,
@@ -102,7 +89,6 @@ pub struct Wizard {
     pub exec: bool,
     pub error: Option<String>,
     pub page: usize,
-    /// Le modèle courant a-t-il été choisi ? (pour l'étape Model en saisie libre)
     pub manual_model: bool,
 }
 
@@ -124,7 +110,6 @@ impl Wizard {
     }
 }
 
-/// Ouvre l'assistant (ou le reprend à `step`).
 pub fn start(app: &mut App, ui_tx: &UnboundedSender<UiEvent>, step: Step) {
     app.wizard = Some(Wizard::new(step));
     app.input.clear();
@@ -202,7 +187,6 @@ fn fetch_models(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
     });
 }
 
-/// Applique la liste de modèles reçue (appelé depuis `handle_ui`).
 pub fn on_models(app: &mut App, list: Vec<ModelEntry>) {
     if let Some(w) = app.wizard.as_mut() {
         w.models = list;
@@ -334,7 +318,6 @@ const COMMAND_TOUR: &[&str] = &[
     "Entrée pour terminer l'assistant.",
 ];
 
-/// Gère une touche quand l'assistant est ouvert.
 pub fn handle_key(key: KeyEvent, app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
     let Some(w) = app.wizard.as_ref() else {
         return;
@@ -410,7 +393,6 @@ fn activate(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
             if cursor == 0 {
                 next = Some(Step::Provider);
             } else {
-                // local : provider "local", pas de clé
                 if let Some(w) = app.wizard.as_mut() {
                     w.provider = Some("local".to_string());
                 }
@@ -478,7 +460,6 @@ fn activate(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
                 .map(|m| m.id.clone())
                 .filter(|id| !id.is_empty());
             let chosen = if let Some(m) = selected {
-                // modèle déjà préfixé par le provider dans la liste ? non : id nu
                 m
             } else if !input.is_empty() {
                 input.clone()
@@ -567,7 +548,6 @@ fn activate(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
                 + 1;
             let w = app.wizard.as_mut().unwrap();
             if w.page + 1 >= pages {
-                // Dernière page : on termine directement (pas d'écran vide).
                 finish(app, ui_tx);
                 return;
             } else {
@@ -605,10 +585,6 @@ fn set_error(app: &mut App, msg: String) {
         w.error = Some(msg);
     }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Rendu
-// ─────────────────────────────────────────────────────────────────────────────
 
 pub fn draw(f: &mut Frame, area: Rect, app: &App) {
     let Some(w) = app.wizard.as_ref() else {
@@ -698,7 +674,6 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
                     .add_modifier(Modifier::BOLD),
             )];
             if app.input.is_empty() {
-                // Champ vide = invisible sans placeholder : c'était le bug.
                 spans.push(Span::styled(
                     "▏",
                     Style::default()
@@ -783,7 +758,6 @@ fn mask(text: &str, secret: bool) -> String {
 }
 
 fn command_page(page: usize, _width: usize) -> Vec<Line<'static>> {
-    // Découpe le tour des commandes en pages séparées par « ---- page suivante ---- ».
     let mut pages: Vec<Vec<&str>> = vec![Vec::new()];
     for l in COMMAND_TOUR {
         if l.starts_with("----") {
@@ -813,7 +787,6 @@ mod tests {
 
     #[test]
     fn step_indices_roundtrip() {
-        // `TelegramToken` est une sous-étape : elle ne doit jamais être persistée.
         for i in 0..=8u8 {
             let step = Step::from_idx(i);
             assert_ne!(step, Step::TelegramToken);

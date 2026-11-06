@@ -1,10 +1,4 @@
-#!/usr/bin/env bash
-# Installe les dépendances de Zer0│GH0ST selon la distribution.
-#
-#   ./scripts/install.sh            # build + audio + presse-papier + média
-#   ./scripts/install.sh --minimal  # seulement de quoi compiler (gcc, git, rust)
-#
-# Idempotent : relançable sans risque. Utilise sudo si nécessaire.
+
 set -euo pipefail
 
 MINIMAL=0
@@ -72,7 +66,7 @@ install_darwin() {
     return
   fi
   [ "$MINIMAL" -eq 0 ] && brew install sox mpv ffmpeg python@3.12
-  # python@3.12 est keg-only : on l'ajoute au PATH de cette installation.
+
   [ "$MINIMAL" -eq 0 ] && export PATH="$(brew --prefix)/opt/python@3.12/libexec/bin:$PATH"
 }
 
@@ -89,11 +83,10 @@ case "$DISTRO" in
     ;;
 esac
 
-# Rust (rustup) si absent.
 if ! command -v cargo >/dev/null; then
   echo "→ Installation de Rust (rustup)…"
   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-  # shellcheck disable=SC1091
+
   . "$HOME/.cargo/env"
 fi
 export PATH="$HOME/.cargo/bin:$PATH"

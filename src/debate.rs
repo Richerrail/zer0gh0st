@@ -1,14 +1,3 @@
-//! Cadrage des débats 0box.
-//!
-//! Problème constaté : MAIN recevait l'instruction « tu DOIS appeler des
-//! outils, si tu ne fais qu'écrire du texte tu ÉCHOUES ». Résultat : sur un
-//! débat de test, il créait des tâches et des fichiers puis rendait une
-//! réponse vide (la « synthèse » était le fichier).
-//!
-//! Ici : un classifieur **déterministe** du sujet. Une question ou un débat
-//! n'ouvre pas les outils d'écriture ; une demande explicite de livrable, si.
-
-/// Verbes/expressions qui demandent une action concrète (fichier, commande…).
 const ACTION_MARKERS: &[&str] = &[
     "crée",
     "créer",
@@ -65,9 +54,6 @@ const ACTION_MARKERS: &[&str] = &[
     "patch",
 ];
 
-/// Débuts de phrase interrogatifs : c'est le **cadrage** qui compte, pas la
-/// présence d'un mot quelque part (« écris un fichier qui résume le débat »
-/// reste une action, même s'il contient « débat »).
 const QUESTION_STARTS: &[&str] = &[
     "est-ce",
     "est ce",
@@ -91,7 +77,6 @@ const QUESTION_STARTS: &[&str] = &[
     "faut il",
 ];
 
-/// Le sujet demande-t-il un livrable/une action, ou seulement une réponse ?
 pub fn topic_wants_actions(topic: &str) -> bool {
     let t = topic.trim().to_lowercase();
     let action = ACTION_MARKERS.iter().any(|m| t.contains(m));

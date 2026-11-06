@@ -1,26 +1,8 @@
-#!/usr/bin/env bash
-# ─────────────────────────────────────────────────────────────────────────────
-# kb-import-public-apis.sh — importe le catalogue d'APIs publiques
-# (https://github.com/public-apis/public-apis) dans zer0gh0st.
-#
-#   ./scripts/kb-import-public-apis.sh            # importe + remplit la table
-#   ./scripts/kb-import-public-apis.sh --kb       # indexe aussi pour l'agent
-#   REF=v0.5.0 ./scripts/kb-import-public-apis.sh # autre version du catalogue
-#
-# Pourquoi un script plutôt qu'un fichier versionné :
-#   - le catalogue évolue (1 400+ APIs) ; on veut la dernière version, pas une
-#     copie figée dans le dépôt ;
-#   - la date d'import est conservée → l'agent sait que c'est un instantané ;
-#   - la licence du catalogue est MIT (attribution conservée dans l'en-tête).
-#
-# Honnêteté : une liste communautaire de liens, c'est un **candidat**, pas une
-# garantie : beaucoup d'APIs sont mortes. `/apis` affiche la source et la date.
-# ─────────────────────────────────────────────────────────────────────────────
+
 set -euo pipefail
 
 REPO="${REPO:-public-apis/public-apis}"
-# RéF ÉPINGLÉE : on fige une version connue (pas 'master'), pour un import
-# reproductible. Mets à jour REF pour rafraîchir le catalogue.
+
 REF="${REF:-master}"
 RAW="https://raw.githubusercontent.com/${REPO}/${REF}/README.md"
 OUT_DIR="${OUT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/base_connaissance}"

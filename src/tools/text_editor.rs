@@ -82,12 +82,6 @@ pub fn run(args: &str) -> String {
     }
 }
 
-/// Sauvegarde le fichier avant de l'écraser ou de le supprimer.
-///
-/// ZER0|GH0ST agit avec les droits de l'utilisateur, sans bac à sable. Un outil
-/// qui réécrit un fichier sans garder de copie rend toute erreur du modèle
-/// irréversible. La sauvegarde est posée **à côté** du fichier (`<nom>.zer0.bak`),
-/// donc trouvable sans connaître l'état interne de l'agent.
 fn backup(path: &Path) -> Option<String> {
     let meta = fs::metadata(path).ok()?;
     if !meta.is_file() || meta.len() == 0 {
@@ -120,8 +114,6 @@ fn view(path: &str, offset: Option<usize>, limit: Option<usize>) -> String {
             let lines: Vec<&str> = content.lines().collect();
             let total = lines.len();
             let start = offset.unwrap_or(1).max(1);
-            // 400 lignes par défaut : un README de 600 lignes ne doit plus être
-            // avalé d'un coup (le modèle demande la suite avec `offset`).
             let count = limit.unwrap_or(400).clamp(1, 2_000);
             let from = (start - 1).min(total);
             let to = (from + count).min(total);
@@ -155,7 +147,6 @@ fn view(path: &str, offset: Option<usize>, limit: Option<usize>) -> String {
 }
 
 fn create(path: &str, content: &str) -> String {
-    // Guard: never silently write an empty file.
     if content.trim().is_empty() {
         return format!(
             "Erreur: contenu vide — `{path}` n'a PAS été écrit. \
@@ -172,19 +163,16 @@ fn create(path: &str, content: &str) -> String {
     }
     let note = backup_note(Path::new(path));
     match fs::write(path, content) {
-        Ok(()) => {
-            // Verify the write actually landed.
-            match fs::metadata(path) {
-                Ok(m) if m.len() > 0 => {
-                    let first = content.lines().next().unwrap_or("");
-                    format!(
-                        "Fichier écrit: {path} ({}). Première ligne: {first}{note}",
-                        stats(content)
-                    )
-                }
-                _ => format!("Erreur: {path} est vide après écriture."),
+        Ok(()) => match fs::metadata(path) {
+            Ok(m) if m.len() > 0 => {
+                let first = content.lines().next().unwrap_or("");
+                format!(
+                    "Fichier écrit: {path} ({}). Première ligne: {first}{note}",
+                    stats(content)
+                )
             }
-        }
+            _ => format!("Erreur: {path} est vide après écriture."),
+        },
         Err(e) => format!("Erreur d'écriture: {e}"),
     }
 }
@@ -220,8 +208,6 @@ fn insert(path: &str, line: usize, text: &str) -> String {
         Ok(c) => c,
         Err(e) => return format!("Erreur de lecture: {e}"),
     };
-    // On préserve la présence (ou l'absence) de newline final : insérer une ligne
-    // ne doit pas réécrire la fin du fichier.
     let had_trailing_newline = content.ends_with('\n');
     let mut lines: Vec<&str> = content.lines().collect();
     let idx = line.saturating_sub(1).min(lines.len());
@@ -255,8 +241,6 @@ fn delete(path: &str) -> String {
 }
 
 fn truncate(mut s: String, max: usize) -> String {
-    // Troncature sûre : `String::truncate` panique au milieu d'un caractère
-    // multi-octets (fichier français > 16 Ko → crash de la tâche de génération).
     if crate::util::truncate_utf8(&mut s, max) {
         s.push_str("\n… (tronqué)");
     }
@@ -334,8 +318,6 @@ mod tests {
         let _ = fs::remove_file(&p);
     }
 
-    /// Régression : `view` sur un fichier français > 16 Ko faisait paniquer
-    /// `String::truncate` (frontière UTF-8).
     #[test]
     fn view_multibyte_file_does_not_panic() {
         let p = tmp("fr.txt");

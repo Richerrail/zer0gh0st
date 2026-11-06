@@ -1,36 +1,20 @@
-//! Thèmes de couleurs de la TUI.
-//!
-//! Un thème est un jeu de rôles de couleurs (fond, accent, texte, code…),
-//! plutôt qu'une liste de couleurs dispersées dans le code. Le thème actif est
-//! global et thread-safe : le rendu de la TUI et ses overlays le consultent sans
-//! avoir à transporter une palette dans chaque fonction.
-
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{anyhow, Result};
 use ratatui::style::Color;
 
-/// Style du banner principal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BannerStyle {
-    /// Dégradé arc-en-ciel animé (thème historique).
     Rainbow,
-    /// Dégradé gris, minimaliste.
     Mono,
-    /// Dégradé rouge, du bordeaux au rouge vif.
     Red,
-    /// Dégradé acier bleuté (thème castle / DOS).
     Steel,
 }
 
-/// Palette complète d'un thème.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Theme {
-    /// Identifiant stable, persisté dans la configuration.
     pub id: &'static str,
-    /// Nom affiché dans le sélecteur.
     pub label: &'static str,
-    /// Description courte affichée dans le sélecteur.
     pub description: &'static str,
     pub background: Color,
     pub accent: Color,
@@ -38,7 +22,6 @@ pub struct Theme {
     pub dim: Color,
     pub text: Color,
     pub code: Color,
-    /// Couleur des blocs d'outils (historiquement bleue).
     pub tool: Color,
     pub border: Color,
     pub highlight: Color,
@@ -50,18 +33,12 @@ pub struct Theme {
     pub warning: Color,
     pub danger: Color,
     pub banner: BannerStyle,
-    /// Pack de sons du thème (`""` = aucun son de thème).
     pub sound_pack: &'static str,
-    /// Glyphe du bouton « ouvrir le menu déroulant » (rail replié, à droite).
     pub rail_arrow: &'static str,
-    /// Le rail est-il une « poignée de tiroir » (ASCII, verticale) au lieu du
-    /// simple `◀☰` ?
     pub rail_drawer: bool,
-    /// Halo lumineux autour du glyphe du rail (effet néon).
     pub rail_glow: bool,
 }
 
-/// Thèmes disponibles. Le premier est le thème par défaut.
 pub const ALL: &[Theme] = &[
     Theme {
         id: "ghost",
@@ -137,8 +114,6 @@ pub const ALL: &[Theme] = &[
         danger: Color::Rgb(255, 60, 68),
         banner: BannerStyle::Red,
         sound_pack: "",
-        // Poignée de tiroir (ASCII : aucun glyphe exotique) pour tirer le menu.
-        // `>>` = le tiroir est rentré, on tire pour l'ouvrir.
         rail_arrow: ">>",
         rail_drawer: true,
         rail_glow: true,
@@ -173,17 +148,14 @@ pub const ALL: &[Theme] = &[
 
 static ACTIVE_INDEX: AtomicUsize = AtomicUsize::new(0);
 
-/// Verrou des tests qui changent le thème actif (état global partagé).
 #[cfg(test)]
 pub(crate) static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-/// Thème actuellement actif.
 pub fn active() -> Theme {
     let index = ACTIVE_INDEX.load(Ordering::Relaxed).min(ALL.len() - 1);
     ALL[index]
 }
 
-/// Normalise un nom et ses alias vers l'identifiant canonique.
 fn canonical_name(name: &str) -> String {
     let lowered = name.trim().to_lowercase().replace('&', "et");
     let normalized: String = lowered
@@ -201,7 +173,6 @@ fn canonical_name(name: &str) -> String {
     }
 }
 
-/// Résout un nom de thème sans modifier le thème actif.
 pub fn resolve(name: &str) -> Result<&'static Theme> {
     let canonical = canonical_name(name);
     ALL.iter()
@@ -217,7 +188,6 @@ pub fn resolve(name: &str) -> Result<&'static Theme> {
         })
 }
 
-/// Active un thème par son identifiant ou l'un de ses alias.
 pub fn activate(name: &str) -> Result<&'static Theme> {
     let selected = resolve(name)?;
     let index = ALL
@@ -228,7 +198,6 @@ pub fn activate(name: &str) -> Result<&'static Theme> {
     Ok(selected)
 }
 
-// Raccourcis de lecture : le rendu ne doit pas répéter `active().champ`.
 pub fn background() -> Color {
     active().background
 }
@@ -277,15 +246,12 @@ pub fn warning() -> Color {
 pub fn danger() -> Color {
     active().danger
 }
-/// Glyphe du bouton d'ouverture du menu (rail replié, à droite).
 pub fn rail_arrow() -> &'static str {
     active().rail_arrow
 }
-/// Le rail se dessine-t-il en « poignée de tiroir » ?
 pub fn rail_drawer() -> bool {
     active().rail_drawer
 }
-/// Le rail affiche-t-il un halo néon autour de son glyphe ?
 pub fn rail_glow() -> bool {
     active().rail_glow
 }
@@ -319,7 +285,6 @@ mod tests {
     #[test]
     fn noir_rouge_gets_a_neon_drawer_handle_on_the_rail() {
         let red = resolve("noir-rouge").unwrap();
-        // ASCII uniquement : les chevrons `▶` ne s'affichent pas partout.
         assert_eq!(red.rail_arrow, ">>");
         assert!(
             red.rail_drawer,

@@ -1,45 +1,29 @@
 use crate::agent::history::ChatMessage;
 
-/// Events sent from background agent turns back to the TUI.
 #[derive(Debug, Clone)]
 pub enum UiEvent {
-    /// A streamed token of the assistant response.
     Token(String),
-    /// A streamed token of the model's internal reasoning (thinking models).
     Reasoning(String),
-    /// The model is requesting a tool call.
-    ToolCall { name: String, args: String },
-    /// A tool finished and produced this output.
+    ToolCall {
+        name: String,
+        args: String,
+    },
     ToolResult(String),
-    /// The whole turn finished; carries the FULL conversation.
     TurnComplete(Vec<ChatMessage>),
-    /// The conversation history was compacted (summary + recent messages).
     Compacted(Vec<ChatMessage>),
-    /// The endpoint actually used (after any failover).
     Active(String),
-    /// Something went wrong during the turn.
     Error(String),
-    /// A local informational message.
     #[allow(dead_code)]
     Info(String),
-    /// Une tâche planifiée est arrivée à échéance.
     TaskDue(String),
-    /// Zero-chan a transcrit une commande vocale.
     Voice(String),
-    /// Vote : compteur de stars GitHub + état du compte (jeton présent ou non).
     VoteState {
         stars: Option<u64>,
         starred: Option<bool>,
     },
-    /// Fenêtre de contexte rapportée par le provider (tokens).
     ContextWindow(u64),
-    /// Liste de modèles reçue : ouvre le sélecteur de modèle.
     ModelList(Vec<crate::models::ModelEntry>),
-    /// Liste de modèles demandée par l'assistant de démarrage (ne l'ouvre pas
-    /// dans le sélecteur : elle alimente l'écran du wizard).
     WizardModels(Vec<crate::models::ModelEntry>),
-    /// Liste de modèles `:free` pour le sélecteur `/free`.
     FreeModels(Vec<crate::models::ModelEntry>),
-    /// Le bot Telegram a demandé à s'éteindre (/shutdown).
     TelegramShutdown,
 }

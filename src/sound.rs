@@ -1,35 +1,18 @@
-//! Sons d'interface (WAV embarqués, coupés par défaut).
-//!
-//! Les fichiers vivent dans `assets/sfx/<pack>/` (originaux, CC0 — voir
-//! `assets/sfx/README.md`). Ils sont **embarqués** dans le binaire : le
-//! comportement est identique en `cargo run` et dans un binaire installé.
-//!
-//! Aucun son n'est joué si `sound = false` (défaut) : `event()` retourne
-//! immédiatement, coût nul. La lecture est détachée (jamais bloquante) et
-//! silencieuse en cas d'absence de lecteur audio.
-
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-/// Événement sonore de l'interface.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
-    /// Navigation dans une liste.
     Tick,
-    /// Validation (hors thème).
     Select,
-    /// Son propre au thème (pack = identifiant de thème).
     Theme(String),
-    /// Ouverture d'un panneau/mod.
     Panel,
     ToggleOn,
     ToggleOff,
     Error,
-    /// Fin d'un tour (réponse complète).
     Done,
 }
 
-/// Assets embarqués : (nom logique, contenu WAV).
 const WAVS: &[(&str, &[u8])] = &[
     ("tick", include_bytes!("../assets/sfx/castle/tick.wav")),
     ("select", include_bytes!("../assets/sfx/castle/select.wav")),
@@ -53,18 +36,15 @@ const WAVS: &[(&str, &[u8])] = &[
     ("done", include_bytes!("../assets/sfx/castle/done.wav")),
 ];
 
-/// Le son est-il activé ? (défaut : non)
 pub fn enabled() -> bool {
     crate::config::load_global().sound.unwrap_or(false)
 }
 
-/// Fichier associé à un événement (pur, testable).
 pub fn asset(ev: &Event) -> Option<(&'static str, &'static [u8])> {
     let name = match ev {
         Event::Tick => "tick",
         Event::Select => "select",
         Event::Theme(pack) if pack == "castle" => "theme_castle",
-        // Un thème sans pack (ghost/noir/noir-rouge) n'a pas de signature.
         Event::Theme(_) => return None,
         Event::Panel => "panel_open",
         Event::ToggleOn => "toggle_on",
@@ -75,7 +55,6 @@ pub fn asset(ev: &Event) -> Option<(&'static str, &'static [u8])> {
     WAVS.iter().find(|(n, _)| *n == name).copied()
 }
 
-/// Joue l'événement si les sons sont activés ; sinon ne fait rien.
 pub fn event(ev: Event) {
     if !enabled() {
         return;
@@ -90,7 +69,6 @@ fn cache_path(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("zer0sfx-{name}.wav"))
 }
 
-/// Écrit le WAV en cache (une fois) puis lance le lecteur du système.
 fn play(name: &str, data: &'static [u8]) {
     let path = cache_path(name);
     let fresh = std::fs::metadata(&path)
@@ -126,7 +104,6 @@ fn play(name: &str, data: &'static [u8]) {
         c.args(["-q", &shown]);
         c
     } else {
-        // Aucun lecteur : silence total, pas d'erreur.
         return;
     };
     let _ = cmd

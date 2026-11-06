@@ -37,8 +37,6 @@ pub fn run(args: &str) -> String {
         Ok(tasks::Update::Ok(s)) => format!("Tâche {id} → {}", s.label()),
         Ok(tasks::Update::NotFound) => format!("Tâche {id} introuvable"),
         Ok(tasks::Update::Refused(missing)) => {
-            // Porte d'honnêteté : le modèle ne peut PAS cocher une tâche dont le
-            // livrable manque — il doit le créer d'abord (0BOX-TEST, critère 3).
             let mut s = format!(
                 "Refusé : la tâche {id} ne peut pas être marquée « fait » — livrable(s) en défaut :\n"
             );

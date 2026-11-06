@@ -1,31 +1,3 @@
-//! `zer0-gw` — passerelle de clés (sidecar ZER0│GH0ST).
-//!
-//! Problème : le coffre chiffre les clés **au repos**, mais tant que la clé est
-//! résolue dans le processus agent (`config::key_for`), un agent compromis peut
-//! la lire en mémoire et l'envoyer ailleurs. Solution : **la clé ne vit plus
-//! dans l'agent**.
-//!
-//! - `zer0-gw` est le seul processus qui détient les clés (`/etc/zer0-gw`,
-//!   lisible par l'utilisateur `zer0-gw` uniquement).
-//! - L'agent appelle `http://127.0.0.1:8787/{provider}/v1/...` **sans aucune clé**.
-//! - La passerelle injecte l'en-tête `Authorization` vers le vrai provider.
-//!
-//! Réduction de surface :
-//! - loopback uniquement (rejet explicite de toute autre source) ;
-//! - méthodes POST/GET seulement ;
-//! - chemins en liste blanche (défaut : `/v1/chat/completions`, `/v1/models`,
-//!   `/v1/embeddings` — ce dernier sert à la mémoire sémantique) ;
-//! - rate-limit par provider (fenêtre fixe d'une minute) ;
-//! - plafond de taille de requête, timeouts (connect + total) ;
-//! - pas de suivi de redirections (pas de relais implicite) ;
-//! - **journal JSON sans corps de requête et sans clé** — jamais.
-//!
-//! Ce que ça ne protège pas : l'abus du relais (l'agent peut demander un appel
-//! provider et consommer du quota — d'où rate-limit + plafonds côté provider),
-//! et tout ce qui reste listé dans SAFETY.md. Un processus qui exécute du code
-//! arbitraire n'est pas devenu digne de confiance : sa clé est devenue
-//! inatteignable, c'est différent.
-
 use std::{
     collections::HashMap,
     net::SocketAddr,
@@ -44,10 +16,6 @@ use axum::{
 };
 use serde::Deserialize;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Configuration (TOML, ex. /etc/zer0-gw/gw.toml, chmod 640 root:zer0-gw)
-// ─────────────────────────────────────────────────────────────────────────────
-
 #[derive(Debug, Clone, Deserialize)]
 struct GwConfig {
     #[serde(default = "default_listen")]
@@ -56,18 +24,8 @@ struct GwConfig {
     limits: Limits,
     #[serde(default)]
     providers: HashMap<String, ProviderCfg>,
-    /// Fichier des clés déposées (géré par la passerelle ; défaut :
-    /// `keys.managed` à côté de gw.toml).
     #[serde(default)]
     keys_file: Option<String>,
-    /// Jeton exigé par les endpoints `/admin/*` (en-tête `x-zer0-admin`).
-    ///
-    /// Pourquoi : « loopback + écriture seule » protège la **confidentialité**
-    /// de la clé, pas l'**intégrité** du service. Sans jeton, n'importe quel
-    /// processus local peut remplacer la clé d'un provider (l'agent enverrait
-    /// alors ses prompts sur le compte d'un autre) ou la supprimer (déni de
-    /// service). Absent = comportement historique (loopback seul), avec un
-    /// avertissement au démarrage. Surchargeable par `ZER0_GW_ADMIN_TOKEN`.
     #[serde(default)]
     admin_token: Option<String>,
 }
@@ -79,12 +37,9 @@ fn default_listen() -> String {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 struct Limits {
-    /// Appels max par provider et par minute (l'agent partage ce plafond).
     requests_per_minute: u32,
-    /// Plafond de taille du corps de requête (octets).
     max_body_bytes: usize,
     connect_timeout_secs: u64,
-    /// Timeout total par appel (SSE long inclus).
     upstream_timeout_secs: u64,
 }
 
@@ -101,24 +56,15 @@ impl Default for Limits {
 
 #[derive(Debug, Clone, Deserialize)]
 struct ProviderCfg {
-    /// Base du provider, sans le suffixe `/v1/...`.
-    /// Ex. OpenRouter : `https://openrouter.ai/api` ; llama-server : `http://127.0.0.1:8080`.
     base_url: String,
-    /// Clé en clair (déconseillé) — préférer `api_key_env`.
     #[serde(default)]
     api_key: Option<String>,
-    /// Nom de la variable d'environnement contenant la clé (via `EnvironmentFile`).
     #[serde(default)]
     api_key_env: Option<String>,
-    /// Chemins autorisés pour ce provider (défaut : chat/completions + models).
     #[serde(default)]
     allowed_paths: Option<Vec<String>>,
 }
 
-/// Résolution de la clé d'un provider (**pur** : testable sans muter
-/// l'environnement — les tests Rust tournent en parallèle, y muter l'env
-/// serait une course et rendait la CI instable).
-/// Ordre : clé littérale → variable d'environnement.
 fn key_from(literal: Option<&str>, env_value: Option<&str>) -> Option<String> {
     if let Some(k) = literal.map(str::trim).filter(|k| !k.is_empty()) {
         return Some(k.to_owned());
@@ -129,8 +75,6 @@ fn key_from(literal: Option<&str>, env_value: Option<&str>) -> Option<String> {
 }
 
 impl ProviderCfg {
-    /// Résout la clé (variable d'env prioritaire dans les faits : `api_key` ne
-    /// devrait servir qu'aux tests). Aucune clé n'est jamais journalisée.
     fn key(&self) -> Option<String> {
         let env_value = self
             .api_key_env
@@ -156,23 +100,15 @@ impl GwConfig {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// État + rate-limit (fenêtre fixe d'une minute, par provider)
-// ─────────────────────────────────────────────────────────────────────────────
-
 struct AppState {
     cfg: GwConfig,
     http: reqwest::Client,
     windows: Mutex<HashMap<String, Window>>,
-    /// Clés déposées via `/admin/keys` (id provider → clé). Jamais journalisées.
     keys: Mutex<HashMap<String, String>>,
-    /// Fichier de persistance (ex. `/etc/zer0-gw/keys.env`).
     keys_path: String,
-    /// Jeton admin effectif (config ou env). `None` = pas d'authentification.
     admin_token: Option<String>,
 }
 
-/// Résolution d'une clé, par ordre : dépôt admin → variable d'env → gw.toml.
 fn resolve_key(keys: &HashMap<String, String>, id: &str, pcfg: &ProviderCfg) -> Option<String> {
     if let Some(k) = keys.get(id) {
         return Some(k.clone());
@@ -180,11 +116,6 @@ fn resolve_key(keys: &HashMap<String, String>, id: &str, pcfg: &ProviderCfg) -> 
     pcfg.key()
 }
 
-/// Verrouille un `Mutex` en récupérant d'un empoisonnement éventuel.
-///
-/// Un panic survenu dans un autre thread ne doit pas tuer la passerelle :
-/// on reprend le garde (`into_inner`) au lieu de paniquer à nouveau. Un
-/// gateway qui meurt = plus aucun accès aux modèles (DoS local).
 fn lock<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
@@ -195,8 +126,6 @@ impl AppState {
     }
 }
 
-/// Charge le fichier des clés déposées : lignes `provider=clé` (commentaires `#`
-/// ignorés). Fichier entièrement géré par la passerelle.
 fn load_keys(path: &str) -> HashMap<String, String> {
     let Ok(raw) = std::fs::read_to_string(path) else {
         return HashMap::new();
@@ -210,8 +139,6 @@ fn load_keys(path: &str) -> HashMap<String, String> {
         .collect()
 }
 
-/// Réécrit le fichier des clés déposées (fichier **entièrement géré**) puis
-/// chmod 600. Écriture atomique (tmp + rename) : jamais d'état partiel exposé.
 fn save_keys(path: &str, keys: &HashMap<String, String>) -> std::io::Result<()> {
     let mut out = String::from("# Clés déposées via /provider add — fichier géré par zer0-gw.\n");
     let mut entries: Vec<(&String, &String)> = keys.iter().collect();
@@ -252,11 +179,6 @@ fn window_allow(windows: &mut HashMap<String, Window>, provider: &str, rpm: u32)
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Routage / sécurité
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Découpe `/{provider}/v1/...` → `("provider", "v1/...")`.
 fn split_provider(path: &str) -> Option<(&str, &str)> {
     let rest = path.strip_prefix('/')?;
     let (provider, subpath) = rest.split_once('/')?;
@@ -266,13 +188,11 @@ fn split_provider(path: &str) -> Option<(&str, &str)> {
     Some((provider, subpath))
 }
 
-/// `true` si le dernier segment du chemin est une version d'API (`v1`, `v4`, `v1beta`…).
 fn ends_with_api_version(base: &str) -> bool {
     matches!(base.rsplit('/').next(), Some(seg)
         if seg.len() > 1 && seg.as_bytes()[0] == b'v' && seg.as_bytes()[1].is_ascii_digit())
 }
 
-/// `v1/chat/completions` → `Some("chat/completions")` (retire le segment de version).
 fn strip_version_prefix(sub: &str) -> Option<&str> {
     let (seg, rest) = sub.split_once('/')?;
     let b = seg.as_bytes();
@@ -283,11 +203,6 @@ fn strip_version_prefix(sub: &str) -> Option<&str> {
     }
 }
 
-/// Construit l'URL upstream : `base_url` + `/` + `subpath` (+ query).
-/// Le `/` est indispensable (`...com` + `v1/models` → `...comv1/models` sinon).
-/// Si la base contient déjà une version (`…/paas/v4`) et que le sous-chemin
-/// commence aussi par une version, on retire celle du sous-chemin : sinon on
-/// obtient `…/paas/v4/v1/chat/completions` → 404 (cas z.ai).
 fn upstream_url(base_url: &str, subpath: &str, query: Option<&str>) -> String {
     let base = base_url.trim_end_matches('/');
     let sub = if ends_with_api_version(base) {
@@ -303,7 +218,6 @@ fn upstream_url(base_url: &str, subpath: &str, query: Option<&str>) -> String {
     url
 }
 
-/// Liste blanche de chemins : défaut conservateur, surchargeable par provider.
 fn path_allowed(pcfg: &ProviderCfg, subpath: &str) -> bool {
     let want = format!("/{subpath}");
     match &pcfg.allowed_paths {
@@ -319,7 +233,6 @@ fn err(status: StatusCode, msg: &str) -> Response {
     (status, format!("{msg}\n")).into_response()
 }
 
-/// Journal JSON sur stderr (journald) — jamais de corps, jamais de clé.
 fn log_line(event: &str, fields: serde_json::Value) {
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -344,12 +257,10 @@ async fn proxy(
 ) -> Response {
     let started = Instant::now();
 
-    // 1) Loopback uniquement — la passerelle n'existe que pour l'agent local.
     if !peer.ip().is_loopback() {
         return err(StatusCode::FORBIDDEN, "accès loopback uniquement");
     }
 
-    // 2) Format de chemin et provider connu.
     let Some((provider_id, subpath)) = split_provider(uri.path()) else {
         return err(StatusCode::NOT_FOUND, "format attendu : /{provider}/v1/…");
     };
@@ -357,7 +268,6 @@ async fn proxy(
         return err(StatusCode::NOT_FOUND, "provider inconnu");
     };
 
-    // 3) Méthode et chemin en liste blanche.
     if !matches!(method, Method::POST | Method::GET) {
         return err(
             StatusCode::METHOD_NOT_ALLOWED,
@@ -368,7 +278,6 @@ async fn proxy(
         return err(StatusCode::FORBIDDEN, "chemin non autorisé");
     }
 
-    // 4) Rate-limit par provider.
     let rpm = state.cfg.limits.requests_per_minute;
     if !window_allow(&mut lock(&state.windows), provider_id, rpm) {
         return err(
@@ -377,8 +286,6 @@ async fn proxy(
         );
     }
 
-    // 5) Construction de l'appel upstream : la clé est injectée ICI, jamais
-    //    transmise par l'agent (l'en-tête Authorization entrant est ignoré).
     let model = serde_json::from_slice::<serde_json::Value>(&body)
         .ok()
         .and_then(|v| {
@@ -418,7 +325,6 @@ async fn proxy(
         }
     };
 
-    // 6) Réponse en flux (SSE inclus), seul content-type est recopié.
     let status = upstream.status();
     let ct = upstream
         .headers()
@@ -459,25 +365,15 @@ async fn proxy(
     resp
 }
 
-// ────────────────────────────────────────────────
-// Endpoints admin (loopback + écriture : déposer une clé, jamais la lire)
-// ────────────────────────────────────────────────
-
 fn loopback_or_403(peer: SocketAddr) -> Option<Response> {
     (!peer.ip().is_loopback()).then(|| err(StatusCode::FORBIDDEN, "accès loopback uniquement"))
 }
 
-/// Vérifie loopback **et** (si configuré) le jeton admin.
-///
-/// Comparaison à temps constant (les jetons font la même longueur) pour ne pas
-/// offrir un oracle de timing sur un endpoint local.
 fn admin_guard(peer: SocketAddr, headers: &HeaderMap, token: Option<&str>) -> Option<Response> {
     if let Some(r) = loopback_or_403(peer) {
         return Some(r);
     }
-    let Some(expected) = token else {
-        return None; // pas de jeton configuré : comportement historique
-    };
+    let expected = token?;
     let got = headers
         .get("x-zer0-admin")
         .and_then(|v| v.to_str().ok())
@@ -503,7 +399,6 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     diff == 0
 }
 
-/// `GET /health` — état de la passerelle + *présence* des clés (jamais leur valeur).
 async fn health(
     State(state): State<Arc<AppState>>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -526,7 +421,6 @@ async fn health(
     Json(serde_json::json!({ "ok": true, "providers": providers })).into_response()
 }
 
-/// `GET /admin/keys` — providers et présence d'une clé (booléen, jamais la valeur).
 async fn admin_list(
     State(state): State<Arc<AppState>>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -553,8 +447,6 @@ async fn admin_list(
     Json(serde_json::json!({ "ok": true, "keys": providers })).into_response()
 }
 
-/// `POST /admin/keys/:provider` — dépose une clé (`{"api_key": "…"}`).
-/// Écriture seule : la valeur n'est jamais renvoyée ni journalisée.
 async fn admin_set(
     State(state): State<Arc<AppState>>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -604,7 +496,6 @@ async fn admin_set(
     Json(serde_json::json!({ "ok": true, "provider": id })).into_response()
 }
 
-/// `DELETE /admin/keys/:provider` — oublie une clé (idempotent).
 async fn admin_delete(
     State(state): State<Arc<AppState>>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -647,10 +538,6 @@ fn router(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// main
-// ─────────────────────────────────────────────────────────────────────────────
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let path = std::env::args()
@@ -674,8 +561,6 @@ async fn main() -> anyhow::Result<()> {
         .user_agent(concat!("zer0-gw/", env!("CARGO_PKG_VERSION")))
         .build()?;
 
-    // Fichier des clés déposées : `keys_file` de gw.toml, sinon keys.managed
-    // à côté de gw.toml (keys.env reste réservé aux variables d'env systemd).
     let keys_path = cfg.keys_file.clone().unwrap_or_else(|| {
         std::path::Path::new(&path)
             .parent()
@@ -683,13 +568,8 @@ async fn main() -> anyhow::Result<()> {
             .unwrap_or_else(|| "keys.managed".to_string())
     });
     let mut keys = load_keys(&keys_path);
-    // Ne gérer que les clés des providers connus : le reste (variables d'env
-    // MAJUSCULES) est laissé au fichier et rechargé par systemd.
     keys.retain(|id, _| cfg.providers.contains_key(id));
 
-    // Jeton admin : variable d'environnement prioritaire (systemd), sinon gw.toml.
-    // Absent → endpoints admin ouverts à tout processus local (comportement
-    // historique) : on le dit au démarrage, une fois, en clair.
     let admin_token = std::env::var("ZER0_GW_ADMIN_TOKEN")
         .ok()
         .map(|t| t.trim().to_string())
@@ -737,10 +617,6 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Tests
-// ─────────────────────────────────────────────────────────────────────────────
-
 #[test]
 fn lock_recovers_from_a_poisoned_mutex() {
     let m = std::sync::Mutex::new(7u8);
@@ -748,7 +624,6 @@ fn lock_recovers_from_a_poisoned_mutex() {
         let _guard = m.lock().unwrap();
         panic!("panic sous verrou");
     });
-    // Le mutex est empoisonné : `lock()` doit quand même rendre la valeur.
     assert_eq!(*lock(&m), 7);
 }
 
@@ -808,9 +683,7 @@ mod tests {
 
     #[test]
     fn split_provider_rejects() {
-        // pas de provider → rejet
         assert_eq!(split_provider("/v1/chat/completions"), None);
-        // pas de suffixe /v1/ → rejet
         assert_eq!(split_provider("/openrouter/keys"), None);
         assert_eq!(split_provider("/openrouter"), None);
         assert_eq!(split_provider("/"), None);
@@ -821,7 +694,7 @@ mod tests {
         let p = pcfg("https://x.example", None);
         assert!(path_allowed(&p, "v1/chat/completions"));
         assert!(path_allowed(&p, "v1/models"));
-        assert!(path_allowed(&p, "v1/embeddings")); // mémoire sémantique
+        assert!(path_allowed(&p, "v1/embeddings"));
         assert!(!path_allowed(&p, "v1/keys"));
         assert!(!path_allowed(&p, "admin/v1/chat/completions"));
         assert!(!path_allowed(&p, "v1/chat/completions/../../secret"));
@@ -840,24 +713,17 @@ mod tests {
         assert!(window_allow(&mut w, "openrouter", 2));
         assert!(window_allow(&mut w, "openrouter", 2));
         assert!(!window_allow(&mut w, "openrouter", 2));
-        // l'autre provider a son propre compteur
         assert!(window_allow(&mut w, "nvidia", 2));
     }
 
     #[test]
     fn key_from_env_and_blank_ignored() {
-        // Fonction **pure** : pas de mutation d'environnement (course en
-        // parallèle → la CI devenait instable).
-        // Littéral vide → ignoré.
         assert_eq!(key_from(Some("  "), None), None);
-        // Littéral → il prime.
         assert_eq!(
             key_from(Some("sk-test"), Some("sk-env")),
             Some("sk-test".to_owned())
         );
-        // Sinon la variable d'environnement.
         assert_eq!(key_from(None, Some("sk-env")), Some("sk-env".to_owned()));
-        // Variable vide → ignorée.
         assert_eq!(key_from(None, Some("  ")), None);
     }
 
@@ -876,7 +742,6 @@ mod tests {
             upstream_url("https://integrate.api.nvidia.com", "v1/models", None),
             "https://integrate.api.nvidia.com/v1/models"
         );
-        // base avec slash final → un seul slash
         assert_eq!(
             upstream_url(
                 "https://openrouter.ai/api/",
@@ -885,12 +750,10 @@ mod tests {
             ),
             "https://openrouter.ai/api/v1/chat/completions?a=1"
         );
-        // base SANS version → version du sous-chemin conservée
         assert_eq!(
             upstream_url("https://openrouter.ai/api", "v1/models", None),
             "https://openrouter.ai/api/v1/models"
         );
-        // base AVEC version (z.ai) → pas de double préfixe
         assert_eq!(
             upstream_url("https://api.z.ai/api/paas/v4", "v1/chat/completions", None),
             "https://api.z.ai/api/paas/v4/chat/completions"
@@ -907,9 +770,7 @@ mod tests {
         let mut p = pcfg("https://x.example", None);
         p.api_key = Some("literal".to_owned());
         p.api_key_env = Some("ZGW_UNSET_KEY".to_owned());
-        // littéral seul
         assert_eq!(resolve_key(&keys, "x", &p), Some("literal".to_owned()));
-        // dépôt admin prioritaire
         keys.insert("x".to_owned(), "deposed".to_owned());
         assert_eq!(resolve_key(&keys, "x", &p), Some("deposed".to_owned()));
     }
@@ -935,7 +796,6 @@ mod tests {
             Some("nvapi-test")
         );
 
-        // Retrait : la clé doit disparaître du fichier (fichier 100 % géré).
         keys.remove("openrouter");
         save_keys(path.to_str().unwrap(), &keys).unwrap();
         let reloaded = load_keys(path.to_str().unwrap());

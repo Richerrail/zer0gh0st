@@ -1,22 +1,8 @@
-//! Module: 0box — débat multi-agents (3 perspectives + MAIN qui synthétise).
-//!
-//! L'outil `0box` est **réel** : il lance exactement le même débat que
-//! `/0box` (TUI) et `zer0 0box` (CLI), via `tui::run_0box_debate`, et renvoie
-//! au modèle la transcription du débat.
-//!
-//! Avant, cet outil renvoyait une chaîne prefabricée (« 3 agents confinés ont
-//! débattu ») alors qu'aucun débat n'avait lieu : le modèle croyait à un
-//! résultat qui n'existait pas. C'est exactement le genre de mensonge que la
-//! philosophie d'honnêteté du projet refuse.
-
 use super::ToolSpec;
 use serde_json::json;
 
-/// Perspectives par défaut : `code` → `reasoning` → `main` (MAIN toujours en
-/// dernier : il synthétise et exécute).
 pub const DEFAULT_PERSPECTIVES: [&str; 3] = ["code", "reasoning", "main"];
 
-/// Taille maximale de la transcription renvoyée au modèle.
 const MAX_REPORT: usize = 8_000;
 
 pub fn spec() -> ToolSpec {
@@ -40,7 +26,6 @@ pub fn spec() -> ToolSpec {
     }
 }
 
-/// Analyse les arguments : sujet + perspectives optionnelles.
 pub fn parse_args(args: &str) -> Result<(String, Vec<String>), String> {
     let v: serde_json::Value =
         serde_json::from_str(args).map_err(|e| format!("arguments JSON invalides ({e})"))?;
@@ -96,8 +81,6 @@ pub async fn run(args: &str) -> String {
         crate::tui::run_0box_debate(topic.clone(), perspectives, setup).await;
     });
 
-    // Collecte la transcription du débat (les autres events sont ignorés :
-    // ce sont des notifications d'UI, pas du contenu).
     let mut report = String::new();
     while let Some(ev) = rx.recv().await {
         if let crate::event::UiEvent::Info(t) = ev {
@@ -120,8 +103,6 @@ pub async fn run(args: &str) -> String {
     report
 }
 
-/// Sujet repris de la configuration d'appel (utilisé seulement dans le message
-/// d'erreur, où le rapport est vide).
 fn topic_for_report(_report: &str) -> &str {
     "(sujet inconnu)"
 }

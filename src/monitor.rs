@@ -1,12 +1,7 @@
-//! Moniteur système « btop-like » (sans btop) : CPU, RAM, températures,
-//! processus. `sysinfo` fournit les métriques multiplateformes ; la mise en
-//! forme est pure et testable.
-
 use std::time::Duration;
 
 use sysinfo::{Components, System};
 
-/// Un processus tel qu'affiché (top 8).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Proc {
     pub pid: u32,
@@ -15,7 +10,6 @@ pub struct Proc {
     pub mem: u64,
 }
 
-/// Photo instantanée de la machine.
 #[derive(Debug, Clone, Default)]
 pub struct Snapshot {
     pub host: String,
@@ -32,7 +26,6 @@ pub struct Snapshot {
     pub temps: Vec<(String, f32)>,
 }
 
-/// État persistant : les deltas CPU n'ont de sens qu'entre deux relevés.
 pub struct Monitor {
     sys: System,
     comps: Components,
@@ -53,7 +46,6 @@ impl Monitor {
         self.comps.refresh(true);
     }
 
-    /// Laisse à `sysinfo` le temps de calculer un delta CPU (premier relevé = 0).
     pub fn warmup(&mut self) {
         self.refresh();
         std::thread::sleep(Duration::from_millis(250));
@@ -116,7 +108,6 @@ impl Default for Monitor {
     }
 }
 
-/// Octets → `12.3 MiB` (base 1024, comme btop).
 pub fn bytes(n: u64) -> String {
     const U: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
     let mut v = n as f64;
@@ -132,7 +123,6 @@ pub fn bytes(n: u64) -> String {
     }
 }
 
-/// Barre ASCII : `[####----]  42%`.
 pub fn bar(pct: f32, width: usize) -> String {
     let w = width.max(4);
     let pct = pct.clamp(0.0, 100.0);
@@ -145,7 +135,6 @@ pub fn bar(pct: f32, width: usize) -> String {
     )
 }
 
-/// Durée lisible : `3h12m`, `2j 4h`.
 pub fn duration(secs: u64) -> String {
     let d = secs / 86_400;
     let h = (secs % 86_400) / 3_600;
@@ -159,7 +148,6 @@ pub fn duration(secs: u64) -> String {
     }
 }
 
-/// Rendu texte complet (partagé par `zer0 t0p` et `/t0p`).
 pub fn render(s: &Snapshot) -> String {
     let mut out = String::new();
     out.push_str(&format!(
@@ -222,20 +210,17 @@ pub fn render(s: &Snapshot) -> String {
     out.trim_end().to_string()
 }
 
-/// `/t0p` : un relevé, prêt à afficher dans la TUI.
 pub fn snapshot_text() -> String {
     let mut m = Monitor::new();
     m.warmup();
     render(&m.snapshot())
 }
 
-/// `zer0 t0p [--watch] [--interval N]`.
 pub async fn cli(watch: bool, interval: u64) -> anyhow::Result<()> {
     let mut m = Monitor::new();
     m.warmup();
     loop {
         if watch {
-            // Efface l'écran et remonte le curseur.
             print!("\x1b[2J\x1b[H");
         }
         println!("{}", render(&m.snapshot()));

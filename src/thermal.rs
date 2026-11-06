@@ -1,31 +1,11 @@
-//! Garde-fou thermique du mode local.
-//!
-//! Sur un portable ancien, un modèle local peut pousser le CPU à 90 °C+ et
-//! provoquer un arrêt brutal. On lit les capteurs `hwmon` (Linux) et on coupe
-//! **proprement** : d'abord la génération, puis le serveur si ça monte encore.
-//!
-//! Seuils (variables d'environnement, en °C) :
-//! - `ZER0_TEMP_WARN` (80) : simple avertissement, la génération continue ;
-//! - `ZER0_TEMP_STOP` (88) : génération interrompue ;
-//! - `ZER0_TEMP_KILL` (92) : `llama-server` arrêté (si c'est le nôtre).
-//!
-//! Sur macOS/Windows, les capteurs ne sont pas exposés de façon portable :
-//! `max_celsius()` renvoie `None` et le garde-fou est inactif (aucun échec).
-
-/// Décision du garde-fou pour une température donnée.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Guard {
-    /// Rien à signaler.
     Ok,
-    /// Chaud : on prévient, on continue.
     Warn(f32),
-    /// Trop chaud : on interrompt la génération.
     Stop(f32),
-    /// Critique : on interrompt et on arrête le serveur local.
     Kill(f32),
 }
 
-/// Lit la température maximale connue (en °C), si disponible.
 pub fn max_celsius() -> Option<f32> {
     #[cfg(target_os = "linux")]
     {
@@ -59,15 +39,12 @@ pub fn max_celsius() -> Option<f32> {
     }
 }
 
-/// Millidegrés → °C, avec filtre de plausibilité (ignore 0 et les valeurs
-/// aberrantes de certains pilotes).
 pub fn parse_milli(raw: &str) -> Option<f32> {
     let v: f32 = raw.trim().parse().ok()?;
     let c = v / 1000.0;
     (c > 1.0 && c < 150.0).then_some(c)
 }
 
-/// Lit les seuils configurés : (warn, stop, kill).
 pub fn limits() -> (f32, f32, f32) {
     (
         env_celsius("ZER0_TEMP_WARN", 80.0),
@@ -76,7 +53,6 @@ pub fn limits() -> (f32, f32, f32) {
     )
 }
 
-/// Classe une température (pure, testable).
 pub fn classify(temp: f32, limits: (f32, f32, f32)) -> Guard {
     let (warn, stop, kill) = limits;
     if temp >= kill {
@@ -90,7 +66,6 @@ pub fn classify(temp: f32, limits: (f32, f32, f32)) -> Guard {
     }
 }
 
-/// Vérifie l'état thermique courant.
 pub fn check() -> Guard {
     match max_celsius() {
         Some(t) => classify(t, limits()),

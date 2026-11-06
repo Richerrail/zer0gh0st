@@ -9,7 +9,6 @@ const OFF: Color = Color::Rgb(12, 46, 24);
 const DIM: Color = Color::Rgb(25, 90, 45);
 const TEXT: Color = Color::Rgb(60, 220, 110);
 
-/// CRT 8-bit binary clock: 3 groups (HEURE/MIN/SEC), 6 bits each (32..1).
 pub struct BinTime {
     pub hms: (u8, u8, u8),
     pub date: String,
@@ -34,7 +33,6 @@ impl BinTime {
     }
 
     fn refresh(&mut self) {
-        // « YYYY-MM-DD HH:MM:SS » (portable : `date` ou PowerShell).
         let now = crate::platform::now();
         let mut parts = now.splitn(2, ' ');
         self.date = parts.next().unwrap_or("").to_string();
@@ -53,7 +51,6 @@ impl BinTime {
         }
     }
 
-    /// (label, weights, leds, decimal) for one group, each padded to W.
     fn group(label: &str, value: u8) -> [String; 4] {
         let weights = [32u8, 16, 8, 4, 2, 1];
         let mut w_row = String::new();
@@ -100,10 +97,10 @@ impl BinTime {
             Style::default().fg(DIM),
         )));
         lines.push(Line::from(""));
-        lines.push(join(0, TEXT)); // labels
-        lines.push(join(1, DIM)); // weights
-        lines.push(led_line(&gs)); // LEDs
-        lines.push(join(3, TEXT)); // decimals
+        lines.push(join(0, TEXT));
+        lines.push(join(1, DIM));
+        lines.push(led_line(&gs));
+        lines.push(join(3, TEXT));
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             bits_line,

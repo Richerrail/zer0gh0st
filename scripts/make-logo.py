@@ -26,7 +26,6 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# ── Glyphes 5×5 : identiques à src/tui/banner.rs ────────────────────────────
 GLYPHS = {
     "A": [" ███ ", "█   █", "█████", "█   █", "█   █"],
     "G": [" ████", "█    ", "█ ███", "█   █", " ███ "],
@@ -45,24 +44,20 @@ GLYPHS = {
 TEXT = "ZER0│GH0ST"
 TAGLINE = "ghost in the shell"
 
-CELL = 24          # taille d'un pixel du glyphe (en unités SVG)
-GAP = 1            # espace entre caractères (en cellules)
+CELL = 24
+GAP = 1
 ROWS = 5
 
-# Palette : cyan → magenta (identique au site)
 CYAN = (34, 211, 238)
 MAGENTA = (217, 70, 239)
 DARK = (10, 10, 18)
 
-
 def text_width(text: str) -> int:
     return sum(len(GLYPHS.get(c, GLYPHS[" "])[0]) + GAP for c in text) - GAP
-
 
 def gradient(t: float) -> tuple[int, int, int]:
     """Interpolation cyan → magenta."""
     return tuple(round(a + (b - a) * t) for a, b in zip(CYAN, MAGENTA))
-
 
 def cells(text: str):
     """Yield (col, row, filled) pour chaque pixel plein du wordmark."""
@@ -76,8 +71,6 @@ def cells(text: str):
         x += len(glyph[0]) + GAP
     return
 
-
-# ── SVG ──────────────────────────────────────────────────────────────────────
 def write_svg_wordmark(path: str) -> None:
     w = text_width(TEXT) * CELL
     h = ROWS * CELL
@@ -108,7 +101,6 @@ def write_svg_wordmark(path: str) -> None:
             "fill": "url(#g)",
         })
 
-    # signature : le bloc est un « secteur » de la TUI
     ET.SubElement(svg, "rect", {
         "x": str(pad + (cols + 0.5) * CELL - CELL / 2),
         "y": str(pad),
@@ -119,7 +111,6 @@ def write_svg_wordmark(path: str) -> None:
     })
     ET.ElementTree(svg).write(path, encoding="utf-8", xml_declaration=True)
     return total_w, total_h
-
 
 def write_svg_avatar(path: str) -> None:
     """Icône carrée : le « 0 » de ZER0 dans un cadre néon."""
@@ -138,7 +129,6 @@ def write_svg_avatar(path: str) -> None:
     ET.SubElement(svg, "rect", {"x": "14", "y": "14", "width": str(s - 28), "height": str(s - 28),
                                 "rx": "84", "fill": "none", "stroke": "url(#g)", "stroke-width": "10"})
 
-    # glyphe « 0 » centré, en 5×5 cellules
     cell = 56
     glyph = GLYPHS["0"]
     gw = len(glyph[0]) * cell
@@ -152,7 +142,7 @@ def write_svg_avatar(path: str) -> None:
                     "x": str(ox + c * cell), "y": str(oy + r * cell),
                     "width": str(cell), "height": str(cell), "fill": "url(#g)",
                 })
-    # le « fantôme » : deux yeux clairs dans le creux du 0
+
     eye = max(3, cell // 4)
     ey = oy + 1 * cell + cell // 3
     for ex in (ox + 1 * cell + cell * 2 // 5, ox + 3 * cell - cell * 2 // 5 - eye):
@@ -160,8 +150,6 @@ def write_svg_avatar(path: str) -> None:
                                     "width": str(eye), "height": str(eye), "fill": "#e6faff"})
     ET.ElementTree(svg).write(path, encoding="utf-8", xml_declaration=True)
 
-
-# ── PNG ──────────────────────────────────────────────────────────────────────
 def render_png(path: str, scale: int = 4) -> None:
     """Wordmark PNG (fond transparent), avec la tagline."""
     cell = 8 * scale
@@ -170,7 +158,6 @@ def render_png(path: str, scale: int = 4) -> None:
     h = ROWS * cell + 2 * cell
     tagline_h = 0
 
-    # on dessine d'abord le wordmark pour mesurer
     img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     total = cols * cell
@@ -182,7 +169,6 @@ def render_png(path: str, scale: int = 4) -> None:
     img.save(path)
     return img
 
-
 def render_avatar(path: str, size: int = 512) -> None:
     """Avatar carré : « 0 » néon sur fond sombre, halo propre."""
     img = Image.new("RGBA", (size, size), DARK + (255,))
@@ -193,7 +179,6 @@ def render_avatar(path: str, size: int = 512) -> None:
     gw, gh = len(glyph[0]) * cell, ROWS * cell
     ox, oy = (size - gw) // 2, (size - gh) // 2 - int(size * 0.02)
 
-    # 1) halo
     glow = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     gd = ImageDraw.Draw(glow)
     for r, line in enumerate(glyph):
@@ -205,11 +190,9 @@ def render_avatar(path: str, size: int = 512) -> None:
     img = Image.alpha_composite(img, glow)
     d = ImageDraw.Draw(img)
 
-    # 2) le « trou » du 0 est purgé du halo (sinon il bave et parait sale)
     d.rectangle([ox + 1 * cell, oy + 1 * cell, ox + 4 * cell - 1, oy + 4 * cell - 1],
                 fill=DARK + (255,))
 
-    # 3) le glyphe net, dégradé cyan → magenta
     for r, line in enumerate(glyph):
         for c, px in enumerate(line):
             if px != " ":
@@ -217,16 +200,15 @@ def render_avatar(path: str, size: int = 512) -> None:
                 d.rectangle([ox + c * cell, oy + r * cell,
                              ox + (c + 1) * cell - 1, oy + (r + 1) * cell - 1],
                             fill=gradient(t) + (255,))
-    # 4) les deux yeux du fantôme (clairs : le creux du 0 est sombre)
+
     eye = max(2, int(cell * 0.30))
     ey = oy + 1 * cell + int(cell * 0.42)
     for ex in (ox + 1 * cell + int(cell * 0.40), ox + 3 * cell - int(cell * 0.40) - eye):
         d.rectangle([ex, ey, ex + eye, ey + eye], fill=(230, 250, 255, 255))
-    # 5) cadre
+
     d.rounded_rectangle([14, 14, size - 15, size - 15], radius=int(size * 0.16),
                         outline=MAGENTA + (200,), width=max(2, size // 96))
     img.save(path)
-
 
 def main() -> None:
     out = os.path.join(ROOT, "site")
@@ -240,12 +222,11 @@ def main() -> None:
     print("  logo.png    wordmark (fond transparent)")
     render_avatar(os.path.join(ROOT, "avatar.png"))
     print("  avatar.png  512×512")
-    # copies pour le site
+
     import shutil
     for name in ("logo.svg", "logo.png", "avatar.svg", "avatar.png"):
         shutil.copy(os.path.join(ROOT, name), os.path.join(out, name))
     print("  → copies dans site/")
-
 
 if __name__ == "__main__":
     main()

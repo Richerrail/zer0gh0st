@@ -1,24 +1,4 @@
-﻿<#
-.SYNOPSIS
-  Installe Zer0│GH0ST et les prérequis Zero-chan sous Windows.
-
-.DESCRIPTION
-  Par défaut : Rust, Git, Visual Studio Build Tools (C++), FFmpeg, SoX_ng,
-  Python 3.12 + faster-whisper, puis compilation release de Zer0.
-
-  -VoiceOnly : installe uniquement la chaîne vocale Zero-chan.
-  -Minimal   : installe seulement la chaîne de compilation (sans voix/média).
-  -SkipBuild : n'effectue pas la compilation Cargo.
-
-.EXAMPLE
-  .\scripts\install.cmd
-
-.EXAMPLE
-  .\scripts\install.cmd -VoiceOnly
-
-.EXAMPLE
-  .\scripts\install-windows.ps1 -SkipBuild
-#>
+﻿
 [CmdletBinding()]
 param(
   [switch]$VoiceOnly,
@@ -51,9 +31,6 @@ function Has-Command([string]$name) {
   return [bool](Get-Command $name -ErrorAction SilentlyContinue)
 }
 
-# Windows PowerShell transforme la sortie stderr d'un programme natif en
-# erreur PowerShell. On la laisse passer sans interrompre le script, puis on
-# contrôle explicitement le code de sortie.
 function Invoke-NativeCommand(
   [string]$FilePath,
   [string[]]$ArgumentList
@@ -183,7 +160,6 @@ function Install-VoiceTools {
     if ($code -ne 0) { Die "Création du venv Python impossible." }
   } else { Ok "venv STT déjà présent : $venv" }
 
-  # Certains Python (uv, distributions embarquées) créent un venv sans pip.
   $pipReady = $false
   try {
     & $venvPython -m pip --version *> $null
@@ -198,7 +174,7 @@ function Install-VoiceTools {
   Info "Installation de faster-whisper + PyAV compatible…"
   $code = Invoke-NativeCommand $venvPython @("-m", "pip", "install", "--upgrade", "pip")
   if ($code -ne 0) { Die "Mise à jour de pip impossible." }
-  # av 19 a retiré `metadata_errors`, encore utilisé par faster-whisper 1.2.1.
+
   $code = Invoke-NativeCommand $venvPython @("-m", "pip", "install", "--upgrade", "faster-whisper", "av<16")
   if ($code -ne 0) { Die "Installation de faster-whisper impossible." }
 

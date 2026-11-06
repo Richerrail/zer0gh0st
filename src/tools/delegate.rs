@@ -43,7 +43,6 @@ pub async fn run(args: &str) -> String {
     if endpoints.is_empty() {
         return format!("Erreur delegate : aucun endpoint pour le rôle `{role}`.");
     }
-    // Pas de récursion : le sous-agent ne peut ni déléguer ni relancer 0box.
     let tools: Vec<ToolSpec> = rt
         .all_tools
         .iter()

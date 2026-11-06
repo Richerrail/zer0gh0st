@@ -1,6 +1,4 @@
-#!/usr/bin/env bash
-# Fast variant: run a small 1.5B model (much faster on weak CPUs).
-# Same CPU budget as serve.sh: 2 cores.
+
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

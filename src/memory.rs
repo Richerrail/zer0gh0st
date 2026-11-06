@@ -9,15 +9,12 @@ use crate::config;
 use crate::http_client;
 use crate::providers;
 
-/// One persistent memory entry. Always stored as `untrusted`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryEntry {
     pub id: String,
     pub text: String,
-    /// Optional query that makes this entry honestly testable later.
     #[serde(default)]
     pub trigger: Option<String>,
-    /// Which embedder produced `vector` (never mixed silently).
     #[serde(default)]
     pub embedder: Option<String>,
     #[serde(default)]
@@ -67,7 +64,6 @@ pub struct UpdateOutcome {
     pub degraded_reason: Option<String>,
 }
 
-/// Corrige une entrée existante. Ré-embedding seulement si le texte change.
 pub async fn update(
     id: &str,
     text: Option<String>,
@@ -131,7 +127,6 @@ pub async fn update(
     })
 }
 
-/// Delete one entry. Returns true if it existed.
 pub fn forget(id: &str) -> Result<bool> {
     let entries = load();
     let before = entries.len();
@@ -143,7 +138,6 @@ pub fn forget(id: &str) -> Result<bool> {
     Ok(removed)
 }
 
-/// Delete all entries.
 pub fn clear() -> Result<()> {
     rewrite(&[])
 }
@@ -173,9 +167,6 @@ fn append(e: &MemoryEntry) -> Result<()> {
     Ok(())
 }
 
-// ---------------------------------------------------------------- embeddings
-
-/// Configured embedder id, e.g. `local/bge-m3` — or `None` if unset.
 pub fn embedder_id() -> Option<String> {
     let g = config::load_global();
     let e = g.embeddings?;
@@ -184,7 +175,6 @@ pub fn embedder_id() -> Option<String> {
     Some(format!("{provider}/{model}"))
 }
 
-/// Call an OpenAI-compatible `/embeddings` endpoint.
 pub async fn embed(text: &str) -> Result<Vec<f32>> {
     let g = config::load_global();
     let e = g
@@ -198,8 +188,6 @@ pub async fn embed(text: &str) -> Result<Vec<f32>> {
         .ok_or_else(|| anyhow!("modèle d'embedding manquant"))?;
     let provider =
         providers::find(&provider_id).ok_or_else(|| anyhow!("provider inconnu: {provider_id}"))?;
-    // Même transport que le chat : passerelle si elle tourne (clé jamais dans
-    // l'agent), sinon direct. Sinon l'embedding partait en direct → 401.
     let (base_url, key) = config::endpoint_for(&provider);
 
     let url = format!("{}/embeddings", base_url.trim_end_matches('/'));
@@ -226,8 +214,6 @@ pub async fn embed(text: &str) -> Result<Vec<f32>> {
         .filter_map(|x| x.as_f64().map(|f| f as f32))
         .collect())
 }
-
-// --------------------------------------------------------------------- save
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SaveOutcome {
@@ -281,7 +267,6 @@ pub async fn save(text: &str, trigger: Option<String>, tags: Vec<String>) -> Res
         created_at: now(),
         tags,
     };
-    // Écriture du JSONL hors du runtime async.
     let to_write = entry.clone();
     tokio::task::spawn_blocking(move || append(&to_write))
         .await
@@ -297,8 +282,6 @@ pub async fn save(text: &str, trigger: Option<String>, tags: Vec<String>) -> Res
         degraded_reason: reason,
     })
 }
-
-// ------------------------------------------------------------------- search
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Hit {
@@ -324,8 +307,6 @@ pub struct SearchOutcome {
 }
 
 pub async fn search(query: &str, k: usize) -> SearchOutcome {
-    // `load()` lit un JSONL : hors du worker async (la recherche mémoire peut
-    // être appelée à chaque tour par l'outil `memory_search`).
     let entries = tokio::task::spawn_blocking(load).await.unwrap_or_default();
     let total = entries.len();
     let probeable = entries.iter().filter(|e| e.trigger.is_some()).count();
@@ -365,7 +346,6 @@ pub async fn search(query: &str, k: usize) -> SearchOutcome {
                     })
                     .collect();
 
-                // Ranking is only meaningful within one embedding space.
                 let mismatched = entries
                     .iter()
                     .any(|e| e.vector.is_some() && e.embedder.as_deref() != Some(qe.as_str()));
@@ -440,7 +420,6 @@ fn cosine(a: &[f32], b: &[f32]) -> f32 {
     }
 }
 
-/// Human-readable honesty header for a search result.
 pub fn format_outcome(o: &SearchOutcome) -> String {
     let mut s = format!(
         "Mémoire — {} résultat(s) / {} entrée(s)\n",

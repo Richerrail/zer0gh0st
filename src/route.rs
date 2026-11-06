@@ -8,7 +8,6 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-/// One concrete place to send a request.
 #[derive(Debug, Clone)]
 pub struct Endpoint {
     pub provider_id: String,
@@ -39,17 +38,6 @@ pub fn from_settings(s: &Settings) -> Endpoint {
     }
 }
 
-/// Retire **un** préfixe `{provider}/` du modèle, quel que soit le provider.
-///
-/// Un identifiant de modèle est soit nu (`minimax/minimax-m3.1-flash:free`), soit
-/// écrit « façon route » (`openrouter/minimax/…`). Le second cas est une pollution
-/// de la config (ex. `zer0 model use openrouter/…`) : envoyé tel quel à l'API, il
-/// ne correspond à aucun modèle, et le label affiché doublait le préfixe
-/// (`openrouter/openrouter/…`).
-///
-/// L'ancienne version excluait OpenRouter au motif que « son namespace est
-/// `vendor/model` » — vrai pour le *reste* de l'identifiant, faux pour son propre
-/// préfixe `openrouter/`, qui n'est jamais légitime.
 fn normalize_model(provider_id: &str, model: &str) -> String {
     if let Some(rest) = model.strip_prefix(&format!("{provider_id}/")) {
         if !rest.is_empty() {
@@ -59,7 +47,6 @@ fn normalize_model(provider_id: &str, model: &str) -> String {
     model.to_string()
 }
 
-/// Parse a `provider/model` route string into an endpoint.
 pub fn parse_route(route: &str) -> Option<Endpoint> {
     let (provider_id, model) = route.split_once('/')?;
     let provider = providers::find(provider_id)?;
@@ -67,9 +54,6 @@ pub fn parse_route(route: &str) -> Option<Endpoint> {
         return None;
     }
     let model = normalize_model(&provider.id, model);
-    // Même transport que le provider actif : passerelle si elle tourne
-    // (routes et rôles ne doivent PAS contourner zer0-gw — sinon ils
-    // partaient en direct, sans clé → 401).
     let (base_url, api_key) = config::endpoint_for(&provider);
     Some(Endpoint {
         provider_id: provider.id.to_string(),
@@ -80,7 +64,6 @@ pub fn parse_route(route: &str) -> Option<Endpoint> {
     })
 }
 
-/// Roles Zer0 knows about.
 pub const KNOWN_ROLES: &[&str] = &[
     "main",
     "code",
@@ -92,7 +75,6 @@ pub const KNOWN_ROLES: &[&str] = &[
     "review",
 ];
 
-/// Default role for a detected task category.
 pub fn role_for_category(cat: Category) -> &'static str {
     match cat {
         Category::Code => "code",
@@ -104,23 +86,14 @@ pub fn role_for_category(cat: Category) -> &'static str {
     }
 }
 
-/// Pick a role automatically from the user's text.
 pub fn auto_role(text: &str) -> &'static str {
     role_for_category(select::classify(text))
 }
 
-/// Endpoint chain for a role: the role's model first, then the normal chain.
-/// Falls back to the `main` role, then to the active endpoint.
 pub fn chain_for_role(settings: &Settings, role: &str) -> Vec<Endpoint> {
     chain_for_role_with(settings, role, config::roles_enabled())
 }
 
-/// Comme `chain_for_role`, mais avec l'état « rôles » explicite (testable).
-///
-/// Rôles désactivés (`/role off`) ⇒ **un seul modèle** : le provider actif,
-/// **sans bascule** (les `routes` de la config sont ignorées). Sinon un échec
-/// changerait silencieusement de modèle — précisément ce qu'on veut éviter en
-/// mode « test d'un seul modèle ».
 fn chain_for_role_with(settings: &Settings, role: &str, roles_on: bool) -> Vec<Endpoint> {
     if !roles_on {
         return vec![from_settings(settings)];
@@ -155,8 +128,6 @@ fn chain_for_role_with(settings: &Settings, role: &str, roles_on: bool) -> Vec<E
     }
 }
 
-/// Ordered chain: active endpoint first, then configured failover routes (deduped).
-/// Recently-failed endpoints are skipped (unless that would leave nothing).
 pub fn build_chain(settings: &Settings) -> Vec<Endpoint> {
     let mut chain = vec![from_settings(settings)];
     for r in config::effective_routes() {
@@ -181,12 +152,9 @@ pub fn build_chain(settings: &Settings) -> Vec<Endpoint> {
     }
 }
 
-/// Build a chain for 0box agents: 0box fallbacks first, then role chain.
-/// This allows configuring model fallbacks specifically for /0box brainstorming.
 pub fn chain_for_0box_role(settings: &Settings, role: &str) -> Vec<Endpoint> {
     let mut chain = Vec::new();
 
-    // Add 0box-specific fallbacks first (if configured)
     if let Some(fallbacks) = config::load_global().zero_box_fallbacks {
         for fb in fallbacks {
             if let Some(ep) = parse_route(&fb) {
@@ -200,11 +168,8 @@ pub fn chain_for_0box_role(settings: &Settings, role: &str) -> Vec<Endpoint> {
         }
     }
 
-    // Then add the full failover chain (role endpoint + global routes)
-    // This ensures proper fallback when models return empty responses
     let mut role_chain = Vec::new();
 
-    // First: the role-specific endpoint (if configured)
     let roles = config::effective_roles();
     let route = roles.get(role).or_else(|| roles.get("main")).cloned();
     if let Some(r) = route {
@@ -213,7 +178,6 @@ pub fn chain_for_0box_role(settings: &Settings, role: &str) -> Vec<Endpoint> {
         }
     }
 
-    // Then: the global failover chain (build_chain includes active + routes)
     for ep in build_chain(settings) {
         let dup = role_chain
             .iter()
@@ -223,7 +187,6 @@ pub fn chain_for_0box_role(settings: &Settings, role: &str) -> Vec<Endpoint> {
         }
     }
 
-    // Add to main chain
     for ep in role_chain {
         let dup = chain
             .iter()
@@ -233,7 +196,6 @@ pub fn chain_for_0box_role(settings: &Settings, role: &str) -> Vec<Endpoint> {
         }
     }
 
-    // Filter out recently failed endpoints
     let alive: Vec<Endpoint> = chain
         .iter()
         .filter(|e| !is_failed(&e.label))
@@ -246,9 +208,6 @@ pub fn chain_for_0box_role(settings: &Settings, role: &str) -> Vec<Endpoint> {
     }
 }
 
-// --------------------------------------------------- model failure memory
-
-/// How long an endpoint stays blacklisted after a failure.
 const FAILURE_TTL: Duration = Duration::from_secs(120);
 
 fn failures() -> &'static Mutex<HashMap<String, Instant>> {
@@ -256,21 +215,18 @@ fn failures() -> &'static Mutex<HashMap<String, Instant>> {
     F.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Remember that an endpoint just failed (gated model, rate limit, …).
 pub fn mark_failed(label: &str) {
     if let Ok(mut m) = failures().lock() {
         m.insert(label.to_string(), Instant::now());
     }
 }
 
-/// Clear the failure mark after a success.
 pub fn clear_failed(label: &str) {
     if let Ok(mut m) = failures().lock() {
         m.remove(label);
     }
 }
 
-/// True while the endpoint is blacklisted (and not expired).
 pub fn is_failed(label: &str) -> bool {
     let Ok(mut m) = failures().lock() else {
         return false;
@@ -285,7 +241,6 @@ pub fn is_failed(label: &str) -> bool {
     }
 }
 
-/// Append a route to the global config (no-op if already present).
 pub fn add_global_route(route: &str) -> anyhow::Result<()> {
     let mut g = config::load_global();
     if !g.routes.iter().any(|r| r == route) {
@@ -302,7 +257,6 @@ pub fn clear_global_routes() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Overwrite the global failover chain.
 pub fn set_global_routes(routes: Vec<String>) -> anyhow::Result<()> {
     let mut g = config::load_global();
     g.routes = routes;
@@ -310,7 +264,6 @@ pub fn set_global_routes(routes: Vec<String>) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Auto-assign each role to the best free model for its category.
 pub async fn auto_role_assignments(provider_id: &str) -> anyhow::Result<Vec<(String, String)>> {
     let provider = providers::find(provider_id)
         .ok_or_else(|| anyhow::anyhow!("provider inconnu: {provider_id}"))?;
@@ -339,7 +292,6 @@ pub async fn auto_role_assignments(provider_id: &str) -> anyhow::Result<Vec<(Str
     Ok(out)
 }
 
-/// Build a failover chain from the provider's free models, ranked for `problem`.
 pub async fn auto_free_routes(
     provider_id: &str,
     problem: &str,
@@ -375,8 +327,6 @@ mod tests {
         assert!(parse_route("openrouter/").is_none());
     }
 
-    /// Régression : `model = "openrouter/minimax/…"` envoyait
-    /// `model: "openrouter/minimax/…"` à l'API et affichait un label doublé.
     #[test]
     fn provider_prefix_is_not_doubled() {
         let s = Settings {

@@ -1,9 +1,3 @@
-# zer0-gw — passerelle de clés ZER0│GH0ST
-#
-# Le SEUL processus qui détient les clés API. L'agent (utilisateur « zer0 »)
-# n'appelle que http://127.0.0.1:8787 sans secret.
-#
-# Installation : scripts/gw-setup.sh (root), puis éditer /etc/zer0-gw/gw.toml.
 
 [Unit]
 Description=ZER0|GH0ST — passerelle de cles (zer0-gw)
@@ -16,14 +10,12 @@ Type=simple
 User=zer0-gw
 Group=zer0-gw
 ExecStart=/usr/local/bin/zer0-gw /etc/zer0-gw/gw.toml
-# Clés des providers (chmod 640 root:zer0-gw) — format : OPENROUTER_API_KEY=sk-or-…
+
 EnvironmentFile=-/etc/zer0-gw/keys.env
 
-# ── Durcissement systemd ────────────────────────────────────────────────────
 NoNewPrivileges=yes
 ProtectSystem=strict
-# La passerelle DOIT pouvoir écrire les clés déposées (/provider add) :
-# sans cette ligne, ProtectSystem=strict rend /etc en lecture seule → 500.
+
 ReadWritePaths=-/etc/zer0-gw
 ProtectHome=yes
 PrivateTmp=yes
@@ -49,9 +41,6 @@ SystemCallErrorNumber=EPERM
 UMask=0077
 Restart=on-failure
 RestartSec=2s
-
-# Sortie réseau : contrôlée par nftables (deploy/20-zer0-egress.nft).
-# zer0-gw est le SEUL utilisateur autorisé à sortir, en TCP 443 uniquement.
 
 [Install]
 WantedBy=multi-user.target

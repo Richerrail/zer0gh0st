@@ -4,7 +4,6 @@ use std::path::PathBuf;
 
 use crate::config;
 
-/// Personas are system-prompt presets, one markdown file per persona.
 pub fn dir() -> PathBuf {
     config::data_dir().join("personas")
 }

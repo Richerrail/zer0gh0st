@@ -12,17 +12,11 @@ use crate::event::UiEvent;
 use crate::http_client::HTTP_CLIENT;
 use crate::tools::ToolSpec;
 
-/// Hard cap on a single streamed response (guards against runaway/looping models).
 const MAX_STREAM_CHARS: usize = 1_000_000;
-/// Abort a stream that sends nothing for this long.
-/// Silences tolérés entre deux tokens. Un modèle local sur 2 cœurs peut
-/// dépasser 2 min de préfill : 240 s par défaut, réglable par
-/// `ZER0_STREAM_IDLE_SECS` (secondes, > 0).
 fn stream_idle_timeout() -> Duration {
     parse_idle_secs(std::env::var("ZER0_STREAM_IDLE_SECS").ok().as_deref())
 }
 
-/// Refuse de démarrer une génération locale si le CPU est déjà en surchauffe.
 fn thermal_gate(options: &ChatOptions) -> Result<(), ChatError> {
     if !options.local {
         return Ok(());
@@ -48,13 +42,8 @@ fn thermal_gate(options: &ChatOptions) -> Result<(), ChatError> {
     }
 }
 
-/// Délai **total** d'une requête non-streamée : un modèle local lent peut
-/// dépasser les 180 s du client partagé (préfill à ~4 tok/s). Réglable par
-/// `ZER0_HTTP_TIMEOUT_SECS` (défaut 600 s).
 fn request_timeout(options: &ChatOptions) -> Duration {
     if options.stream {
-        // En flux, le silence entre tokens est déjà surveillé : pas de plafond
-        // total, sinon une génération longue mais active serait coupée.
         Duration::from_secs(24 * 3600)
     } else {
         parse_total_secs(std::env::var("ZER0_HTTP_TIMEOUT_SECS").ok().as_deref())
@@ -68,7 +57,6 @@ fn parse_total_secs(raw: Option<&str>) -> Duration {
         .unwrap_or(Duration::from_secs(600))
 }
 
-/// Analyse `ZER0_STREAM_IDLE_SECS` (séparé pour être testable sans env).
 fn parse_idle_secs(raw: Option<&str>) -> Duration {
     raw.and_then(|v| v.trim().parse::<u64>().ok())
         .filter(|s| *s > 0)
@@ -76,12 +64,8 @@ fn parse_idle_secs(raw: Option<&str>) -> Duration {
         .unwrap_or(Duration::from_secs(240))
 }
 
-/// Plafond de sortie pour les modèles `:free` : les providers comptent souvent
-/// la sortie **réservée** contre le quota, et un `max_tokens` élevé rapproche
-/// le 429 sans rien apporter sur une réponse normale.
 const FREE_MAX_TOKENS: u32 = 2048;
 
-/// `max_tokens` effectif (pur, testable).
 fn effective_max_tokens(model: &str, requested: u32) -> u32 {
     if model.to_ascii_lowercase().contains(":free") {
         requested.min(FREE_MAX_TOKENS)
@@ -90,28 +74,20 @@ fn effective_max_tokens(model: &str, requested: u32) -> u32 {
     }
 }
 
-/// Comment les outils sont exposés au modèle.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum ToolsMode {
-    /// API OpenAI `tools` + `tool_choice` (cloud, llama.cpp récent).
     #[default]
     Native,
-    /// Protocole texte `<tool_call>{…}</tool_call>` : nécessaire quand le
-    /// serveur local ne sait pas (ou plus) construire la grammaire des outils.
     Prompt,
 }
 
-/// Per-request generation options.
 #[derive(Clone, Debug)]
 pub struct ChatOptions {
     pub max_tokens: u32,
     pub thinking: bool,
     pub temperature: f32,
     pub tools_mode: ToolsMode,
-    /// `false` = réponse complète en un bloc (`stream: false`). Utile quand un
-    /// serveur local laisse de longs silences pendant le préfill.
     pub stream: bool,
-    /// Provider local : active le garde-fou thermique pendant la génération.
     pub local: bool,
 }
 
@@ -128,19 +104,16 @@ impl Default for ChatOptions {
     }
 }
 
-/// Distinguishes failures that are safe to fail over from mid-stream failures.
 #[derive(Debug)]
 pub enum ChatError {
-    /// Failed before any token was emitted (connect / status / request build).
     Setup {
         err: anyhow::Error,
         status: Option<u16>,
     },
-    /// Failed after streaming started; tokens may already be visible.
     Mid(anyhow::Error),
-    /// Quota définitif (journalier / crédits) : réessayer ou basculer vers un
-    /// autre modèle `:free` du même compte ne sert à rien.
-    Quota { detail: String },
+    Quota {
+        detail: String,
+    },
 }
 
 impl std::fmt::Display for ChatError {
@@ -154,7 +127,6 @@ impl std::fmt::Display for ChatError {
 
 impl std::error::Error for ChatError {}
 
-/// Minimal OpenAI-compatible client for `llama-server`.
 #[derive(Clone)]
 pub struct ApiClient {
     pub base_url: String,
@@ -177,8 +149,6 @@ impl ApiClient {
         }
     }
 
-    /// Stream a chat completion. Emits tokens through `ui` and returns the full
-    /// assistant text plus any requested tool calls.
     pub async fn stream_chat(
         &self,
         system: &str,
@@ -190,7 +160,6 @@ impl ApiClient {
         let mut msgs: Vec<serde_json::Value> = Vec::with_capacity(messages.len() + 1);
         msgs.push(json!({ "role": "system", "content": system }));
         for m in messages {
-            // Defensive: never forward UI-only roles to the server.
             if !matches!(m.role.as_str(), "user" | "assistant" | "tool" | "system") {
                 continue;
             }
@@ -204,13 +173,9 @@ impl ApiClient {
             "temperature": options.temperature,
             "max_tokens": effective_max_tokens(&self.model, options.max_tokens),
         });
-        // `chat_template_kwargs` est un paramètre llama.cpp/vLLM : l'endpoint OpenAI-compat
-        // de Google le REJETTE (400 « Unknown name "chat_template_kwargs" ») — bug constaté
-        // en débat 0box (rôle reasoning via gemma). On ne l'envoie pas à Google.
         if !self.base_url.contains("generativelanguage.googleapis.com") {
             body["chat_template_kwargs"] = json!({ "enable_thinking": options.thinking });
         }
-        // OpenRouter's unified reasoning control (Qwen uses chat_template_kwargs).
         if self.base_url.contains("openrouter.ai") {
             body["reasoning"] = json!({ "enabled": options.thinking });
         }
@@ -221,14 +186,11 @@ impl ApiClient {
             body["tool_choice"] = json!("auto");
         }
 
-        // Refus immédiat si la machine est déjà trop chaude (local seulement).
         thermal_gate(options)?;
 
         let url = format!("{}/chat/completions", self.base_url);
-        // Étiquette d'usage (suivi 200/429, voir `quota`) — identique aux labels de `route`.
         let quota_label = crate::quota::label_for(&self.base_url, &self.model);
 
-        // Build request with proper headers
         let req_builder = || {
             let mut req = self
                 .http
@@ -244,7 +206,6 @@ impl ApiClient {
             req
         };
 
-        // Retry loop for 429 (rate limit) with exponential backoff + Retry-After header
         let mut retries = 3;
         let resp = loop {
             if !crate::budget::try_consume() {
@@ -264,7 +225,6 @@ impl ApiClient {
             })?;
 
             if resp.status() == 429 {
-                // Retry-After doit être lu avant `text()` (qui consomme la réponse).
                 let wait = resp
                     .headers()
                     .get(RETRY_AFTER)
@@ -274,8 +234,6 @@ impl ApiClient {
                 let text = resp.text().await.unwrap_or_default();
                 crate::quota::record_rate_limited(&quota_label, &text);
                 if let Some(detail) = definitive_quota(&text) {
-                    // Inutile de réessayer : attendre la réinitialisation ou
-                    // changer de modèle gratuit ne rendra pas de quota.
                     return Err(ChatError::Quota { detail });
                 }
                 if retries == 0 {
@@ -326,9 +284,6 @@ impl ApiClient {
         let mut emitted: usize = 0;
         let mut last_thermal = std::time::Instant::now();
         let mut warned_thermal = false;
-        // Un flux n'est valide que s'il annonce sa fin (`[DONE]` ou `finish_reason`).
-        // Sinon on a peut-être perdu la fin d'un `tool_call` (JSON tronqué) :
-        // c'était jusqu'ici retourné comme un succès, en silence.
         let mut terminal = false;
 
         loop {
@@ -380,8 +335,6 @@ impl ApiClient {
                     }
                 }
             }
-            // Surveillance thermique toutes les 2 s : on coupe AVANT la
-            // surchauffe, au lieu de laisser le noyau redémarrer la machine.
             if options.local && last_thermal.elapsed() >= Duration::from_secs(2) {
                 last_thermal = std::time::Instant::now();
                 match crate::thermal::check() {
@@ -436,9 +389,6 @@ impl ApiClient {
             ));
         }
 
-        // Some providers return empty content in streaming mode (e.g. vLLM
-        // diffusion models) while the non-streaming call works. Retry once
-        // without streaming (with retry on 429).
         if content.trim().is_empty() && partial.is_empty() {
             let mut body2 = body.clone();
             body2["stream"] = json!(false);
@@ -466,7 +416,6 @@ impl ApiClient {
                             .and_then(|h| h.to_str().ok())
                             .and_then(|s| s.parse::<u64>().ok())
                             .unwrap_or(2u64.pow(3 - retries2));
-                        // Limites éventuelles dans les en-têtes (avant le corps).
                         crate::quota::record_limits(
                             &quota_label,
                             crate::quota::header_u64(resp2.headers(), crate::quota::LIMIT_HEADERS),
@@ -486,8 +435,6 @@ impl ApiClient {
                         continue;
                     }
                     Ok(resp2) if !resp2.status().is_success() => {
-                        // Ne pas masquer la cause : un 401/404 ici doit remonter
-                        // (turn.rs peut alors basculer d'endpoint).
                         let status = resp2.status();
                         let body = resp2.text().await.unwrap_or_default();
                         return Err(ChatError::Setup {
@@ -533,8 +480,6 @@ impl ApiClient {
             }
         }
 
-        // Last resort: some reasoning models put everything in reasoning_content and
-        // leave content empty. Use the reasoning as the answer instead of failing over.
         if content.trim().is_empty() && partial.is_empty() && !reasoning.trim().is_empty() {
             let _ = ui.send(UiEvent::Info(
                 "↪ réponse issue du raisonnement (`content` vide)".into(),
@@ -571,9 +516,6 @@ impl ApiClient {
     }
 }
 
-/// Détecte un 429 **définitif** (quota journalier, crédits épuisés) d'après le
-/// corps renvoyé par le provider. Retourne un message court, ou `None` si la
-/// limite est probablement passagère (rafale par minute).
 fn definitive_quota(body: &str) -> Option<String> {
     let b = body.to_ascii_lowercase();
     let daily = b.contains("free-models-per-day")
@@ -591,8 +533,6 @@ fn definitive_quota(body: &str) -> Option<String> {
     Some(msg.trim().to_string())
 }
 
-/// Nettoyage commun streaming / non-streaming : retire le bruit du modèle et,
-/// en mode « prompt », extrait les appels `<tool_call>` du texte.
 fn finalize_content(raw: String, options: &ChatOptions) -> (String, Vec<ToolCall>) {
     let content = sanitize_content(&raw);
     if options.tools_mode == ToolsMode::Prompt {
@@ -602,7 +542,6 @@ fn finalize_content(raw: String, options: &ChatOptions) -> (String, Vec<ToolCall
     }
 }
 
-/// Réponse complète (`stream: false`).
 #[derive(serde::Deserialize)]
 struct ChatCompletion {
     #[serde(default)]
@@ -626,8 +565,6 @@ struct CompletionMessage {
     tool_calls: Option<Vec<ToolCall>>,
 }
 
-/// Affiche un texte déjà complet par petits morceaux : la TUI garde un
-/// rendu progressif même sans flux réseau.
 fn emit_in_chunks(text: &str, ui: &UnboundedSender<UiEvent>, reasoning: bool) {
     let chars: Vec<char> = text.chars().collect();
     for part in chars.chunks(64) {
@@ -671,11 +608,6 @@ fn parse_completion(
     Ok((content, calls, choice.finish_reason))
 }
 
-/// Extrait les appels d'outils d'un texte au format `<tool_call>…</tool_call>`.
-///
-/// Tolérant sur la forme : `{"name":…,"arguments":{…}}` ou
-/// `{"tool":…,"args":{…}}`, et arguments en chaîne JSON ou en objet.
-/// Retourne le texte nettoyé et les appels (ids synthétiques `local_N`).
 pub fn parse_prompt_tool_calls(content: &str) -> (String, Vec<ToolCall>) {
     let mut clean = String::with_capacity(content.len());
     let mut calls = Vec::new();
@@ -688,7 +620,6 @@ pub fn parse_prompt_tool_calls(content: &str) -> (String, Vec<ToolCall>) {
         clean.push_str(&rest[..start]);
         let after = &rest[start + "<tool_call>".len()..];
         let Some(end) = after.find("</tool_call>") else {
-            // Bloc non fermé : on garde le texte tel quel (le modèle a été coupé).
             clean.push_str(&rest[start..]);
             break;
         };
@@ -729,11 +660,6 @@ pub fn parse_prompt_tool_calls(content: &str) -> (String, Vec<ToolCall>) {
     (clean.trim().to_string(), calls)
 }
 
-/// En-têtes d'attribution envoyés à OpenRouter (tableau de bord + `HTTP-Referer`).
-///
-/// La version précédente avait `zer0gh0st/0.5.5` et `github.com/richerrail/...`
-/// écrits en dur à deux endroits : version fausse dès la 0.5.6, et mauvaise
-/// casse de l'organisation. Une seule source : `CARGO_PKG_VERSION` + `update::REPO`.
 fn attribution(req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
     req.header(
         "HTTP-Referer",
@@ -742,20 +668,10 @@ fn attribution(req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
     .header("X-Title", concat!("ZER0|GH0ST/", env!("CARGO_PKG_VERSION")))
 }
 
-/// Retire les tokens spéciaux qui fuient (`<|im_end|>`, `<|eot_id|>`…).
-///
-/// **Ne touche pas aux blancs.** La version précédente terminait par
-/// `out.split_whitespace().collect::<Vec<_>>().join(" ")`, ce qui écrasait les
-/// retours à la ligne et l'indentation de *chaque* réponse assistant : le code
-/// relu (et renvoyé au modèle au tour suivant) arrivait aplati sur une ligne.
-/// On se contente désormais de supprimer les lignes vides excédentaires.
 fn sanitize_content(s: &str) -> String {
     collapse_blank_lines(&strip_special_tokens(s))
 }
 
-/// Supprime les séquences `<|…|>` dont le contenu est un identifiant de token
-/// (`alnum` + `_`). Tout le reste est laissé intact : on ne mange pas de texte
-/// arbitraire au motif qu'il commence par `<|`.
 fn strip_special_tokens(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut i = 0usize;
@@ -779,8 +695,6 @@ fn strip_special_tokens(s: &str) -> String {
     out
 }
 
-/// Réduit les suites de lignes vides (`\n\n\n…` → `\n\n`), sans toucher à
-/// l'indentation ni aux espaces significatifs.
 fn collapse_blank_lines(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut newlines = 0usize;
@@ -896,7 +810,6 @@ mod tests {
         .is_some());
         assert!(definitive_quota("daily limit reached").is_some());
         assert!(definitive_quota("Insufficient credits").is_some());
-        // Une rafale par minute n'est PAS définitive : on réessaie.
         assert!(definitive_quota("rate limit exceeded, retry in 3s").is_none());
         assert!(definitive_quota("").is_none());
     }
@@ -921,7 +834,6 @@ mod tests {
 
     #[test]
     fn non_token_angle_pipes_are_kept() {
-        // Pas un identifiant de token : on ne détruit rien.
         let s = "comparaison a <| b et c |> d";
         assert_eq!(sanitize_content(s), s);
         let s2 = "code: `<|pas un token|>`";

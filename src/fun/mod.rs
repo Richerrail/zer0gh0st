@@ -9,7 +9,6 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 
-/// Full-screen "fun" modes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     Chat,
@@ -21,7 +20,6 @@ pub enum Mode {
     Term,
 }
 
-/// Dump a single Pong frame to stdout (diagnostic).
 pub fn debug_pong_frame() -> anyhow::Result<()> {
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
@@ -40,7 +38,6 @@ pub fn debug_pong_frame() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Standalone runner for previewing a mode outside the agent.
 pub fn run_standalone(mode: Mode) -> anyhow::Result<()> {
     let mut terminal = ratatui::init();
     let mut bt = bintime::BinTime::new();
@@ -123,7 +120,6 @@ pub fn run_standalone(mode: Mode) -> anyhow::Result<()> {
                 }
             }
 
-            // fixed-step: advance as many ticks as wall-clock allows (bounded catch-up)
             let now = Instant::now();
             if now.duration_since(next) > tick * 3 {
                 next = now;

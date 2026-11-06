@@ -1,6 +1,5 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// Global "cancel the current turn" flag, set by `/stop`.
 static CANCELLED: AtomicBool = AtomicBool::new(false);
 
 pub fn request() {

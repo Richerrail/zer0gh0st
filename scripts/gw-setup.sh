@@ -1,23 +1,4 @@
-#!/usr/bin/env bash
-# ─────────────────────────────────────────────────────────────────────────────
-# gw-setup.sh — découpage de sécurité ZER0│GH0ST (Linux, à exécuter en root)
-#
-# But : la clé n'existe plus dans le processus agent.
-#   1. utilisateurs dédiés : zer0-gw (clés) / zer0 (agent)
-#   2. binaire zer0-gw installé + service durci
-#   3. règles nftables : zer0 → loopback uniquement ; zer0-gw → 443 sortant
-#
-# Après l'installation, éditez /etc/zer0-gw/gw.toml et /etc/zer0-gw/keys.env
-# puis retirez les clés de ~/.config/zer0/config.toml côté agent.
-#
-# Notes :
-#   - Le build est fait EN TANT QU'UTILISATEUR INVOQUANT (jamais root) :
-#     sous sudo, $HOME vaut /root et le rustup de root n'a souvent pas de
-#     toolchain par défaut — et un build root laisserait target/ à root.
-#     RUSTUP_HOME/CARGO_HOME personnalisés : exportez-les avant le script.
-#   - Rebuild automatique si les sources sont plus récentes que le binaire.
-#   - FORCE_BUILD=1 sudo scripts/gw-setup.sh  → reconstruit dans tous les cas.
-# ─────────────────────────────────────────────────────────────────────────────
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -36,7 +17,6 @@ echo "── 2/5  Binaire zer0-gw"
 echo "   → dépôt : $ROOT_DIR"
 echo "   → binaire source attendu : $BIN_SRC"
 
-# Construit en tant qu'utilisateur invoquant (avec SON rustup), jamais root.
 build_as_invoker() {
     [ -n "$INVOKER" ] && [ "$INVOKER" != "root" ] || return 1
     local user_home
@@ -53,10 +33,9 @@ build_as_invoker() {
         cargo build --release --features gateway --manifest-path "$ROOT_DIR/Cargo.toml"
 }
 
-# Repli : cargo système utilisable par root (rustup configuré pour root, ou binaire autonome).
 build_as_root() {
     command -v cargo &>/dev/null || return 1
-    cargo --version &>/dev/null || return 1   # un shim rustup sans défaut échoue ici
+    cargo --version &>/dev/null || return 1
     echo "   → build en tant que root (cargo système)"
     ( cd "$ROOT_DIR" && cargo build --release --features gateway )
 }
@@ -64,8 +43,7 @@ build_as_root() {
 needs_build() {
     [ "${FORCE_BUILD:-0}" = "1" ] && return 0
     [ -x "$BIN_SRC" ] || return 0
-    # Sources plus récentes que le binaire → reconstruire (évite d'installer
-    # une passerelle périmée, sans endpoints admin par exemple).
+
     find "$ROOT_DIR/src" "$ROOT_DIR/Cargo.toml" -newer "$BIN_SRC" -print -quit 2>/dev/null | grep -q .
 }
 
@@ -88,7 +66,7 @@ fi
 [ -x "$BIN_SRC" ] || { echo "✗ binaire introuvable : $BIN_SRC"; exit 1; }
 echo "   → source : $(stat -c%s "$BIN_SRC") o · $(date -r "$BIN_SRC" '+%d/%m %H:%M') · sha256 $(sha256sum "$BIN_SRC" | cut -c1-12)"
 install -m 0755 "$BIN_SRC" "$BIN_DIR/zer0-gw"
-# Vérification : le fichier installé doit être identique à la source.
+
 if ! cmp -s "$BIN_SRC" "$BIN_DIR/zer0-gw"; then
     echo "✗ l'installation ne correspond pas à $BIN_SRC — abandon"
     exit 1
@@ -97,8 +75,7 @@ echo "   → installé : $BIN_DIR/zer0-gw · $(stat -c%s "$BIN_DIR/zer0-gw") o �
 
 echo "── 3/5  Configuration /etc/zer0-gw"
 install -d -m 1770 -o root -g zer0-gw "$ETC_DIR"
-# Corrige des droits hérités : le groupe zer0-gw doit pouvoir ÉCRIRE les clés
-# déposées (/provider add) — sticky pour protéger gw.toml des suppressions.
+
 chown root:zer0-gw "$ETC_DIR"
 chmod 1770 "$ETC_DIR"
 if [ ! -f "$ETC_DIR/gw.toml" ]; then
@@ -107,22 +84,18 @@ if [ ! -f "$ETC_DIR/gw.toml" ]; then
 else
     echo "   → gw.toml déjà présent, non modifié"
 fi
-# keys.env : clés « style variable d'env » (OPENROUTER_API_KEY=…) injectées par
-# systemd — à éditer à la main si tu n'utilises pas /provider add.
+
 if [ ! -f "$ETC_DIR/keys.env" ]; then
     install -m 0600 -o zer0-gw -g zer0-gw /dev/null "$ETC_DIR/keys.env"
 fi
 chown zer0-gw:zer0-gw "$ETC_DIR/keys.env" && chmod 0600 "$ETC_DIR/keys.env"
-# keys.managed : clés déposées via /provider add — écrit par la passerelle,
-# jamais lisible par l'agent (utilisateur zer0).
+
 if [ ! -f "$ETC_DIR/keys.managed" ]; then
     install -m 0600 -o zer0-gw -g zer0-gw /dev/null "$ETC_DIR/keys.managed"
 fi
 chown zer0-gw:zer0-gw "$ETC_DIR/keys.managed" && chmod 0600 "$ETC_DIR/keys.managed"
 echo "   → $ETC_DIR/keys.managed : géré par zer0-gw (dépôt via /provider add dans le TUI)"
 
-# Ajoute à gw.toml les [providers.*] de l'exemple encore absents (ex. zai),
-# sans toucher à ceux déjà présents ni au reste du fichier.
 if command -v python3 >/dev/null && [ -f "$ROOT_DIR/deploy/gw.example.toml" ]; then
     python3 - "$ROOT_DIR/deploy/gw.example.toml" "$ETC_DIR/gw.toml" <<'PYEOF'
 import re, sys
@@ -148,16 +121,12 @@ install -m 0644 "$ROOT_DIR/deploy/zer0-gw.service"   /etc/systemd/system/
 install -m 0644 "$ROOT_DIR/deploy/zer0-agent.service" /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable zer0-gw
-# Redémarrer même si le service tourne déjà : sinon un ANCIEN binaire
-# (sans endpoints admin) reste en mémoire après une mise à jour.
+
 systemctl restart zer0-gw
 systemctl status zer0-gw --no-pager | head -5 || true
 
-# Auto-contrôle : le service doit exposer les endpoints admin. Sinon un ANCIEN
-# binaire tourne encore (le process garde l'ancien exécutable en mémoire).
 if command -v curl >/dev/null; then
-    # Le service vient d'être redémarré : attendre qu'il ouvre son port (≤ 6 s),
-    # sinon on lit un vide et on croit à tort que l'ancien binaire tourne.
+
     health=""
     i=0
     while [ "$i" -lt 15 ]; do

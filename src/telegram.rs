@@ -1,13 +1,3 @@
-//! Bot Telegram — converse avec Zer0 à distance.
-//!
-//! Choix de conception :
-//! - **Long polling** (`getUpdates`) : **aucun port à ouvrir**, ça marche
-//!   derrière NAT/pare-feu. Le bot appelle Telegram, l'inverse n'est pas vrai.
-//! - **Allowlist** par identifiant Telegram ; le **premier chat** qui écrit est
-//!   auto-lié (puis persisté dans la config).
-//! - **Vocal** → Whisper (réutilise `zerochan`). **Fichiers** → dossier `drop/`.
-//! - **Progression** : le message est édité au fil des appels d'outils.
-
 use anyhow::{anyhow, Result};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -99,14 +89,9 @@ struct Bot {
     chats: HashMap<i64, Vec<ChatMessage>>,
     notify: Option<tokio::sync::mpsc::UnboundedSender<UiEvent>>,
     shutdown: bool,
-    /// Autorise `code_exec` (shell) — désactivé par défaut.
     exec: bool,
-    /// L'allowlist vient-elle de l'utilisateur (config/CLI) ou d'un auto-claim ?
-    /// Un auto-claim seul n'ouvre pas le shell : sinon, quiconque trouve le bot
-    /// avant son propriétaire obtient un `bash` sur la machine.
     exec_trusted: bool,
 }
-/// Shell distant explicitement autorisé malgré un auto-claim.
 fn exec_optin() -> bool {
     matches!(
         std::env::var("ZER0_TELEGRAM_ALLOW_EXEC").as_deref(),
@@ -115,13 +100,6 @@ fn exec_optin() -> bool {
 }
 
 impl Bot {
-    /// Outils exposés au bot.
-    ///
-    /// `code_exec` **et** `text_editor` sont derrière `/exec` : un chat lié
-    /// automatiquement (auto-claim) ne doit pas pouvoir écrire ou supprimer un
-    /// fichier avant que l'utilisateur ait autorisé les actions système depuis
-    /// la machine locale. Avant, `text_editor` était toujours actif : un inconnu
-    /// qui trouvait le bot pouvait déjà écraser des fichiers sans `/exec`.
     fn tools_for(&self) -> Vec<ToolSpec> {
         self.tools
             .iter()
@@ -235,10 +213,9 @@ impl Bot {
         let chat_id = msg.chat.id;
         let from_id = msg.from.as_ref().map(|u| u.id).unwrap_or(chat_id);
 
-        // Allowlist + auto-claim du premier chat.
         if self.allow.is_empty() {
             self.allow = vec![from_id];
-            self.exec_trusted = false; // provenance inconnue → shell verrouillé
+            self.exec_trusted = false;
             let mut g = config::load_global();
             g.telegram_allow = self.allow.clone();
             let _ = config::save_global(&g);
@@ -256,7 +233,6 @@ impl Bot {
 
         let mut text = msg.text.clone().or_else(|| msg.caption.clone());
 
-        // Vocal → transcription (Whisper).
         if let Some(v) = msg.voice.as_ref().or(msg.audio.as_ref()) {
             let _ = self.typing(chat_id).await;
             match self.download(&v.file_id).await {
@@ -407,14 +383,12 @@ impl Bot {
     }
 
     async fn ask(&mut self, chat_id: i64, prompt: String) {
-        // Calculé AVANT d'emprunter `self.chats` (emprunt mutable plus bas).
         let tools = self.tools_for();
         let history = self.chats.entry(chat_id).or_default();
         history.push(ChatMessage::user(prompt.clone()));
         let role = route::auto_role(&prompt).to_string();
         let endpoints = route::chain_for_role(&self.settings, &role);
         let utility = route::chain_for_role(&self.settings, "utility");
-        // Liste explicite des outils dans le prompt (ce modèle ignore le paramètre `tools`).
         let mut system = self.system.clone();
         if !tools.is_empty() {
             system.push_str(
@@ -474,14 +448,12 @@ impl Bot {
             let history = self.chats.entry(chat_id).or_default();
             history.push(ChatMessage::assistant(acc.clone(), vec![]));
         }
-        // Message de progression → état final.
         let mut done = format!("{} terminé en {dur}s", if ok { "✅" } else { "⚠️" });
         if !prog.is_empty() {
             done.push('\n');
             done.push_str(prog.trim_end());
         }
         self.edit(chat_id, mid, &done).await;
-        // Réponse finale dans un NOUVEAU message → déclenche une notification.
         if ok {
             self.finish(chat_id, 0, &acc).await;
         }
@@ -543,7 +515,6 @@ fn chunk(text: &str, max: usize) -> Vec<String> {
     out
 }
 
-/// Rapport d'avancement (tâches du projet + état du chat).
 fn progress_report(
     settings: &Settings,
     chats: &HashMap<i64, Vec<ChatMessage>>,
@@ -593,7 +564,6 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
-/// Lit `ZER0_TELEGRAM_TOKEN` depuis `~/.config/zer0/telegram.env` (chmod 600).
 fn token_from_env_file() -> Option<String> {
     let s = std::fs::read_to_string(config::config_dir().join("telegram.env")).ok()?;
     s.lines()
@@ -613,7 +583,6 @@ fn resolve_token(explicit: Option<String>) -> Option<String> {
         .filter(|t| !t.is_empty())
 }
 
-/// Poignée pour arrêter un bot lancé depuis la TUI.
 pub struct Handle {
     stop: tokio::sync::watch::Sender<bool>,
     #[allow(dead_code)]
@@ -626,7 +595,6 @@ impl Handle {
     }
 }
 
-/// Lance le bot en tâche de fond. `notify` renvoie les infos à la TUI.
 pub fn spawn(
     token: Option<String>,
     allow: Vec<i64>,
@@ -654,7 +622,6 @@ pub fn spawn(
     })
 }
 
-/// Mode CLI : lance et bloque jusqu'à Ctrl+C.
 pub async fn run(token: Option<String>, allow: Vec<i64>) -> Result<()> {
     let h = spawn(token, allow, None)?;
     let _ = h.join.await;
@@ -692,8 +659,6 @@ async fn run_loop(
         notify,
         shutdown: false,
         exec: false,
-        // Une allowlist fournie par l'utilisateur (--allow ou config) est de
-        // confiance ; une liste vide = auto-claim au premier contact.
         exec_trusted: !allow_is_empty,
     };
 

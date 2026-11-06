@@ -4,9 +4,7 @@ use std::time::Duration;
 
 use super::ToolSpec;
 
-/// Plafond du texte OCR renvoyé au modèle.
 const MAX_CHARS: usize = 12_000;
-/// Un OCR de capture d'écran dépasse rarement quelques secondes.
 const TIMEOUT_SECS: u64 = 90;
 
 pub fn spec() -> ToolSpec {
@@ -26,7 +24,6 @@ pub fn spec() -> ToolSpec {
     }
 }
 
-/// Langues installées (best effort : `/usr/share/tessdata` ou `TESSDATA_PREFIX`).
 pub fn available_langs() -> Vec<String> {
     let dir = std::env::var("TESSDATA_PREFIX")
         .map(std::path::PathBuf::from)
@@ -42,7 +39,6 @@ pub fn available_langs() -> Vec<String> {
         }
     }
     if out.is_empty() {
-        // macOS/Windows : les traineddata ne sont pas dans /usr/share.
         if let Ok(o) = std::process::Command::new("tesseract")
             .arg("--list-langs")
             .output()
@@ -62,8 +58,6 @@ pub fn available_langs() -> Vec<String> {
     out
 }
 
-/// Garde les langues demandées réellement installées ; repli sur `eng` (ou la
-/// première dispo) si aucune ne l'est. Retourne (utilisées, absentes).
 pub fn resolve_langs(requested: &str, available: &[String]) -> (String, Vec<String>) {
     if available.is_empty() {
         return (requested.to_string(), Vec::new());
@@ -92,7 +86,6 @@ pub fn resolve_langs(requested: &str, available: &[String]) -> (String, Vec<Stri
     (used.join("+"), missing)
 }
 
-/// Extensions acceptées (tesseract lit via Leptonica).
 pub fn is_image_path(path: &str) -> bool {
     let ext = std::path::Path::new(path)
         .extension()
@@ -128,7 +121,6 @@ pub async fn run(args: &str) -> String {
         .filter(|s| !s.is_empty())
         .unwrap_or("fra+eng");
 
-    // Métadonnées (best effort) : dimensions + format, utile pour un screenshot.
     let mut meta = String::new();
     if let Ok(out) = tokio::process::Command::new("identify")
         .args(["-format", "%wx%h %m", path])
@@ -221,7 +213,6 @@ mod tests {
             resolve_langs("eng", &avail),
             ("eng".to_string(), Vec::new())
         );
-        // aucune info sur les langues : on ne prétend rien
         assert_eq!(
             resolve_langs("fra+eng", &[]),
             ("fra+eng".to_string(), Vec::new())

@@ -1,12 +1,6 @@
-//! Petites abstractions multiplateformes (Linux / macOS / Windows).
-//!
-//! Linux reste la cible principale ; macOS et Windows passent par des replis
-//! (shell, presse-papier, ouverture de fichiers, enregistreur micro).
-
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-/// `true` si `cmd` est trouvé dans le PATH (gère `.exe`/`.cmd` sur Windows).
 pub fn has(cmd: &str) -> bool {
     let candidates: Vec<String> = if cfg!(windows) {
         vec![
@@ -23,7 +17,6 @@ pub fn has(cmd: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Dossier personnel (`HOME` sur Unix, `USERPROFILE` sur Windows).
 pub fn home() -> String {
     std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
@@ -36,14 +29,7 @@ pub fn home() -> String {
         })
 }
 
-/// Interpréteur pour `code_exec` : `bash -lc` (Unix) ou `cmd /C` (Windows).
-///
-/// L'environnement transmis au shell est **nettoyé des secrets** (`scrub_secrets`) :
-/// un modèle qui demande une commande arbitraire ne doit jamais pouvoir faire
-/// `echo $OPENROUTER_API_KEY` ni `env` pour récupérer une clé.
 pub fn shell_command(script: &str) -> Command {
-    // `cfg!` évalue les deux branches : `windows_shell` n'existe que sous
-    // Windows, donc on sélectionne à la compilation.
     #[cfg(windows)]
     let mut c = windows_shell(script);
     #[cfg(not(windows))]
@@ -56,7 +42,6 @@ pub fn shell_command(script: &str) -> Command {
     c
 }
 
-/// Shell utilisé par `code_exec` (libellé affiché au modèle).
 pub fn shell_label() -> String {
     #[cfg(windows)]
     {
@@ -84,7 +69,6 @@ pub fn shell_label() -> String {
     }
 }
 
-/// Shell retenu sous Windows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WinShell {
     Bash,
@@ -92,9 +76,6 @@ pub enum WinShell {
     Cmd,
 }
 
-/// Choix **pur** (testable) : `ZER0_SHELL` explicite, sinon le shell d'où
-/// Zer0 a été lancé (Git Bash via `MSYSTEM`, PowerShell via `PSModulePath`),
-/// sinon bash (Git Bash), sinon PowerShell, sinon cmd.
 #[allow(clippy::too_many_arguments)]
 pub fn choose_windows_shell(
     override_: Option<&str>,
@@ -116,9 +97,6 @@ pub fn choose_windows_shell(
     pick_windows_shell(None, has_bash, has_pwsh, has_powershell)
 }
 
-/// Choix **pur** (testable) : `ZER0_SHELL` explicite, sinon bash (Git Bash),
-/// sinon PowerShell, sinon cmd. Objectif : offrir les outils POSIX (`wc`,
-/// `grep`…) aux utilisateurs Windows qui ont Git Bash, au lieu de cmd.
 pub fn pick_windows_shell(
     override_: Option<&str>,
     has_bash: bool,
@@ -173,7 +151,6 @@ fn windows_shell(script: &str) -> Command {
     }
 }
 
-/// Cherche un exécutable dans `PATH` (avec extensions Windows).
 pub fn find_in_path(exe: &str) -> Option<std::path::PathBuf> {
     let path = std::env::var_os("PATH")?;
     for dir in std::env::split_paths(&path) {
@@ -192,13 +169,6 @@ pub fn find_in_path(exe: &str) -> Option<std::path::PathBuf> {
     None
 }
 
-/// Retire de l'environnement d'un processus enfant toute variable qui **ressemble
-/// à un secret** (`*API_KEY*`, `*TOKEN*`, `*SECRET*`, `*PASSPHRASE*`, `*PASSWORD*`,
-/// `*CREDENTIAL*`, `*PRIVATE_KEY*`, `ZER0_VAULT*`).
-///
-/// Précaution supplémentaire (pas une garantie) : un `bash -lc` relit les profils
-/// shell, qui peuvent ré-exporter des variables — ne mettez pas de clés dans
-/// `~/.bashrc`. Le découpage fort reste `zer0-gw` (voir SAFETY.md §7).
 pub fn scrub_secrets(cmd: &mut Command) {
     for name in
         secret_names(std::env::vars_os().filter_map(|(k, _)| k.to_str().map(str::to_string)))
@@ -207,15 +177,10 @@ pub fn scrub_secrets(cmd: &mut Command) {
     }
 }
 
-/// Noms de variables « à secret » dans une liste donnée (fonction **pure** :
-/// les tests peuvent la tester sans muter l'environnement, ce qui serait une
-/// course — les tests Rust tournent en parallèle).
 pub fn secret_names<I: IntoIterator<Item = String>>(names: I) -> Vec<String> {
     names.into_iter().filter(|n| is_secret_like(n)).collect()
 }
 
-/// `true` si le nom de variable ressemble à un secret (comparaison insensible
-/// à la casse, volontairement large — faux positifs inoffensifs).
 pub fn is_secret_like(name: &str) -> bool {
     let n = name.to_ascii_lowercase();
     n.contains("api_key")
@@ -231,8 +196,6 @@ pub fn is_secret_like(name: &str) -> bool {
         || n.starts_with("zer0_vault")
 }
 
-/// Lit une image et renvoie `(data URL base64, taille en octets)`.
-/// MIME déduit de l'extension (png par défaut). Utilisé par `/img` (TUI) et `--img` (CLI).
 pub fn image_data_url(path: &str) -> Result<(String, usize), String> {
     use base64::Engine as _;
     let bytes = std::fs::read(path).map_err(|e| format!("lecture de {path} : {e}"))?;
@@ -251,18 +214,6 @@ pub fn image_data_url(path: &str) -> Result<(String, usize), String> {
     Ok((format!("data:{mime};base64,{b64}"), bytes.len()))
 }
 
-/// Ouvre une **URL** dans le navigateur par défaut.
-///
-/// **Windows** : on passe par `rundll32 url.dll,FileProtocolHandler` plutôt
-/// que par `cmd /C start`. Raison : `cmd` **hérite de la console** du TUI —
-/// or c'est le mode de la console qui porte la **capture souris** de crossterm.
-/// Un `cmd` enfant reprenait ce mode à sa sortie : après un simple clic sur le
-/// 👍, le terminal ne recevait **plus aucun événement souris** (menu compris).
-/// Mesuré : `mouse=true` avant → `mouse=false` après `cmd /C start`.
-/// `rundll32` n'ouvre aucune console annexe : le terminal garde la main.
-///
-/// Dans tous les cas, les flux stdio sont détachés (`Stdio::null()`) : un
-/// enfant qui écrit dans le stdout du TUI casserait l'affichage.
 pub fn open_url(url: &str) -> std::io::Result<std::process::Child> {
     if cfg!(target_os = "macos") {
         Command::new("open")
@@ -287,7 +238,6 @@ pub fn open_url(url: &str) -> std::io::Result<std::process::Child> {
             .stderr(Stdio::null())
             .spawn()
     } else {
-        // `gio open` : repli GNOME (xdg-open absent).
         Command::new("gio")
             .args(["open", url])
             .stdin(Stdio::null())
@@ -297,21 +247,10 @@ pub fn open_url(url: &str) -> std::io::Result<std::process::Child> {
     }
 }
 
-/// Ouvre un **fichier local** dans l'application par défaut.
-///
-/// Même principe que [`open_url`], mais le lanceur doit gérer un chemin de
-/// fichier : sous Windows, `cmd /C start "" <chemin>` est le lanceur fiable.
-///
-/// **Windows** : on ajoute `CREATE_NO_WINDOW` — sans ce drapeau, `cmd`
-/// **hérite de la console** du TUI et lui reprend le mode « capture souris »
-/// (même symptôme que pour les URLs : plus aucun clic n'atteint le TUI).
-/// `CREATE_NO_WINDOW` empêche explicitement cet héritage.
 pub fn open_file(path: &str) -> std::io::Result<std::process::Child> {
     if cfg!(target_os = "macos") {
         Command::new("open").arg(path).spawn()
     } else if cfg!(windows) {
-        // `CommandExt` n'existe que sous Windows : l'import doit être dans le
-        // bloc `cfg(windows)`, sinon la compilation Linux/macOS échoue.
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -343,53 +282,27 @@ pub fn open_file(path: &str) -> std::io::Result<std::process::Child> {
     }
 }
 
-/// Réactive la capture souris du terminal.
-///
-/// Utile après avoir lancé un programme externe : celui-ci a pu hériter du
-/// terminal (console Windows) ou du TTY (Unix) et lui reprendre la main —
-/// auquel cas le TUI ne recevrait plus **aucun** clic.
-///
-/// - **Windows** : la capture souris est portée par le *mode de la console*
-///   (ENABLE_MOUSE_INPUT). Un process enfant qui hérite de la console peut
-///   rendre ce mode au terminal : on le réactive donc explicitement.
-/// - **Linux / macOS** : la capture souris est portée par les séquences ANSI
-///   émises au démarrage (`?1000h`, `?1006h`…). Elles restent actives, mais un
-///   enfant qui a hérité du TTY a pu désorganiser le terminal ; on les
-///   réémet pour être sûr.
 pub fn restore_mouse_capture() {
     #[cfg(windows)]
     {
         use crossterm::event::EnableMouseCapture;
         use crossterm::terminal::enable_raw_mode;
-        // Mode brut d'abord, puis capture souris : un programme tiers ayant
-        // hérité de la console a pu modifier l'un ou l'autre.
         let _ = enable_raw_mode();
         let _ = crossterm::execute!(std::io::stdout(), EnableMouseCapture);
     }
     #[cfg(not(windows))]
     {
         use crossterm::event::EnableMouseCapture;
-        // Sur Unix, EnableMouseCapture écrit les séquences ANSI de suivi
-        // souris. On les renvoie : inoffensif si elles sont déjà actives.
         let _ = crossterm::execute!(std::io::stdout(), EnableMouseCapture);
     }
 }
 
-/// Interpréteur Python. Priorité : `$ZER0_PYTHON`, puis le venv STT
-/// `~/.venvs/zer0-whisper`, puis `python3`, puis `python`.
-///
-/// `$ZER0_PYTHON` permet de pointer un autre **venv** (utile quand
-/// `faster-whisper` n'est pas installé dans le Python système, ex. Ubuntu/WSL) :
-/// `ZER0_PYTHON=~/.venvs/whisper/bin/python`.
 pub fn python() -> String {
     if let Ok(p) = std::env::var("ZER0_PYTHON") {
         if !p.trim().is_empty() {
             return p;
         }
     }
-    // Convention Zero-chan : un venv STT dédié dans le dossier utilisateur.
-    // La détection automatique évite de dépendre d'un terminal déjà ouvert
-    // avant la définition de `$ZER0_PYTHON`.
     let venv = if cfg!(windows) {
         PathBuf::from(home())
             .join(".venvs")
@@ -415,7 +328,6 @@ pub fn python() -> String {
     }
 }
 
-/// Horodatage local `YYYY-MM-DD HH:MM:SS` (via `date` ou PowerShell).
 pub fn now() -> String {
     let out = if cfg!(windows) {
         Command::new("powershell")
@@ -434,7 +346,6 @@ pub fn now() -> String {
         .unwrap_or_default()
 }
 
-/// Carte graphique détectée : faits bruts du bus PCI, sans supposer l'usage.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Gpu {
     pub vendor: String,
@@ -442,7 +353,6 @@ pub struct Gpu {
     pub driver: Option<String>,
 }
 
-/// Cartes DRM présentes (Linux). Ailleurs : liste vide (pas d'API portable).
 pub fn gpus() -> Vec<Gpu> {
     #[cfg(target_os = "linux")]
     {
@@ -453,7 +363,6 @@ pub fn gpus() -> Vec<Gpu> {
         for entry in dir.flatten() {
             let name = entry.file_name();
             let name = name.to_string_lossy();
-            // `card0`, `card1`… mais pas les connecteurs `card0-DP-1`.
             if !name.starts_with("card") || name.contains('-') {
                 continue;
             }
@@ -475,7 +384,6 @@ pub fn gpus() -> Vec<Gpu> {
     }
 }
 
-/// Extrait vendeur / id PCI / pilote d'un `uevent` de carte DRM.
 pub fn parse_uevent(text: &str) -> Option<Gpu> {
     let mut driver = None;
     let mut pci = None;
@@ -518,27 +426,22 @@ mod tests {
 
     #[test]
     fn inherited_shell_wins_over_the_heuristic() {
-        // Lancé depuis PowerShell (PSModulePath) → PowerShell, même avec bash.
         assert_eq!(
             choose_windows_shell(None, false, true, true, true, true),
             WinShell::PowerShell
         );
-        // Lancé depuis Git Bash (MSYSTEM) → bash.
         assert_eq!(
             choose_windows_shell(None, true, false, true, true, true),
             WinShell::Bash
         );
-        // Rien d'hérité → ancien ordre (bash d'abord).
         assert_eq!(
             choose_windows_shell(None, false, false, true, true, true),
             WinShell::Bash
         );
-        // ZER0_SHELL gagne toujours.
         assert_eq!(
             choose_windows_shell(Some("cmd"), true, true, true, true, true),
             WinShell::Cmd
         );
-        // PSModulePath sans PowerShell installé → repli.
         assert_eq!(
             choose_windows_shell(None, false, true, false, false, false),
             WinShell::Cmd
@@ -588,8 +491,6 @@ mod tests {
 
     #[test]
     fn scrub_removes_secrets_keeps_rest() {
-        // Test sur la fonction **pure** : pas de mutation d'environnement
-        // (les tests tournent en parallèle → la CI devenait instable).
         let names = secret_names([
             "TEST_SECRET_TOKEN".to_string(),
             "TEST_PLAIN_VAR".to_string(),

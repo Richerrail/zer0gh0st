@@ -1,40 +1,20 @@
-//! Journal d'audit des actions de l'agent.
-//!
-//! ZER0|GH0ST n'a **pas** de bac à sable : il agit avec les droits de
-//! l'utilisateur. Le corollaire non négociable, c'est que ses actions doivent
-//! être **relisibles après coup**. Avant ce module, une commande exécutée ou un
-//! fichier écrasé ne laissait aucune trace : impossible de reconstituer ce que
-//! l'agent avait fait, ni quand.
-//!
-//! Format : un objet JSON par ligne (JSONL), ajout seul, jamais réécrit.
-//! Emplacement : `<data>/audit.jsonl` (rotation à 8 Mio → `audit.1.jsonl`).
-
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-/// Taille au-delà de laquelle le journal est tourné.
 const MAX_BYTES: u64 = 8 * 1024 * 1024;
-/// Rétention par défaut : au-delà, les lignes sont oubliées.
 const DEFAULT_RETENTION_DAYS: u64 = 90;
-/// Longueur maximale du résumé de résultat conservé (les arguments, eux, sont
-/// conservés en entier : c'est ce qui permet de vérifier une action).
 const MAX_RESULT_CHARS: usize = 600;
 
 fn audit_dir() -> PathBuf {
     crate::config::data_dir()
 }
 
-/// Chemin du journal actif.
 pub fn path() -> PathBuf {
     audit_dir().join("audit.jsonl")
 }
 
-/// Enregistre une action d'outil. Ne panique jamais, ne bloque jamais un tour :
-/// une erreur d'écriture est signalée sur stderr et on continue.
 pub fn record(tool: &str, args: &str, result: &str) {
-    // Purge d'ancienneté une fois par processus : le journal ne grossit pas
-    // indéfiniment, même si l'utilisateur ne le consulte jamais.
     static PURGED: std::sync::Once = std::sync::Once::new();
     PURGED.call_once(|| {
         let days = retention_days_from(std::env::var("ZER0_AUDIT_RETENTION_DAYS").ok().as_deref());
@@ -46,7 +26,6 @@ pub fn record(tool: &str, args: &str, result: &str) {
     }
 }
 
-/// Construit la ligne JSONL (fonction pure, testable).
 pub fn format_line(tool: &str, args: &str, result: &str) -> String {
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -68,7 +47,6 @@ pub fn format_line(tool: &str, args: &str, result: &str) -> String {
     .to_string()
 }
 
-/// Ajoute une ligne au journal de `dir`, avec rotation.
 pub fn append_to(dir: &Path, line: &str) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     let file = dir.join("audit.jsonl");
@@ -79,12 +57,9 @@ pub fn append_to(dir: &Path, line: &str) -> std::io::Result<()> {
     }
     let mut f = OpenOptions::new().create(true).append(true).open(&file)?;
     writeln!(f, "{line}")?;
-    // Pas de buffer : une ligne = un `write`, lisible même si le process meurt.
     f.flush()
 }
 
-/// Jours de rétention, à partir de `ZER0_AUDIT_RETENTION_DAYS` (fonction pure :
-/// testable sans muter l'environnement). `0` désactive la purge.
 pub fn retention_days_from(env: Option<&str>) -> u64 {
     match env.and_then(|v| v.trim().parse::<u64>().ok()) {
         Some(v) => v,
@@ -92,11 +67,6 @@ pub fn retention_days_from(env: Option<&str>) -> u64 {
     }
 }
 
-/// Réécrit les journaux (`audit.jsonl`, `audit.1.jsonl`) en retirant les lignes
-/// plus anciennes que `days`. Retourne le nombre de lignes supprimées.
-///
-/// Une ligne dont l'horodatage est illisible est **conservée** : on ne supprime
-/// jamais une trace qu'on ne comprend pas.
 pub fn purge_older_than(dir: &Path, days: u64) -> std::io::Result<usize> {
     if days == 0 {
         return Ok(0);
@@ -136,7 +106,6 @@ pub fn purge_older_than(dir: &Path, days: u64) -> std::io::Result<usize> {
     Ok(removed)
 }
 
-/// Les `n` dernières actions (les plus récentes en dernier).
 pub fn tail(n: usize) -> Vec<String> {
     let Ok(raw) = std::fs::read_to_string(path()) else {
         return Vec::new();
@@ -161,7 +130,6 @@ mod tests {
         let line = format_line("code_exec", r#"{"command":"rm -rf /tmp/x"}"#, "sortie");
         let v: serde_json::Value = serde_json::from_str(&line).unwrap();
         assert_eq!(v["tool"], "code_exec");
-        // Les arguments sont conservés en entier : c'est la trace vérifiable.
         assert!(v["args"].as_str().unwrap().contains("rm -rf"));
         assert_eq!(v["result"], "sortie");
     }
@@ -225,7 +193,6 @@ mod tests {
     fn rotation_keeps_a_previous_file() {
         let dir = tmpdir("rotate");
         std::fs::create_dir_all(&dir).unwrap();
-        // Un fichier déjà au-delà du seuil déclenche la rotation.
         std::fs::write(
             dir.join("audit.jsonl"),
             vec![b'x'; (MAX_BYTES as usize) + 10],

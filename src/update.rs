@@ -1,26 +1,11 @@
-//! Mise à jour automatique depuis les Releases GitHub de zer0gh0st.
-//!
-//! Principes :
-//! - on télécharge le **binaire brut** de la plateforme (pas d'archive à extraire,
-//!   donc aucune dépendance tar/gzip) ;
-//! - on **vérifie le SHA256** quand la release publie un `SHA256SUMS` (sinon on
-//!   le dit franchement : l'intégrité n'est pas vérifiée) ;
-//! - remplacement **atomique** du binaire courant (`rename`) ;
-//! - limites assumées : l'API GitHub non authentifiée est plafonnée (60 req/h),
-//!   et un SHA256 pris dans le même dépôt protège d'une **corruption**, pas d'un
-//!   dépôt compromis (aucune signature).
-
 use anyhow::{anyhow, Context, Result};
 
-/// Dépôt d'origine des releases.
 pub const REPO: &str = "Richerrail/zer0gh0st";
 
-/// Version compilée dans ce binaire.
 pub fn current_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
-/// Cible de compilation, telle qu'utilisée dans les noms d'assets de la CI.
 pub fn target_triple() -> &'static str {
     if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
         "x86_64-unknown-linux-gnu"
@@ -37,7 +22,6 @@ pub fn target_triple() -> &'static str {
     }
 }
 
-/// Nom de l'asset à télécharger pour cette plateforme.
 pub fn asset_name() -> String {
     let t = target_triple();
     if cfg!(windows) {
@@ -47,8 +31,6 @@ pub fn asset_name() -> String {
     }
 }
 
-/// `true` si `latest` est plus récent que `current` (comparaison numérique par
-/// composants ; `v` initial et suffixes ignorés).
 pub fn is_newer(latest: &str, current: &str) -> bool {
     fn nums(s: &str) -> Vec<u64> {
         s.trim()
@@ -69,8 +51,6 @@ pub fn is_newer(latest: &str, current: &str) -> bool {
     false
 }
 
-/// Extrait le SHA256 attendu pour `asset` depuis un fichier `SHA256SUMS`.
-/// Formes acceptées : `<hash>  <nom>` et `<hash> *<nom>` (mode binaire).
 pub fn sha256_for(sums: &str, asset: &str) -> Option<String> {
     sums.lines().find_map(|l| {
         let mut it = l.split_whitespace();
@@ -80,14 +60,10 @@ pub fn sha256_for(sums: &str, asset: &str) -> Option<String> {
     })
 }
 
-/// `true` si le binaire vient d'un build Cargo (`.../target/<profil>/…`).
-/// Dans ce cas `zer0 update` ne doit **pas** remplacer le binaire : pour un dev,
-/// c'est `cargo build` qui fait foi (et un prochain build écraserait la mise à jour).
 pub fn is_dev_build(path: &str) -> bool {
     path.replace('\\', "/").contains("/target/")
 }
 
-/// SHA256 hexadécimal d'un bloc d'octets.
 pub fn sha256_hex(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
@@ -95,7 +71,6 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     format!("{:x}", h.finalize())
 }
 
-/// Release GitHub (champs utiles).
 pub struct Release {
     pub tag: String,
     pub url: String,
@@ -119,7 +94,6 @@ async fn get_bytes(url: &str) -> Result<Vec<u8>> {
     Ok(r.bytes().await?.to_vec())
 }
 
-/// Dernière release publiée.
 pub async fn fetch_latest() -> Result<Release> {
     let v: serde_json::Value = serde_json::from_slice(
         &get_bytes(&format!(
@@ -152,13 +126,6 @@ pub async fn fetch_latest() -> Result<Release> {
     })
 }
 
-/// Remplace le binaire en cours d'exécution.
-/// Unix : `rename` atomique (l'ancien inode reste valide pour le process courant).
-/// Windows : impossible d'écraser un `.exe` en cours → on renomme l'ancien puis
-/// on installe le nouveau ; l'ancien reste verrouillé jusqu'à la fin du
-/// processus (Windows refuse sa suppression) → on le signale, il est nettoyé au
-/// lancement suivant.
-/// Retourne une note à afficher (None si rien à signaler).
 pub fn replace_current_exe(bytes: &[u8]) -> Result<Option<String>> {
     let exe = std::env::current_exe().context("chemin de l'exécutable")?;
     let dir = exe
@@ -181,13 +148,9 @@ pub fn replace_current_exe(bytes: &[u8]) -> Result<Option<String>> {
     #[cfg(windows)]
     {
         let old = dir.join(format!("{stem}.old"));
-        // Reliquat d'une mise à jour précédente : le processus qui le tenait
-        // est quitté, il est donc supprimable.
         let _ = std::fs::remove_file(&old);
         std::fs::rename(&exe, &old).context("renommage de l'ancien binaire")?;
         std::fs::rename(&new, &exe).context("installation du nouveau binaire")?;
-        // L'ancien binaire reste chargé par le processus courant → Windows
-        // refuse de le supprimer : on le dit plutôt que de l'ignorer.
         match std::fs::remove_file(&old) {
             Ok(()) => Ok(None),
             Err(e) => Ok(Some(format!(
@@ -205,8 +168,6 @@ pub fn replace_current_exe(bytes: &[u8]) -> Result<Option<String>> {
     }
 }
 
-/// Nettoie le reliquat d'une mise à jour Windows (`zer0.old`) : le processus
-/// qui le tenait est quitté, il est donc supprimable. Sans effet ailleurs.
 pub fn cleanup_leftover() {
     #[cfg(windows)]
     {
@@ -223,7 +184,6 @@ pub fn cleanup_leftover() {
     }
 }
 
-/// Flux complet. Retourne un rapport lisible (aussi utilisé par la TUI).
 pub async fn run(check_only: bool, force: bool) -> Result<String> {
     cleanup_leftover();
     let rel = fetch_latest().await?;
@@ -319,7 +279,7 @@ mod tests {
     #[test]
     fn version_comparison_is_numeric() {
         assert!(is_newer("v0.6.0", "0.5.4"));
-        assert!(is_newer("0.10.0", "0.9.9")); // 10 > 9, pas de comparaison texte
+        assert!(is_newer("0.10.0", "0.9.9"));
         assert!(!is_newer("v0.5.4", "0.5.4"));
         assert!(!is_newer("0.5.3", "0.5.4"));
         assert!(is_newer("1.0", "0.99.99"));
@@ -335,7 +295,6 @@ ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789 *zer0-aarch64-a
             sha256_for(sums, "zer0-x86_64-unknown-linux-gnu").as_deref(),
             Some("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
         );
-        // mode binaire `*nom` + normalisation en minuscules
         assert_eq!(
             sha256_for(sums, "zer0-aarch64-apple-darwin").as_deref(),
             Some("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789")

@@ -6,29 +6,25 @@ use crate::route::Endpoint;
 use crate::tools::ToolSpec;
 use tokio::sync::mpsc::UnboundedSender;
 
-/// Events that a sub-agent can forward to the parent (for visibility).
 #[derive(Debug, Clone)]
 pub enum SubAgentEvent {
-    /// The sub-agent switched to a different endpoint (failover).
     Fallback {
         from: String,
         to: String,
         reason: String,
     },
-    /// A tool was called.
-    ToolCall { name: String, args: String },
-    /// A tool returned a result (name = last called tool).
-    ToolResult { name: String, result: String },
-    /// An error occurred (non-fatal).
+    ToolCall {
+        name: String,
+        args: String,
+    },
+    ToolResult {
+        name: String,
+        result: String,
+    },
     Error(String),
-    /// Progress info.
     Info(String),
 }
 
-/// Run an isolated one-shot sub-agent and return its final text.
-///
-/// The sub-agent gets a fresh conversation (no shared history) and its own
-/// event channel. Optionally forwards fallback/progress events via `event_tx`.
 pub async fn run_subagent(
     endpoints: Vec<Endpoint>,
     system: String,
@@ -40,8 +36,6 @@ pub async fn run_subagent(
     run_subagent_budgeted(endpoints, system, task, tools, options, event_tx, 8, 24).await
 }
 
-/// Comme `run_subagent`, avec budget d'endiguement explicite (itérations / appels
-/// d'outils) — utilisé par le débat 0box dont MAIN exécute un plan multi-étapes.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_subagent_budgeted(
     endpoints: Vec<Endpoint>,
@@ -79,9 +73,6 @@ pub async fn run_subagent_budgeted(
     while let Some(ev) = rx.recv().await {
         match ev {
             UiEvent::TurnComplete(full) => {
-                // Dernier message assistant AYANT du texte : un tour peut se terminer sur
-                // des appels d'outils (budget d'itérations atteint) sans texte final —
-                // prendre un message plus ancien plutôt que "(aucune réponse)".
                 result = full
                     .iter()
                     .rev()
@@ -101,7 +92,6 @@ pub async fn run_subagent_budgeted(
                 break;
             }
             UiEvent::Active(label) => {
-                // Endpoint changed (failover) — forward to parent for visibility.
                 if let Some(prev) = last_endpoint.replace(label.clone()) {
                     if prev != label {
                         if let Some(tx) = &event_tx {
@@ -123,8 +113,6 @@ pub async fn run_subagent_budgeted(
                 }
             }
             UiEvent::ToolResult(r) => {
-                // Sans ça, le débat 0box affichait l'appel mais jamais sa
-                // confirmation — d'où l'impression de « coupé » (0BOX-TEST).
                 if let Some(tx) = &event_tx {
                     let _ = tx.send(SubAgentEvent::ToolResult {
                         name: last_tool.clone(),
@@ -146,11 +134,6 @@ pub async fn run_subagent_budgeted(
     result
 }
 
-/// Évalue la qualité d'un code via le rôle `review`.
-///
-/// Ne **tronque pas** : envoie tout le fichier. Au-delà de `MAX_WHOLE` caractères,
-/// il découpe en parties (`CHUNK`) puis agrège les scores (moyenne).
-/// Le découpage se fait **par caractères** (jamais par octets → pas de panic UTF-8).
 pub async fn run_jev(
     endpoints: Vec<Endpoint>,
     system: String,

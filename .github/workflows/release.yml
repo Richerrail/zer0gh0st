@@ -17,7 +17,7 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-          # macOS : les deux archis compilées depuis le runner ARM (SDK universel).
+
           - os: macos-latest
             target: aarch64-apple-darwin
           - os: macos-latest
@@ -43,8 +43,7 @@ jobs:
         run: |
           cd target/${{ matrix.target }}/release
           tar czf ../../../zer0-${{ matrix.target }}.tar.gz zer0 zer0-gw
-          # Binaires bruts : `zer0 update` ne télécharge que `zer0` ; la
-          # passerelle est fournie à côté (installation manuelle).
+
           cp zer0 ../../../zer0-${{ matrix.target }}
           cp zer0-gw ../../../zer0-gw-${{ matrix.target }}
           cd ../../..
@@ -70,8 +69,7 @@ jobs:
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
-          # `zer0-<cible>*` (sans point obligatoire) : couvre AUSSI le binaire brut
-          # sans extension (Linux/macOS), dont `zer0 update` a besoin.
+
           files: |
             zer0-${{ matrix.target }}*
             zer0-gw-${{ matrix.target }}*

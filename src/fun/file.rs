@@ -1,10 +1,3 @@
-//! Mod « 0file » : explorateur de dossiers rétro (lecture + navigation +
-//! copie du chemin). Aucune écriture, aucune exécution.
-//!
-//! Style : phosphore vert / ambre, bordure double, comme un terminal des
-//! années 80. Les dossiers sont `▸`, les fichiers `·`, la sélection est un
-//! bloc inversé.
-
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -19,7 +12,6 @@ const AMBER: Color = Color::Rgb(255, 176, 0);
 const DIM: Color = Color::Rgb(86, 140, 110);
 const DARK: Color = Color::Rgb(6, 18, 10);
 
-/// Une ligne de la liste (`..` inclus).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Entry {
     pub name: String,
@@ -40,7 +32,6 @@ pub struct FileExplorer {
 }
 
 impl FileExplorer {
-    /// Ouvre un dossier, ou le dossier parent d'un fichier (et le sélectionne).
     pub fn open(arg: &str) -> Self {
         let arg = expand_tilde(arg.trim());
         let path = if arg.is_empty() {
@@ -141,7 +132,6 @@ impl FileExplorer {
         self.clamp_scroll();
     }
 
-    /// Avance/recule d'une page (hauteur visible).
     pub fn page(&mut self, forward: bool) {
         let step = self.rows.max(1);
         if forward {
@@ -162,7 +152,6 @@ impl FileExplorer {
         self.clamp_scroll();
     }
 
-    /// Entrée : descendre dans un dossier, copier le chemin d'un fichier.
     pub fn enter(&mut self) {
         let Some(e) = self.selected().cloned() else {
             return;
@@ -205,7 +194,6 @@ impl FileExplorer {
         self.flash("liste relue", true);
     }
 
-    /// Copie le chemin absolu de l'élément sélectionné.
     pub fn copy_path(&mut self) {
         let Some(e) = self.selected().cloned() else {
             return;
@@ -253,7 +241,6 @@ impl FileExplorer {
         self.rows = rows[1].height as usize;
         self.clamp_scroll();
 
-        // Chemin courant, raccourci avec `~`.
         let shown = shorten_home(&self.cwd);
         f.render_widget(
             Paragraph::new(Line::from(vec![
@@ -263,7 +250,6 @@ impl FileExplorer {
             rows[0],
         );
 
-        // Liste : fenêtre glissante sur `self.scroll`.
         let mut lines: Vec<Line> = Vec::new();
         for (i, e) in self
             .entries
@@ -324,7 +310,6 @@ impl FileExplorer {
             rows[1],
         );
 
-        // Pied : statut éphémère, sinon rappel des touches.
         let status = self
             .status
             .as_ref()
@@ -346,7 +331,6 @@ impl FileExplorer {
     }
 }
 
-/// `~` pour le dossier personnel, sinon chemin tel quel.
 pub fn shorten_home(p: &Path) -> String {
     let home = crate::platform::home();
     let s = p.to_string_lossy();
@@ -368,7 +352,6 @@ fn expand_tilde(arg: &str) -> String {
     arg.to_string()
 }
 
-/// Tronque à `width` colonnes, avec `…`.
 fn truncate_width(s: &str, width: usize) -> String {
     use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
     if width == 0 {

@@ -1,9 +1,3 @@
-//! Tests d'intégration du noyau.
-//!
-//! Ils n'existaient pas avant l'extraction de `src/lib.rs` : le projet était un
-//! binaire monolithique, donc rien n'était importable depuis `tests/`. C'est le
-//! point de départ du filet de sécurité (boucle d'agent, persistance, outils).
-
 use zer0::agent::history::ChatMessage;
 use zer0::convo::repair;
 use zer0::util::{floor_char_boundary, truncate_utf8};
@@ -24,8 +18,6 @@ fn call(id: &str) -> ChatMessage {
 
 #[test]
 fn a_truncated_session_can_be_replayed() {
-    // JSONL coupé au milieu d'un échange d'outils : c'est ce que produisait
-    // `--resume` avec `load(200)`, et les providers répondaient 400.
     let msgs = vec![
         ChatMessage::tool_result("call_9", "orphelin".into()),
         ChatMessage::user("écris le fichier"),

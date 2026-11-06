@@ -33,11 +33,9 @@ pub struct Task {
     pub text: String,
     pub status: Status,
     pub role: Option<String>,
-    /// Échéance (epoch secondes) : déclenche un rappel dans la TUI.
     pub due: Option<u64>,
 }
 
-/// Horodatage courant (epoch secondes).
 pub fn now_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -45,7 +43,6 @@ pub fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
-/// Analyse une échéance : epoch en secondes, ou relatif `+15m`, `+2h`, `+3d`.
 pub fn parse_due(raw: &str) -> Option<u64> {
     let raw = raw.trim();
     if raw.is_empty() {
@@ -65,16 +62,6 @@ pub fn parse_due(raw: &str) -> Option<u64> {
     raw.parse::<u64>().ok().map(|v| v.max(now_secs()))
 }
 
-/// Fichier de la liste de tâches (Markdown), **global à l'utilisateur**.
-///
-/// Avant : `.zer0/tasks.md` **relatif au dossier courant**. Les tâches
-/// changeaient donc selon l'endroit d'où l'agent était lancé (`~`, le dépôt, un
-/// projet quelconque), ce qui rendait `/task` incohérent — et créait des
-/// `.zer0/` un peu partout.
-///
-/// Désormais dans le dossier de données (XDG), comme la mémoire et les
-/// conversations. Surchargeable par `ZERO_TASKS_FILE` (utile pour une liste
-/// propre à un projet).
 pub fn path() -> PathBuf {
     static P: OnceLock<PathBuf> = OnceLock::new();
     P.get_or_init(|| {
@@ -90,7 +77,6 @@ pub fn path() -> PathBuf {
     .clone()
 }
 
-/// Résolution pure du chemin (testable sans toucher l'environnement).
 pub fn task_file_from(env: Option<&str>, data_dir: &Path) -> PathBuf {
     env.map(str::trim)
         .filter(|s| !s.is_empty())
@@ -98,7 +84,6 @@ pub fn task_file_from(env: Option<&str>, data_dir: &Path) -> PathBuf {
         .unwrap_or_else(|| data_dir.join("tasks.md"))
 }
 
-/// Anciens emplacements possibles de la liste (ordre d'exploration).
 fn legacy_candidates() -> Vec<PathBuf> {
     let mut out = vec![PathBuf::from(".zer0/tasks.md")];
     for p in [
@@ -112,12 +97,10 @@ fn legacy_candidates() -> Vec<PathBuf> {
     out
 }
 
-/// Importe l'ancienne liste si la nouvelle n'existe pas encore.
 pub fn migrate_legacy(target: &Path) -> Option<PathBuf> {
     migrate_legacy_from(target, &legacy_candidates())
 }
 
-/// Variante pure : choisit le candidat **le plus récent** et le copie.
 pub(crate) fn migrate_legacy_from(target: &Path, candidates: &[PathBuf]) -> Option<PathBuf> {
     if target.exists() {
         return None;
@@ -202,7 +185,6 @@ pub fn add(text: &str, role: Option<String>) -> Result<Task> {
     add_with_due(text, role, None)
 }
 
-/// Comme `add`, avec une échéance (epoch secondes).
 pub fn add_with_due(text: &str, role: Option<String>, due: Option<u64>) -> Result<Task> {
     let mut tasks = load();
     let n = tasks
@@ -223,24 +205,16 @@ pub fn add_with_due(text: &str, role: Option<String>, due: Option<u64>) -> Resul
     Ok(task)
 }
 
-/// Issue d'une mise à jour de statut.
 #[derive(Debug, PartialEq)]
 pub enum Update {
-    /// Appliqué (statut résultant).
     Ok(Status),
-    /// Id inconnu.
     NotFound,
-    /// `done` refusé : livrables absents/vides — (chemin, problème).
     Refused(Vec<(String, String)>),
 }
 
 pub fn set_status(id: &str, status: Status) -> Result<Update> {
     let mut tasks = load();
     let mut found = false;
-    // Porte d'honnêteté : marquer `done` exige que les livrables mentionnés
-    // dans le texte existent réellement sur disque (le test 0BOX-TEST a révélé
-    // des tâches [x] sans livrable — « j'ai écrit le fichier » non vérifié).
-    // Contournement assumé : éditer `.zer0/tasks.md` à la main.
     if status == Status::Done {
         let mut missing = Vec::new();
         for t in &tasks {
@@ -268,12 +242,6 @@ pub fn set_status(id: &str, status: Status) -> Result<Update> {
     }
 }
 
-/// Chemins candidats dans le texte d'une tâche. L'heuristique est volontairement
-/// **prudente** : seuls les chemins ancrés (`~/…`, `/…`, `X:\…`, `./…`, `../…`)
-/// sont retenus — jamais un relatif ambigu (cwd variable), ni une notation
-/// d'extension (`.txt/.jsonl`), ni une URL (« et/ou » est déjà écarté : pas de
-/// point dans le dernier segment). Objectif : ne JAMAIS bloquer une tâche sur un
-/// faux positif ; la vérification vise les livrables en chemin complet.
 pub fn extract_paths(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     for tok in text.split_whitespace() {
@@ -288,7 +256,7 @@ pub fn extract_paths(text: &str) -> Vec<String> {
         }
         let low = tok.to_ascii_lowercase();
         if low.starts_with("http://") || low.starts_with("https://") || low.starts_with("ftp://") {
-            continue; // URL, pas un livrable local
+            continue;
         }
         if !tok.contains('/') && !tok.contains('\\') {
             continue;
@@ -300,16 +268,15 @@ pub fn extract_paths(text: &str) -> Vec<String> {
             || tok.starts_with(".\\")
             || tok.starts_with("../")
             || tok.starts_with("..\\")
-            || (tok.len() > 1 && tok.as_bytes()[1] == b':'); // C:\ …
+            || (tok.len() > 1 && tok.as_bytes()[1] == b':');
         if !rooted {
-            continue; // relatif ambigu ou notation d'extension (`.txt/.jsonl`)
+            continue;
         }
         out.push(expand_home(tok));
     }
     out
 }
 
-/// `~/x` → dossier personnel. Autres chemins inchangés.
 fn expand_home(p: &str) -> String {
     if let Some(rest) = p.strip_prefix("~/").or_else(|| p.strip_prefix("~\\")) {
         format!(
@@ -322,8 +289,6 @@ fn expand_home(p: &str) -> String {
     }
 }
 
-/// Vérifie les livrables : chaque chemin doit exister ; un fichier doit être
-/// non vide. Retourne les défauts (chemin, problème) — vide = tout va bien.
 fn verify_deliverables(paths: &[String]) -> Vec<(String, String)> {
     paths
         .iter()
@@ -336,7 +301,6 @@ fn verify_deliverables(paths: &[String]) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Supprime une tâche par id. `true` si trouvée.
 pub fn remove(id: &str) -> Result<bool> {
     let mut tasks = load();
     let before = tasks.len();
@@ -348,7 +312,6 @@ pub fn remove(id: &str) -> Result<bool> {
     Ok(removed)
 }
 
-/// Supprime toutes les tâches terminées (`[x]`). Retourne le nombre supprimé.
 pub fn clear_done() -> Result<usize> {
     let mut tasks = load();
     let before = tasks.len();
@@ -360,15 +323,10 @@ pub fn clear_done() -> Result<usize> {
     Ok(n)
 }
 
-/// First pending task (for the work loop).
 pub fn next_pending() -> Option<Task> {
     load().into_iter().find(|t| t.status == Status::Pending)
 }
 
-/// Animation des tâches **en cours** : le marqueur `[~]` devient un point
-/// braille qui tourne (`⠋ ⠙ ⠹ …`), pour distinguer « en cours » de « en
-/// attente » d'un coup d'œil. Une seule colonne, lisible en monochrome, et
-/// beaucoup moins « bruit » que l'ancien `* ¤ o O 0 O o ¤`.
 pub const SPINNER: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
 fn mark_for(status: Status, phase: Option<usize>) -> String {
@@ -378,7 +336,6 @@ fn mark_for(status: Status, phase: Option<usize>) -> String {
     }
 }
 
-/// Rendu pur (testable) ; `phase = None` = marqueur statique `[~]`.
 pub fn format_tasks(tasks: &[Task], phase: Option<usize>) -> String {
     if tasks.is_empty() {
         return "Aucune tâche. `/task add <texte>` pour en créer.".to_string();
@@ -405,8 +362,6 @@ pub fn format_list() -> String {
     format_tasks(&load(), None)
 }
 
-/// Variante animée (TUI) : relit le fichier — l'appelant préfère en général
-/// `format_tasks` sur une liste déjà chargée.
 pub fn format_list_animated(phase: usize) -> String {
     format_tasks(&load(), Some(phase))
 }
@@ -424,7 +379,6 @@ mod tests {
         assert!(m >= now + 1700 && m <= now + 1900);
         assert_eq!(parse_due("nope"), None);
         assert_eq!(parse_due(""), None);
-        // epoch déjà passé → ramené à maintenant (rappel immédiat)
         assert!(parse_due("1").unwrap() >= now);
     }
 
@@ -465,20 +419,17 @@ mod tests {
                 due: None,
             },
         ];
-        // sans animation : marqueur statique
         let plain = format_tasks(&tasks, None);
         assert!(plain.contains("[x] t1"));
         assert!(plain.contains("[~] t2"));
         assert!(plain.contains("[ ] t3"));
 
-        // avec animation : seul le marqueur « en cours » change, et il cycle
         let a = format_tasks(&tasks, Some(0));
         let b = format_tasks(&tasks, Some(1));
         assert!(a.contains(&format!("[{}] t2", SPINNER[0])));
         assert!(b.contains(&format!("[{}] t2", SPINNER[1])));
         assert!(a.contains("[x] t1"));
         assert!(a.contains("[ ] t3"));
-        // le cycle boucle proprement
         let wrapped = format_tasks(&tasks, Some(SPINNER.len() + 2));
         assert!(wrapped.contains(&format!("[{}] t2", SPINNER[2])));
     }
@@ -517,7 +468,6 @@ mod tests {
         assert_eq!(src.as_deref(), Some(recent.as_path()));
         assert_eq!(fs::read_to_string(&target).unwrap(), "- [ ] récente");
 
-        // Deuxième passe : la cible existe, on ne réécrase plus.
         assert!(migrate_legacy_from(&target, &[old]).is_none());
         assert_eq!(fs::read_to_string(&target).unwrap(), "- [ ] récente");
         let _ = fs::remove_dir_all(&dir);
@@ -531,7 +481,6 @@ mod tests {
         assert!(ps.contains(&"D:\\x\\0box-test\\RAPPORT.md".to_string()));
         assert!(ps.contains(&"D:\\x\\0box-test\\".to_string()));
 
-        // ~ expandu vers le dossier personnel
         let ps = extract_paths("Générer ~/0box-test/sample.jsonl (20 lignes)");
         assert_eq!(ps.len(), 1);
         assert!(ps[0].ends_with("0box-test/sample.jsonl"));
@@ -543,11 +492,8 @@ mod tests {
         assert!(extract_paths("choisir A et/ou B puis valider").is_empty());
         assert!(extract_paths("voir https://exemple.com/page/1 pour plus").is_empty());
         assert!(extract_paths("réponds directement dans le chat").is_empty());
-        // nom de fichier sans répertoire : non détecté (limite assumée)
         assert!(extract_paths("écris RAPPORT.md puis arrête").is_empty());
-        // notation d'extensions : pas un chemin
         assert!(extract_paths("entrées .txt/.jsonl, format txt|json").is_empty());
-        // chemin relatif ambigu : non vérifiable honnêtement (cwd variable)
         assert!(extract_paths("crée 0box-test/RAPPORT.md ici").is_empty());
     }
 
@@ -566,7 +512,7 @@ mod tests {
             full.to_str().unwrap().to_string(),
             empty.to_str().unwrap().to_string(),
             missing.to_str().unwrap().to_string(),
-            dir.to_str().unwrap().to_string(), // dossier existant = OK
+            dir.to_str().unwrap().to_string(),
         ]);
         assert_eq!(fails.len(), 2);
         assert!(fails.iter().any(|(p, _)| p.ends_with("vide.txt")));
