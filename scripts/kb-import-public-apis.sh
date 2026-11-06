@@ -32,7 +32,7 @@ lines = open(src, encoding="utf-8", errors="replace").read().splitlines()
 
 def uniq(s):
     s = s.replace("&amp;", "&").replace("&quot;", '"').replace("&#39;", "'")
-    s = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", s)   # markdown -> texte
+    s = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", s)
     s = re.sub(r"[`*]", "", s)
     return re.sub(r"\s+", " ", s).strip()
 
@@ -51,7 +51,7 @@ for ln in lines:
     if len(cells) < 3:
         continue
     if cells[0].startswith(":") or set(cells[0]) <= set("-: "):
-        continue                      # ligne de séparation du tableau markdown
+        continue
     name = uniq(cells[0])
     if not name or name.lower() in ("api", "name"):
         continue

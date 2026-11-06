@@ -329,7 +329,6 @@ ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789 *zer0-aarch64-a
         assert!(is_dev_build("C:\\dev\\projet\\target\\release\\zer0.exe"));
         assert!(!is_dev_build("/usr/local/bin/zer0"));
         assert!(!is_dev_build("/home/dev/.local/bin/zer0gh0st"));
-        // pas de faux positif sur un dossier nommé target ailleurs
         assert!(!is_dev_build("/opt/targets/zer0"));
     }
 }

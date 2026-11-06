@@ -162,19 +162,14 @@ fn repair_wav(path: &Path) -> std::io::Result<()> {
         .ok_or_else(|| Error::new(ErrorKind::InvalidData, "chunk WAV « data » introuvable"))?;
     let payload = data_pos + 8;
     let available = bytes.len().saturating_sub(payload);
-    // Fichier déjà cohérent (SoX l'a finalisé sous Unix) : ne rien réécrire.
     if declared == available {
         return Ok(());
     }
-    // Taille manifestement provisoire ? Sinon ce sont des chunks annexes
-    // (`LIST`, `INFO`…) qui suivent `data` : la taille déclarée est fiable.
     let provisional = declared == 0 || declared > available || declared % 2 != 0;
     if !provisional {
         return Ok(());
     }
     let mut data_len = available;
-    // Un échantillon PCM 16 bits fait 2 octets : ignore un éventuel octet
-    // partial écrit juste avant l'arrêt du processus.
     data_len -= data_len % 2;
     let riff_len = bytes.len() - 8;
     if riff_len > u32::MAX as usize || data_len > u32::MAX as usize {
@@ -196,7 +191,6 @@ pub struct ZeroChan {
     rec_started: Option<std::time::Instant>,
 }
 
-/// Durée d'écoute maximale avant arrêt automatique (secondes).
 pub const MAX_REC_SECS: f32 = 6.0;
 
 impl Default for ZeroChan {
@@ -229,13 +223,11 @@ impl ZeroChan {
         }
     }
 
-    /// Démarre l'écoute micro. Retourne true si l'enregistrement a commencé.
     pub fn start_rec(&mut self) -> bool {
         if !self.on || self.rec.is_some() {
             return false;
         }
         let path = rec_path();
-        // Ne jamais réutiliser un ancien WAV si le nouvel enregistrement échoue.
         let _ = std::fs::remove_file(&path);
 
         let Some((mut cmd, label)) = recorder(&path) else {
@@ -255,9 +247,6 @@ impl ZeroChan {
             }
         };
 
-        // Certains enregistreurs échouent immédiatement (micro absent, privacy
-        // Windows, périphérique déjà utilisé). On laisse un court délai, puis on
-        // remonte leur erreur au lieu d'afficher un vague « indisponible ».
         std::thread::sleep(std::time::Duration::from_millis(120));
         if let Ok(Some(status)) = child.try_wait() {
             let detail = stderr_text(child.stderr.take());
@@ -277,13 +266,9 @@ impl ZeroChan {
         true
     }
 
-    /// Arrête l'enregistrement, attend la fermeture du processus et répare le
-    /// WAV si Windows a interrompu SoX avant sa finalisation.
     pub fn stop_rec(&mut self) {
         self.rec_started = None;
         if let Some(mut c) = self.rec.take() {
-            // SIGINT = finalise proprement le WAV (Unix). Windows : kill direct,
-            // puis `repair_wav` recalcule les tailles du RIFF.
             #[cfg(unix)]
             {
                 let pid = c.id();
@@ -333,7 +318,6 @@ impl ZeroChan {
         }
     }
 
-    /// Durée d'écoute écoulée (secondes), si enregistrement en cours.
     pub fn rec_elapsed(&self) -> Option<f32> {
         self.rec_started.map(|t| t.elapsed().as_secs_f32())
     }
@@ -346,7 +330,6 @@ impl ZeroChan {
         self.frame = self.frame.wrapping_add(1);
     }
 
-    /// Visage animé style kawaii : `◕` + bouche variable + clins d'œil.
     fn face(&self) -> String {
         let f = self.frame;
         let mouth = match self.state {
@@ -374,7 +357,6 @@ impl ZeroChan {
             }
             State::Off => "_",
         };
-        // clin d'œil / clignement occasionnel
         let left = if (f / 33).is_multiple_of(11) {
             "-"
         } else {
@@ -388,7 +370,6 @@ impl ZeroChan {
         format!("({left}{mouth}{right})")
     }
 
-    /// Petit bloc d'état (à droite du banner).
     pub fn draw(&self, f: &mut Frame, area: Rect) {
         let color = match self.state {
             State::Off => theme::dim(),
@@ -407,7 +388,6 @@ impl ZeroChan {
             return;
         }
 
-        // visualiseur animé (petites barres)
         let bars = inner.width.saturating_sub(2) as usize / 2;
         let mut vis: Vec<Span> = Vec::new();
         for i in 0..bars {
@@ -442,7 +422,6 @@ impl ZeroChan {
     }
 }
 
-/// Transcrit un WAV via `faster_whisper` (Python, déjà installé).
 pub async fn transcribe(path: &PathBuf) -> anyhow::Result<String> {
     let code = "import sys\n\
         from faster_whisper import WhisperModel\n\
@@ -589,17 +568,16 @@ mod tests {
         wav[8..12].copy_from_slice(b"WAVE");
         wav[12..16].copy_from_slice(b"fmt ");
         wav[16..20].copy_from_slice(&16u32.to_le_bytes());
-        wav[20..22].copy_from_slice(&1u16.to_le_bytes()); // PCM
-        wav[22..24].copy_from_slice(&1u16.to_le_bytes()); // mono
+        wav[20..22].copy_from_slice(&1u16.to_le_bytes());
+        wav[22..24].copy_from_slice(&1u16.to_le_bytes());
         wav[24..28].copy_from_slice(&16_000u32.to_le_bytes());
         wav[28..32].copy_from_slice(&32_000u32.to_le_bytes());
         wav[32..34].copy_from_slice(&2u16.to_le_bytes());
         wav[34..36].copy_from_slice(&16u16.to_le_bytes());
         wav[36..40].copy_from_slice(b"data");
-        // SoX interrompu brutalement : tailles encore provisoires.
         wav[4..8].copy_from_slice(&u32::MAX.to_le_bytes());
         wav[40..44].copy_from_slice(&u32::MAX.to_le_bytes());
-        wav.extend_from_slice(&[0u8; 100]); // 50 échantillons PCM 16 bits
+        wav.extend_from_slice(&[0u8; 100]);
         std::fs::write(&path, &wav).unwrap();
 
         repair_wav(&path).unwrap();
@@ -627,7 +605,6 @@ mod tests {
         wav[16..20].copy_from_slice(&16u32.to_le_bytes());
         wav[36..40].copy_from_slice(b"data");
         wav.extend_from_slice(&[1u8; 100]);
-        // tailles exactes, comme les écrit SoX à la finalisation
         let riff_size = (wav.len() - 8) as u32;
         let data_size = (wav.len() - 44) as u32;
         wav[4..8].copy_from_slice(&riff_size.to_le_bytes());

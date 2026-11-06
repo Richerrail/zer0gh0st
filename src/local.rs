@@ -478,7 +478,6 @@ mod tests {
             resolve_model(&models, Some("qwen3.5-4B-super-coder.Q4_0")),
             Some(PathBuf::from("/m/b.gguf"))
         );
-        // id partiel
         assert_eq!(
             resolve_model(&models, Some("qwen2.5-coder-1.5b")),
             Some(PathBuf::from("/m/a.gguf"))

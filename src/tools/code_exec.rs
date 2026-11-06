@@ -207,8 +207,6 @@ mod tests {
         assert!(r.contains("commande terminée"));
     }
 
-    /// Régression : une sortie accentuée de plus de 16 Ko déclenchait
-    /// `panic!("assertion failed: self.is_char_boundary")`.
     #[test]
     fn render_multibyte_output_does_not_panic() {
         let mut out = String::from("a");
@@ -246,7 +244,6 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn stdin_is_closed_so_reads_fail_fast() {
-        // `cat` sans stdin doit terminer immédiatement (pas de blocage).
         let r = run(r#"{"command":"cat","timeout_secs":5}"#).await;
         assert!(!r.contains("délai dépassé"), "got: {r}");
     }
