@@ -1,3 +1,14 @@
+## v0.7.32 — Mods seuls, onde sur mod actif (2026-11-05)
+
+- **Rail `◀☰` et menu permanent retirés** : la palette `/` (et `F2`) suffit,
+  et ils prenaient de la place en permanence.
+- **Mods plus larges** : un mod ouvert occupe 44 % de la largeur (56 % pour
+  le chat), au lieu de 40 colonnes fixes.
+- **Onde néon** : elle parcourt le contour de la page quand **un mod est
+  actif** (et s'arrête quand il est fermé), au lieu de dépendre du menu et
+  du thème.
+- Tests du tiroir/menu supprimés, clics de vote conservés.
+
 ## v0.7.31 — R1 : zer0-gw robuste (2026-11-05)
 
 - `zer0-gw` : plus de `expect("mutex")` en production — `lock()` récupère un
