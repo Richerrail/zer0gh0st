@@ -1,3 +1,10 @@
+## v0.7.31 — R1 : zer0-gw robuste (2026-11-05)
+
+- `zer0-gw` : plus de `expect("mutex")` en production — `lock()` récupère un
+  mutex empoisonné (`into_inner`). Un panic dans un thread ne tue plus la
+  passerelle (sinon : plus aucun accès aux modèles). Test de non-panic.
+- `vault.rs` vérifié : les `unwrap()` restants sont tous dans les tests.
+
 ## v0.7.30 — Tiroir néon + audit 2026-11-04 (2026-11-05)
 
 Contribution de **darkdober4** (PR #29) + corrections de l'audit du 4 nov.
