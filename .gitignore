@@ -2,6 +2,10 @@
 /target
 /target0box
 
+# Python bytecode
+__pycache__/
+*.pyc
+
 # Windows debug/test artifacts (binaires de test clipboard, scripts temporaires)
 *.exe
 *.pdb
