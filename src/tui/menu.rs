@@ -229,6 +229,7 @@ pub const TREE: &[Node] = &[
 
 /// Dessine le menu et remplit `hits` (coordonnées écran). `scroll` est ajusté.
 /// `sel` = index sélectionné au clavier (surbrillance).
+#[allow(dead_code)] // plus de menu permanent : palette `/` et F2
 pub fn draw(
     f: &mut Frame,
     area: Rect,
