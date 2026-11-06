@@ -100,7 +100,7 @@ pub fn scan() -> Result<Report> {
         &root,
         &["describe", "--tags", "--abbrev=0", "--match", "v*"],
     );
-    let changed_files = match &since_tag {
+    let changed_files: Vec<String> = match &since_tag {
         Some(tag) => git(&root, &["diff", "--name-only", &format!("{tag}..HEAD")])
             .unwrap_or_default()
             .lines()
