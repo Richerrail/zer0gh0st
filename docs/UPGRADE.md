@@ -23,6 +23,19 @@ audit-AAAAMMJJ.json  # machine, pour le futur `/upgrade fix`
 
 `/upgrade` sans argument (ou `status`) affiche le dernier audit.
 
+## `/upgrade fix [id]`
+
+- sans argument : liste les findings du dernier audit, numérotés ;
+- `/upgrade fix 1` ou `/upgrade fix U1` : crée/sélectionne la branche
+  `upgrade/<date>`, puis un **sous-agent** corrige **uniquement** ce finding ;
+- règles envoyées au sous-agent : ne pas toucher aux tests, pas de
+  reformatage global, ne rien changer hors du finding ;
+- après le patch : `cargo test --offline --lib` (2 jobs, plafond 15 min) —
+  **échec = revert automatique** (`git checkout -- .` + `git clean -fd`) ;
+- aucun commit, aucun push : `/upgrade ship` viendra après.
+
+Prérequis : arbre git **propre**, `F3` (Read&Write) et `F4` (Code-exec) actifs.
+
 ## Ce qui n'est pas encore là
 
 - `/upgrade fix` : suivre la TODO, demander confirmation à chaque étape ;

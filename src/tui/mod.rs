@@ -945,6 +945,109 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
                         )),
                     }
                 }
+                Some("fix") => {
+                    let found = match crate::upgrade::findings() {
+                        Ok(f) => f,
+                        Err(e) => {
+                            app.messages
+                                .push(ChatMessage::notice(format!("/upgrade fix : {e}")));
+                            return;
+                        }
+                    };
+                    let Some(sel) = args.get(1).copied() else {
+                        let mut msg = String::from("Findings du dernier audit :\n");
+                        for (i, f) in found.iter().enumerate() {
+                            msg.push_str(&format!(
+                                "  {}. {} [{}] {}\n",
+                                i + 1,
+                                f.id,
+                                f.severity,
+                                f.title
+                            ));
+                        }
+                        msg.push_str("\n/upgrade fix <numéro|Ux> (arbre git propre requis)");
+                        app.messages.push(ChatMessage::notice(msg));
+                        return;
+                    };
+                    let target = found.iter().find(|f| {
+                        f.id.eq_ignore_ascii_case(sel)
+                            || f.id.trim_start_matches('U') == sel.trim_start_matches('U')
+                    });
+                    let Some(finding) = target.cloned() else {
+                        app.messages.push(ChatMessage::notice(format!(
+                            "finding inconnu : {sel} (voir `/upgrade fix`)"
+                        )));
+                        return;
+                    };
+                    if !app.read_write {
+                        app.messages.push(ChatMessage::notice(
+                            "F3 Read&Write est désactivé : active-le pour corriger.",
+                        ));
+                        return;
+                    }
+                    if !app.code_exec {
+                        app.messages.push(ChatMessage::notice(
+                            "F4 Code-exec est désactivé : active-le pour vérifier le patch.",
+                        ));
+                        return;
+                    }
+                    let mut tools: Vec<crate::tools::ToolSpec> = app
+                        .all_tools
+                        .iter()
+                        .filter(|t| matches!(t.name, "text_editor" | "code_exec" | "search"))
+                        .cloned()
+                        .collect();
+                    if tools.is_empty() {
+                        tools = app.all_tools.clone();
+                    }
+                    let settings = app.settings();
+                    let system = app.system.clone();
+                    let options = ChatOptions {
+                        max_tokens: 4096,
+                        thinking: false,
+                        temperature: 0.2,
+                        tools_mode: crate::llm::llama::ToolsMode::Native,
+                        stream: true,
+                        local: false,
+                    };
+                    let ui = ui_tx.clone();
+                    app.messages.push(ChatMessage::notice(format!(
+                        "🔧 correction de {} sur `upgrade/<date>` — tests lancés ensuite, \
+                         revert automatique si échec.",
+                        finding.id
+                    )));
+                    tokio::spawn(async move {
+                        let _ = ui.send(UiEvent::Info(format!(
+                            "🔧 /upgrade fix {} : sous-agent…",
+                            finding.id
+                        )));
+                        match crate::upgrade::fix(&finding, &settings, &system, tools, options)
+                            .await
+                        {
+                            Ok(o) if o.tests_ok => {
+                                let _ = ui.send(UiEvent::Info(format!(
+                                    "✅ {} corrigé sur `{}` — tests verts.\n{}\n{}",
+                                    finding.id, o.branch, o.diff, o.tests_tail
+                                )));
+                                let _ = ui.send(UiEvent::Info(
+                                    "Relis le diff, puis `/upgrade scan` pour re-mesurer. \
+                                     Commit/PR : `/upgrade ship` (à venir)."
+                                        .into(),
+                                ));
+                            }
+                            Ok(o) => {
+                                let _ = ui.send(UiEvent::Error(format!(
+                                    "❌ tests KO → patch annulé (revert).\n{}\n{}",
+                                    o.diff, o.tests_tail
+                                )));
+                                let _ = ui.send(UiEvent::Info(o.message));
+                            }
+                            Err(e) => {
+                                let _ = ui.send(UiEvent::Error(format!("/upgrade fix : {e}")));
+                            }
+                        }
+                    });
+                }
                 Some("scan") => {
                     let ui = ui_tx.clone();
                     tokio::spawn(async move {
@@ -965,7 +1068,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
                     });
                 }
                 Some(other) => app.messages.push(ChatMessage::notice(format!(
-                    "usage: /upgrade [scan|status] (reçu: {other})"
+                    "usage: /upgrade [scan|status|fix [id]] (reçu: {other})"
                 ))),
             }
         }
