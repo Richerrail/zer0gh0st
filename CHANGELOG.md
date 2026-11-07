@@ -1,3 +1,12 @@
+## v0.7.41 — `scan` : tests hors `#[cfg(test)]` (2026-11-07)
+
+- La partie « production » s'arrête au **premier test**, qu'il soit une
+  fonction `#[test]` ou un module `#[cfg(test)]` : le test isolé de `zer0-gw`
+  ne gonfle plus le compteur (finding U2 fantôme).
+- `unwrap/expect` et `unsafe` sont comptés sur les **lignes de code** : une
+  phrase de commentaire qui mentionne `.unwrap()` n'est plus un finding.
+- Message « aucune modification » : suggère un faux positif et un re-scan.
+
 ## v0.7.40 — `fix` : statut, revert, branche fraîche (2026-11-07)
 
 - `/upgrade status` : branche courante, fichiers modifiés, dernier audit

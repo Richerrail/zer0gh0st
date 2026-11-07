@@ -1039,7 +1039,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
                                 let answer: String = o.message.chars().take(1200).collect();
                                 let _ = ui.send(UiEvent::Info(format!(
                                     "⚠ aucune modification : le sous-agent n'a édité aucun fichier.\n\
-                                     {answer}\n\nConseil : cible un finding plus précis (ou corrige à la main)."
+                                     {answer}\n\nSi le sous-agent n'a rien trouvé : le finding est peut-être un faux positif — `/upgrade scan` pour re-mesurer. Sinon, cible un finding plus précis."
                                 )));
                             }
                             Ok(o) if o.tests_ok => {
