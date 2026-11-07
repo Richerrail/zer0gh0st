@@ -14,6 +14,10 @@ Audit **lecture seule** du dépôt. Ce qu'il regarde :
 | dépôt | sauvegardes `*.zer0.bak`, fichiers modifiés non commités |
 | git | fichiers modifiés depuis le dernier tag `v*` |
 
+Chaque finding est **par fichier** (ex. « 3 unwrap() dans `src/tui/wizard.rs` »)
+pour que `/upgrade fix` ait une cible corrigeable ; les refactors (fichiers
+> 900 lignes) sont listés mais sans fichier cible (à faire à la main).
+
 Sorties écrites dans `~/.local/share/zer0gh0st/upgrade/` :
 
 ```
