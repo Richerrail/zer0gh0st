@@ -1,3 +1,13 @@
+## v0.7.36 — Scan : moins de faux positifs (2026-11-07)
+
+- Métriques calculées **hors tests** (`#[cfg(test)]`) : vault/zer0-gw/config ne
+  sont plus signalés à cause de leurs tests.
+- `unsafe` : seuls `unsafe {` / `unsafe fn` / `unsafe impl` comptent (plus le mot
+  dans une chaîne) ; le scanner s'ignore lui-même.
+- TODO/FIXME/XXX : uniquement dans les commentaires.
+- `unwrap/expect` : répartition par fichier dans le finding (triée).
+- Code commenté : « async (prose) » et phrases finissant par `;` ne passent plus.
+
 ## v0.7.35 — Scan : code commenté (2026-11-07)
 
 - `/upgrade scan` distingue désormais **code désactivé** et documentation :
