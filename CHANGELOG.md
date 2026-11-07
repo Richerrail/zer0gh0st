@@ -1,3 +1,11 @@
+## v0.7.35 — Scan : code commenté (2026-11-07)
+
+- `/upgrade scan` distingue désormais **code désactivé** et documentation :
+  heuristique stricte (`// let`, `// pub fn`, `// }`, ligne terminée par `;`
+  avec syntaxe…), les `///`/`//!` et la prose ne sont jamais comptés.
+- Finding « N ligne(s) de code commenté » avec les extraits `fichier:ligne`.
+- Test unitaire du détecteur (code vs doc vs prose).
+
 ## v0.7.34 — `/upgrade scan` livré (2026-11-06)
 
 - `/upgrade scan` : audit lecture seule (git, unwrap/expect chauds, unsafe,
