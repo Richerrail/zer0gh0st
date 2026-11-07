@@ -1,3 +1,12 @@
+## v0.7.39 — `scan` : findings par fichier (2026-11-07)
+
+- Un finding **par fichier** pour `unwrap()/expect()` (au lieu d'un agrégat
+  « 11 dans 8 fichiers »), ainsi que TODO, `unsafe` et code commenté : chaque
+  cible est corrigeable par `/upgrade fix`.
+- Les fichiers > 900 lignes restent listés (refactor manuel, sans fichier
+  cible) ; `fix` refuse proprement un finding sans cible.
+- Le scanner ne se compte plus lui-même (unwrap/TODO).
+
 ## v0.7.38 — `fix` : visibilité + messages honnêtes (2026-11-07)
 
 - Le sous-agent de `fix` est **visible en direct** : appels d'outils (`⚙`),

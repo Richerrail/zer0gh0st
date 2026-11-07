@@ -175,17 +175,10 @@ fn git(root: &Path, args: &[&str]) -> Option<String> {
 fn scan_sources(root: &Path, out: &mut Vec<Finding>) {
     let mut files: Vec<PathBuf> = Vec::new();
     walk(&root.join("src"), &mut files);
-    let mut unwrap_total = 0usize;
-    let mut todos = 0usize;
-    let mut todo_files: Vec<String> = Vec::new();
-    let mut unsafe_files: Vec<String> = Vec::new();
-    let mut big_files: Vec<String> = Vec::new();
-    let mut commented: Vec<String> = Vec::new();
-    let mut unwrap_files: Vec<(String, usize)> = Vec::new();
 
     for path in files
         .iter()
-        .filter(|p| p.extension().is_some_and(|e| e == "rs"))
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("rs"))
     {
         let Ok(text) = std::fs::read_to_string(path) else {
             continue;
@@ -195,26 +188,36 @@ fn scan_sources(root: &Path, out: &mut Vec<Finding>) {
             .unwrap_or(path)
             .to_string_lossy()
             .to_string();
-        // Les tests gonflent artificiellement unwrap/expect/TODO : on ne
-        // mesure que le code de production (tout ce qui précède le module de
-        // tests). Le nombre de lignes, lui, reste celui du fichier entier.
         let production = text.split("\n#[cfg(test)]").next().unwrap_or(&text);
-        // Le scanner se lit lui-même : ses chaînes `"TODO"`, `"unsafe {"`… ne
-        // sont pas des findings. On ignore ses auto-références.
         let is_scanner = rel == "src/upgrade.rs";
         let lines = text.lines().count();
+
+        // 1) unwrap/expect : un finding PAR fichier (cible corrigeable).
         let unwrap =
             count_occurrences(production, ".unwrap()") + count_occurrences(production, ".expect(");
-        unwrap_total += unwrap;
-        if unwrap > 0 {
-            unwrap_files.push((rel.clone(), unwrap));
+        if unwrap > 0 && !is_scanner {
+            let hot = HOT_FILES.iter().any(|h| rel.ends_with(*h));
+            out.push(Finding {
+                id: String::new(),
+                severity: if hot && unwrap >= 5 {
+                    Severity::Medium
+                } else {
+                    Severity::Low
+                },
+                title: format!("{unwrap} unwrap()/expect() dans {rel}"),
+                detail: if hot {
+                    "Chemin chaud : un I/O raté (permission, disque plein, JSON corrompu) provoque un panic au lieu d'une erreur.".into()
+                } else {
+                    "Hors chemin chaud ; à convertir si l'entrée est une I/O ou un parsing.".into()
+                },
+                files: vec![rel.clone()],
+                effort: "faible".into(),
+            });
         }
-        // TODO/FIXME/XXX : uniquement dans les commentaires (sinon une chaîne
-        // de code qui contient « TODO » se compte elle-même).
-        let todo = if is_scanner {
-            0
-        } else {
-            production
+
+        // 2) TODO/FIXME/XXX : uniquement dans les commentaires, par fichier.
+        if !is_scanner {
+            let todo: usize = production
                 .lines()
                 .filter(|l| l.trim_start().starts_with("//"))
                 .map(|l| {
@@ -222,116 +225,76 @@ fn scan_sources(root: &Path, out: &mut Vec<Finding>) {
                         + count_occurrences(l, "FIXME")
                         + count_occurrences(l, "XXX")
                 })
-                .sum::<usize>()
-        };
-        if todo > 0 {
-            todos += todo;
-            todo_files.push(format!("{rel} ({todo})"));
+                .sum();
+            if todo > 0 {
+                out.push(Finding {
+                    id: String::new(),
+                    severity: Severity::Low,
+                    title: format!("{todo} TODO/FIXME dans {rel}"),
+                    detail: "Marqueurs dans les commentaires : à traiter ou supprimer.".into(),
+                    files: vec![rel.clone()],
+                    effort: "trivial".into(),
+                });
+            }
         }
-        // `unsafe` réel : bloc/fonction/impl, pas le mot dans une chaîne.
+
+        // 3) unsafe réel, par fichier.
         if !is_scanner
             && (production.contains("unsafe {")
                 || production.contains("unsafe fn ")
                 || production.contains("unsafe impl "))
         {
-            unsafe_files.push(rel.clone());
-        }
-        for (n, line) in production.lines().enumerate() {
-            if let Some(code) = commented_code(line) {
-                commented.push(format!("{rel}:{} — {code}", n + 1));
-            }
-        }
-        if lines > 900 {
-            big_files.push(format!("{rel} ({lines} lignes)"));
-        }
-        // Chemin chaud : unwrap/expect concentrés.
-        if HOT_FILES.iter().any(|h| rel.ends_with(*h)) && unwrap >= 5 {
             out.push(Finding {
                 id: String::new(),
-                severity: Severity::Medium,
-                title: format!("{} unwrap()/expect() dans {}", unwrap, rel),
+                severity: Severity::High,
+                title: format!("`unsafe` dans {rel}"),
+                detail: "Chaque bloc `unsafe` doit être justifié par un commentaire `// SAFETY:`."
+                    .into(),
+                files: vec![rel.clone()],
+                effort: "moyen".into(),
+            });
+        }
+
+        // 4) code commenté, par fichier.
+        let commented: Vec<String> = production
+            .lines()
+            .enumerate()
+            .filter_map(|(n, line)| {
+                commented_code(line).map(|code| format!("ligne {} — {code}", n + 1))
+            })
+            .collect();
+        if !commented.is_empty() {
+            out.push(Finding {
+                id: String::new(),
+                severity: Severity::Low,
+                title: format!("{} ligne(s) de code commenté dans {rel}", commented.len()),
                 detail: format!(
-                    "{} occurrences dans un chemin chaud : un I/O raté (permission, \
-                     disque plein, JSON corrompu) provoque un panic au lieu d'une erreur.",
-                    unwrap
+                    "Code désactivé (pas de la documentation) : à supprimer s'il est mort, à réactiver s'il est utile.\n{}",
+                    commented.iter().take(6).cloned().collect::<Vec<_>>().join("\n")
                 ),
                 files: vec![rel.clone()],
                 effort: "faible".into(),
             });
         }
-    }
 
-    if unwrap_total > 0 {
-        unwrap_files.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-        out.push(Finding {
-            id: String::new(),
-            severity: Severity::Low,
-            title: format!("{unwrap_total} unwrap()/expect() dans src/ (hors tests)"),
-            detail: "À traiter en priorité sur les chemins chauds ; les tests ne sont pas comptés."
-                .into(),
-            files: unwrap_files
-                .iter()
-                .take(8)
-                .map(|(f, n)| format!("{f} ({n})"))
-                .collect(),
-            effort: "moyen".into(),
-        });
-    }
-    if todos > 0 {
-        out.push(Finding {
-            id: String::new(),
-            severity: Severity::Low,
-            title: format!("{todos} TODO/FIXME/XXX"),
-            detail: format!("Répartis dans {} fichier(s).", todo_files.len()),
-            files: todo_files.into_iter().take(12).collect(),
-            effort: "faible".into(),
-        });
-    }
-    if !unsafe_files.is_empty() {
-        out.push(Finding {
-            id: String::new(),
-            severity: Severity::High,
-            title: format!("{} fichier(s) avec `unsafe`", unsafe_files.len()),
-            detail: "Chaque bloc `unsafe` doit être justifié par un commentaire `// SAFETY:`."
-                .into(),
-            files: unsafe_files,
-            effort: "moyen".into(),
-        });
-    }
-    if !commented.is_empty() {
-        let severity = if commented.len() >= 20 {
-            Severity::Medium
-        } else {
-            Severity::Low
-        };
-        out.push(Finding {
-            id: String::new(),
-            severity,
-            title: format!("{} ligne(s) de code commenté", commented.len()),
-            detail: "Code désactivé (pas de la documentation) : à supprimer s'il est mort, \
-                     à réactiver s'il est utile. Les `///` et `//!` ne sont pas comptés."
-                .into(),
-            files: commented.into_iter().take(12).collect(),
-            effort: "faible".into(),
-        });
-    }
-    if !big_files.is_empty() {
-        out.push(Finding {
-            id: String::new(),
-            severity: Severity::Low,
-            title: format!("{} fichier(s) > 900 lignes", big_files.len()),
-            detail: "Candidats à un découpage (lisibilité, revue, conflits git).".into(),
-            files: big_files.into_iter().take(8).collect(),
-            effort: "moyen".into(),
-        });
+        // 5) gros fichier : refactor manuel, pas une cible de `fix`.
+        if lines > 900 {
+            out.push(Finding {
+                id: String::new(),
+                severity: Severity::Low,
+                title: format!("{rel} ({lines} lignes) — refactor manuel"),
+                detail: "Découpage à faire en plusieurs PR ; `/upgrade fix` ne s'en occupe pas."
+                    .into(),
+                files: Vec::new(),
+                effort: "moyen".into(),
+            });
+        }
     }
 }
-
 /// Une ligne `// …` ressemble-t-elle à du **code désactivé** ?
 ///
-/// Heuristique stricte : on ne veut pas classer la prose en « code mort »
-/// (les commentaires de décision/pièges restent intacts). Les commentaires
-/// de doc (`///`, `//!`) ne sont jamais concernés.
+/// Heuristique stricte : la prose et la documentation ne doivent jamais être
+/// classées « code mort ».
 pub fn commented_code(line: &str) -> Option<&str> {
     let t = line.trim_start();
     let rest = t.strip_prefix("//")?;
@@ -374,8 +337,6 @@ pub fn commented_code(line: &str) -> Option<&str> {
     if code == "{" || code == "}" || code == "};" {
         return Some(code);
     }
-    // Ligne terminée par `;` (sans espace avant) avec une syntaxe de code et
-    // peu de mots : évite « … renommé en canonique ; » (phrase française).
     let words = code.split_whitespace().count();
     if code.ends_with(';')
         && !code.ends_with(" ;")
@@ -709,6 +670,11 @@ pub async fn fix(
 ) -> Result<FixOutcome> {
     // Un finding qui couvre 8 fichiers n'est pas « une correction » : le
     // sous-agent répond un plan au lieu d'agir. On refuse tôt.
+    if finding.files.is_empty() {
+        return Err(anyhow!(
+            "finding sans fichier cible (état/refactor) : à traiter à la main"
+        ));
+    }
     if finding.files.len() > 3 {
         return Err(anyhow!(
             "finding trop large ({} fichiers) : `fix` corrige un point ciblé. \
