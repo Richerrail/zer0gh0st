@@ -188,13 +188,22 @@ fn scan_sources(root: &Path, out: &mut Vec<Finding>) {
             .unwrap_or(path)
             .to_string_lossy()
             .to_string();
-        let production = text.split("\n#[cfg(test)]").next().unwrap_or(&text);
+        let production = production_part(&text);
         let is_scanner = rel == "src/upgrade.rs";
         let lines = text.lines().count();
 
         // 1) unwrap/expect : un finding PAR fichier (cible corrigeable).
-        let unwrap =
-            count_occurrences(production, ".unwrap()") + count_occurrences(production, ".expect(");
+        // On ignore les lignes de commentaire : une phrase qui mentionne
+        // `.unwrap()` ne doit pas devenir un finding.
+        let code_only: String = production
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let unwrap = code_only
+            .lines()
+            .map(|l| count_occurrences(l, ".unwrap()") + count_occurrences(l, ".expect("))
+            .sum::<usize>();
         if unwrap > 0 && !is_scanner {
             let hot = HOT_FILES.iter().any(|h| rel.ends_with(*h));
             out.push(Finding {
@@ -240,9 +249,9 @@ fn scan_sources(root: &Path, out: &mut Vec<Finding>) {
 
         // 3) unsafe réel, par fichier.
         if !is_scanner
-            && (production.contains("unsafe {")
-                || production.contains("unsafe fn ")
-                || production.contains("unsafe impl "))
+            && (code_only.contains("unsafe {")
+                || code_only.contains("unsafe fn ")
+                || code_only.contains("unsafe impl "))
         {
             out.push(Finding {
                 id: String::new(),
@@ -291,6 +300,22 @@ fn scan_sources(root: &Path, out: &mut Vec<Finding>) {
         }
     }
 }
+/// Partie « production » d'un fichier : tout ce qui précède le **premier**
+/// test, qu'il soit une fonction `#[test]` ou un module `#[cfg(test)]`.
+fn production_part(text: &str) -> &str {
+    let mut offset = text.len();
+    let mut pos = 0;
+    for line in text.split_inclusive('\n') {
+        let t = line.trim_start();
+        if t.starts_with("#[test]") || t.starts_with("#[cfg(test)]") {
+            offset = pos;
+            break;
+        }
+        pos += line.len();
+    }
+    &text[..offset]
+}
+
 /// Une ligne `// …` ressemble-t-elle à du **code désactivé** ?
 ///
 /// Heuristique stricte : la prose et la documentation ne doivent jamais être
@@ -919,6 +944,17 @@ mod tests {
     fn occurrence_counting_is_literal() {
         assert_eq!(count_occurrences("a.unwrap().unwrap()", ".unwrap()"), 2);
         assert_eq!(count_occurrences("TODO: x\nFIXME", "TODO"), 1);
+    }
+
+    #[test]
+    fn production_part_stops_at_the_first_test() {
+        let t = "fn x() {}\n#[test]\nfn t() { panic!() }\n#[cfg(test)]\nmod tests {}\n";
+        let p = production_part(t);
+        assert!(p.contains("fn x()"));
+        assert!(!p.contains("#[test]"));
+        assert!(!p.contains("mod tests"));
+        // Un fichier sans test est pris en entier.
+        assert_eq!(production_part("fn y() {}\n"), "fn y() {}\n");
     }
 
     #[test]
