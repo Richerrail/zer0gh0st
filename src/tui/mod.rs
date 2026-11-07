@@ -1021,9 +1021,23 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
                             "🔧 /upgrade fix {} : sous-agent…",
                             finding.id
                         )));
-                        match crate::upgrade::fix(&finding, &settings, &system, tools, options)
-                            .await
+                        match crate::upgrade::fix(
+                            &finding,
+                            &settings,
+                            &system,
+                            tools,
+                            options,
+                            Some(ui.clone()),
+                        )
+                        .await
                         {
+                            Ok(o) if !o.changed => {
+                                let answer: String = o.message.chars().take(1200).collect();
+                                let _ = ui.send(UiEvent::Info(format!(
+                                    "⚠ aucune modification : le sous-agent n'a édité aucun fichier.\n\
+                                     {answer}\n\nConseil : cible un finding plus précis (ou corrige à la main)."
+                                )));
+                            }
                             Ok(o) if o.tests_ok => {
                                 let _ = ui.send(UiEvent::Info(format!(
                                     "✅ {} corrigé sur `{}` — tests verts.\n{}\n{}",

@@ -1,3 +1,12 @@
+## v0.7.38 — `fix` : visibilité + messages honnêtes (2026-11-07)
+
+- Le sous-agent de `fix` est **visible en direct** : appels d'outils (`⚙`),
+  résultats, repli d'endpoint, erreurs (`🧪 tests…`).
+- « Aucune modification » n'est plus affiché comme « tests KO » : message
+  distinct avec la réponse du sous-agent et un conseil de ciblage.
+- Prompt du sous-agent : **agir** avec `text_editor` (pas de plan), et refus
+  immédiat des findings couvrant plus de 3 fichiers.
+
 ## v0.7.37 — `/upgrade fix` (dev) (2026-11-07)
 
 - `/upgrade fix` liste les findings du dernier audit ; `/upgrade fix <id|n>`
