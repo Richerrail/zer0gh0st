@@ -688,6 +688,8 @@ pub fn findings() -> Result<Vec<FindingView>> {
 pub struct FixOutcome {
     pub branch: String,
     pub diff: String,
+    /// Le sous-agent a-t-il modifié au moins un fichier ?
+    pub changed: bool,
     pub tests_ok: bool,
     pub tests_tail: String,
     pub message: String,
@@ -703,7 +705,17 @@ pub async fn fix(
     system: &str,
     tools: Vec<crate::tools::ToolSpec>,
     options: crate::llm::llama::ChatOptions,
+    ui: Option<tokio::sync::mpsc::UnboundedSender<crate::event::UiEvent>>,
 ) -> Result<FixOutcome> {
+    // Un finding qui couvre 8 fichiers n'est pas « une correction » : le
+    // sous-agent répond un plan au lieu d'agir. On refuse tôt.
+    if finding.files.len() > 3 {
+        return Err(anyhow!(
+            "finding trop large ({} fichiers) : `fix` corrige un point ciblé. \
+             Re-scanne ou corrige à la main, puis re-scan.",
+            finding.files.len()
+        ));
+    }
     ensure_clean_tree()?;
     let date = latest_json()
         .and_then(|p| {
@@ -716,6 +728,9 @@ pub async fn fix(
 
     let mut task = String::from(
         "Tu es un sous-agent de correction de ZER0|GH0ST. Corrige UNIQUEMENT le finding ci-dessous.\n\
+         Tu DOIS agir avec les outils, pas décrire un plan : commence par `text_editor` (view)\n\
+         le fichier concerné, puis applique la modification minimale avec `text_editor`\n\
+         (str_replace/create). Ne réponds JAMAIS « I'll start by… » sans appel d'outil.\n\
          Règles absolues :\n\
          - ne modifie AUCUN test (`#[test]`, `tests/`, `#[cfg(test)]`) ;\n\
          - ne change pas le comportement en dehors du finding ;\n\
@@ -735,13 +750,36 @@ pub async fn fix(
     }
 
     let endpoints = crate::route::chain_for_role(settings, "code");
+    let (evt_tx, mut evt_rx) =
+        tokio::sync::mpsc::unbounded_channel::<crate::agent::subagent::SubAgentEvent>();
+    if let Some(ui) = ui.clone() {
+        tokio::spawn(async move {
+            while let Some(ev) = evt_rx.recv().await {
+                use crate::agent::subagent::SubAgentEvent as E;
+                let line = match ev {
+                    E::ToolCall { name, args } => {
+                        format!("⚙ {name} {}", args.chars().take(120).collect::<String>())
+                    }
+                    E::ToolResult { result, .. } => {
+                        format!("⚙ → {}", result.lines().next().unwrap_or(""))
+                    }
+                    E::Fallback { from, to, reason } => {
+                        format!("↪ repli {from} → {to} ({reason})")
+                    }
+                    E::Error(e) => format!("⚠ {e}"),
+                    E::Info(i) => i,
+                };
+                let _ = ui.send(crate::event::UiEvent::Info(line));
+            }
+        });
+    }
     let answer = crate::agent::subagent::run_subagent(
         endpoints,
         system.to_string(),
         task,
         tools,
         options,
-        None,
+        Some(evt_tx),
     )
     .await;
 
@@ -750,12 +788,16 @@ pub async fn fix(
         return Ok(FixOutcome {
             branch,
             diff: String::new(),
+            changed: false,
             tests_ok: false,
             tests_tail: String::new(),
             message: format!("aucune modification appliquée. Réponse du sous-agent :\n{answer}"),
         });
     }
 
+    if let Some(ui) = &ui {
+        let _ = ui.send(crate::event::UiEvent::Info("🧪 cargo test --lib…".into()));
+    }
     let (tests_ok, tests_tail) = run_tests().await;
     if !tests_ok {
         let _ = git_text(&["checkout", "--", "."]);
@@ -764,6 +806,7 @@ pub async fn fix(
     Ok(FixOutcome {
         branch,
         diff,
+        changed: true,
         tests_ok,
         tests_tail,
         message: answer,
