@@ -1,6 +1,6 @@
 [package]
 name = "zer0"
-version = "0.7.35"
+version = "0.7.36"
 edition = "2021"
 rust-version = "1.88"
 description = "ZER0|GH0ST - a terminal-native AI agent (CLI-only, Rust)"
