@@ -606,6 +606,244 @@ pub fn summary(r: &Report) -> String {
     s
 }
 
+// ---------------------------------------------------------------------------
+// Phase 2 : `/upgrade fix`
+// ---------------------------------------------------------------------------
+
+/// Finding relu depuis `audit-*.json` (pour le fix).
+#[derive(Debug, Clone)]
+pub struct FindingView {
+    pub id: String,
+    pub severity: String,
+    pub title: String,
+    pub detail: String,
+    pub files: Vec<String>,
+    pub effort: String,
+}
+
+/// Dernier audit JSON disponible.
+pub fn latest_json() -> Option<PathBuf> {
+    let dir = crate::config::data_dir().join("upgrade");
+    std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("json"))
+        .max_by_key(|p| p.file_name().map(|n| n.to_os_string()))
+}
+
+/// Findings du dernier audit, dans l'ordre du rapport.
+pub fn findings() -> Result<Vec<FindingView>> {
+    let path = latest_json().ok_or_else(|| anyhow!("aucun audit : `/upgrade scan` d'abord"))?;
+    let raw = std::fs::read_to_string(&path)?;
+    let v: serde_json::Value = serde_json::from_str(&raw)?;
+    let mut out = Vec::new();
+    for f in v
+        .get("findings")
+        .and_then(|x| x.as_array())
+        .into_iter()
+        .flatten()
+    {
+        out.push(FindingView {
+            id: f
+                .get("id")
+                .and_then(|x| x.as_str())
+                .unwrap_or("?")
+                .to_string(),
+            severity: f
+                .get("severity")
+                .and_then(|x| x.as_str())
+                .unwrap_or("low")
+                .to_string(),
+            title: f
+                .get("title")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string(),
+            detail: f
+                .get("detail")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string(),
+            files: f
+                .get("files")
+                .and_then(|x| x.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            effort: f
+                .get("effort")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string(),
+        });
+    }
+    Ok(out)
+}
+
+#[derive(Debug)]
+pub struct FixOutcome {
+    pub branch: String,
+    pub diff: String,
+    pub tests_ok: bool,
+    pub tests_tail: String,
+    pub message: String,
+}
+
+/// Corrige un finding sur une branche `upgrade/<date>`.
+///
+/// Garde-fous : arbre propre exigé, aucun test modifié, tests lancés après
+/// le patch, **revert automatique** si les tests échouent, aucun commit.
+pub async fn fix(
+    finding: &FindingView,
+    settings: &crate::config::Settings,
+    system: &str,
+    tools: Vec<crate::tools::ToolSpec>,
+    options: crate::llm::llama::ChatOptions,
+) -> Result<FixOutcome> {
+    ensure_clean_tree()?;
+    let date = latest_json()
+        .and_then(|p| {
+            p.file_stem()
+                .map(|s| s.to_string_lossy().trim_start_matches("audit-").to_string())
+        })
+        .unwrap_or_else(|| "sans-date".into());
+    let branch = format!("upgrade/{date}");
+    ensure_branch(&branch)?;
+
+    let mut task = String::from(
+        "Tu es un sous-agent de correction de ZER0|GH0ST. Corrige UNIQUEMENT le finding ci-dessous.\n\
+         Règles absolues :\n\
+         - ne modifie AUCUN test (`#[test]`, `tests/`, `#[cfg(test)]`) ;\n\
+         - ne change pas le comportement en dehors du finding ;\n\
+         - pas de reformatage global, pas de renommage massif ;\n\
+         - si tu ne peux pas corriger proprement, ne modifie rien et explique pourquoi.\n\
+         - tu peux lancer `cargo check --offline` pour vérifier.\n\n",
+    );
+    task.push_str(&format!(
+        "Finding {} [{}] : {}\n{}\n",
+        finding.id, finding.severity, finding.title, finding.detail
+    ));
+    if !finding.files.is_empty() {
+        task.push_str("Fichiers :\n");
+        for f in &finding.files {
+            task.push_str(&format!("- {f}\n"));
+        }
+    }
+
+    let endpoints = crate::route::chain_for_role(settings, "code");
+    let answer = crate::agent::subagent::run_subagent(
+        endpoints,
+        system.to_string(),
+        task,
+        tools,
+        options,
+        None,
+    )
+    .await;
+
+    let diff = git_text(&["diff", "--stat"]).unwrap_or_default();
+    if diff.trim().is_empty() {
+        return Ok(FixOutcome {
+            branch,
+            diff: String::new(),
+            tests_ok: false,
+            tests_tail: String::new(),
+            message: format!("aucune modification appliquée. Réponse du sous-agent :\n{answer}"),
+        });
+    }
+
+    let (tests_ok, tests_tail) = run_tests().await;
+    if !tests_ok {
+        let _ = git_text(&["checkout", "--", "."]);
+        let _ = git_text(&["clean", "-fd"]);
+    }
+    Ok(FixOutcome {
+        branch,
+        diff,
+        tests_ok,
+        tests_tail,
+        message: answer,
+    })
+}
+
+/// Refuse de travailler sur un arbre sale (le diff serait mélangé).
+pub fn ensure_clean_tree() -> Result<()> {
+    let out = git_text(&["status", "--porcelain"]).unwrap_or_default();
+    if !out.trim().is_empty() {
+        return Err(anyhow!(
+            "arbre git sale ({} fichier(s)) : commit ou stash avant `/upgrade fix`",
+            out.lines().count()
+        ));
+    }
+    Ok(())
+}
+
+fn ensure_branch(branch: &str) -> Result<()> {
+    let current = git_text(&["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_default();
+    if current == "main" {
+        let exists = git_text(&["rev-parse", "--verify", branch]).is_some();
+        if exists {
+            git_text(&["switch", branch]);
+        } else {
+            git_text(&["switch", "-c", branch]);
+        }
+    } else if current != branch {
+        return Err(anyhow!(
+            "branche courante `{current}` : passe sur `main` ou `{branch}`"
+        ));
+    }
+    Ok(())
+}
+
+fn git_text(args: &[&str]) -> Option<String> {
+    let out = Command::new("git")
+        .current_dir(crate::mods::project_root())
+        .args(args)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// `cargo test --offline --lib` avec 2 jobs et un plafond de 15 min.
+async fn run_tests() -> (bool, String) {
+    let mut cmd = tokio::process::Command::new("cargo");
+    cmd.current_dir(crate::mods::project_root())
+        .args(["test", "--offline", "--lib", "-j", "2"])
+        .env("CARGO_BUILD_JOBS", "2")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let fut = cmd.output();
+    match tokio::time::timeout(std::time::Duration::from_secs(900), fut).await {
+        Ok(Ok(out)) => {
+            let text = format!(
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            let tail: String = text
+                .lines()
+                .rev()
+                .take(12)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect::<Vec<_>>()
+                .join("\n");
+            (out.status.success(), tail)
+        }
+        Ok(Err(e)) => (false, format!("cargo test : {e}")),
+        Err(_) => (false, "cargo test : interrompu après 15 min".into()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

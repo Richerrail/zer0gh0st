@@ -1,3 +1,12 @@
+## v0.7.37 — `/upgrade fix` (dev) (2026-11-07)
+
+- `/upgrade fix` liste les findings du dernier audit ; `/upgrade fix <id|n>`
+  corrige **un** finding sur une branche `upgrade/<date>` via un sous-agent
+  restreint (text_editor/code_exec, tests interdits).
+- Après le patch : `cargo test --lib` (2 jobs, 15 min max), **revert
+  automatique** si échec ; aucun commit/push.
+- Garde-fous : arbre propre, F3/F4 actifs, outils limités.
+
 ## v0.7.36 — Scan : moins de faux positifs (2026-11-07)
 
 - Métriques calculées **hors tests** (`#[cfg(test)]`) : vault/zer0-gw/config ne
