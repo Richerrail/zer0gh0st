@@ -1,3 +1,16 @@
+## v0.7.40 — `fix` : statut, revert, branche fraîche (2026-11-07)
+
+- `/upgrade status` : branche courante, fichiers modifiés, dernier audit
+  (plus seulement le chemin du rapport).
+- `/upgrade revert` : annule le patch en cours (`checkout` + `clean`), avec la
+  liste des fichiers concernés.
+- Arbre sale : l'erreur **liste les fichiers** et propose `git diff`, commit
+  ou `/upgrade revert` (au lieu d'un simple compteur).
+- Branche `upgrade/<date>` en retard sur `main` : `fix` refuse et demande
+  `git merge main` (évite de corriger sur une base périmée).
+- `gwclient` : mutex empoisonné récupéré (`into_inner`) au lieu de `expect`
+  — patch issu d'un `/upgrade fix`.
+
 ## v0.7.39 — `scan` : findings par fichier (2026-11-07)
 
 - Un finding **par fichier** pour `unwrap()/expect()` (au lieu d'un agrégat
