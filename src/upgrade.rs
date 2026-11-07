@@ -180,6 +180,7 @@ fn scan_sources(root: &Path, out: &mut Vec<Finding>) {
     let mut todo_files: Vec<String> = Vec::new();
     let mut unsafe_files: Vec<String> = Vec::new();
     let mut big_files: Vec<String> = Vec::new();
+    let mut commented: Vec<String> = Vec::new();
 
     for path in files
         .iter()
@@ -205,6 +206,11 @@ fn scan_sources(root: &Path, out: &mut Vec<Finding>) {
         }
         if text.contains("unsafe ") {
             unsafe_files.push(rel.clone());
+        }
+        for (n, line) in text.lines().enumerate() {
+            if let Some(code) = commented_code(line) {
+                commented.push(format!("{rel}:{} — {code}", n + 1));
+            }
         }
         if lines > 900 {
             big_files.push(format!("{rel} ({lines} lignes)"));
@@ -257,6 +263,23 @@ fn scan_sources(root: &Path, out: &mut Vec<Finding>) {
             effort: "moyen".into(),
         });
     }
+    if !commented.is_empty() {
+        let severity = if commented.len() >= 20 {
+            Severity::Medium
+        } else {
+            Severity::Low
+        };
+        out.push(Finding {
+            id: String::new(),
+            severity,
+            title: format!("{} ligne(s) de code commenté", commented.len()),
+            detail: "Code désactivé (pas de la documentation) : à supprimer s'il est mort, \
+                     à réactiver s'il est utile. Les `///` et `//!` ne sont pas comptés."
+                .into(),
+            files: commented.into_iter().take(12).collect(),
+            effort: "faible".into(),
+        });
+    }
     if !big_files.is_empty() {
         out.push(Finding {
             id: String::new(),
@@ -267,6 +290,64 @@ fn scan_sources(root: &Path, out: &mut Vec<Finding>) {
             effort: "moyen".into(),
         });
     }
+}
+
+/// Une ligne `// …` ressemble-t-elle à du **code désactivé** ?
+///
+/// Heuristique stricte : on ne veut pas classer la prose en « code mort »
+/// (les commentaires de décision/pièges restent intacts). Les commentaires
+/// de doc (`///`, `//!`) ne sont jamais concernés.
+pub fn commented_code(line: &str) -> Option<&str> {
+    let t = line.trim_start();
+    let rest = t.strip_prefix("//")?;
+    if rest.starts_with('/') || rest.starts_with('!') {
+        return None; // doc
+    }
+    let code = rest.trim();
+    if code.is_empty() {
+        return None;
+    }
+    const KEYWORDS: &[&str] = &[
+        "let ",
+        "fn ",
+        "pub ",
+        "use ",
+        "if ",
+        "else ",
+        "for ",
+        "while ",
+        "loop ",
+        "match ",
+        "impl ",
+        "struct ",
+        "enum ",
+        "mod ",
+        "return ",
+        "break;",
+        "continue;",
+        "const ",
+        "static ",
+        "trait ",
+        "type ",
+        "unsafe ",
+        "move ",
+        "async ",
+        "await ",
+        "} else",
+    ];
+    if KEYWORDS.iter().any(|k| code.starts_with(k)) {
+        return Some(code);
+    }
+    if code == "{" || code == "}" || code == "};" {
+        return Some(code);
+    }
+    // Ligne terminée par `;` avec une syntaxe de code (pas une phrase).
+    if code.ends_with(';')
+        && (code.contains('(') || code.contains('=') || code.contains("::") || code.contains('!'))
+    {
+        return Some(code);
+    }
+    None
 }
 
 fn count_occurrences(haystack: &str, needle: &str) -> usize {
@@ -496,6 +577,20 @@ mod tests {
     fn occurrence_counting_is_literal() {
         assert_eq!(count_occurrences("a.unwrap().unwrap()", ".unwrap()"), 2);
         assert_eq!(count_occurrences("TODO: x\nFIXME", "TODO"), 1);
+    }
+
+    #[test]
+    fn commented_code_detects_disabled_code_only() {
+        assert!(commented_code("// let x = 1;").is_some());
+        assert!(commented_code("  // }").is_some());
+        assert!(commented_code("// pub fn f() {").is_some());
+        assert!(commented_code("// foo();").is_some());
+        // Documentation et prose : jamais « code commenté ».
+        assert!(commented_code("/// doc publique").is_none());
+        assert!(commented_code("//! doc de module").is_none());
+        assert!(commented_code("// le serveur fige, ne pas utiliser").is_none());
+        assert!(commented_code("// ─── section ───").is_none());
+        assert!(commented_code("let x = 1;").is_none());
     }
 
     #[test]
