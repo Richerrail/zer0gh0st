@@ -928,23 +928,27 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
             }
             match args.first().copied() {
                 None | Some("status") => {
-                    let dir = config::data_dir().join("upgrade");
-                    let newest = std::fs::read_dir(&dir).ok().and_then(|rd| {
-                        rd.flatten()
-                            .map(|e| e.path())
-                            .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("md"))
-                            .max_by_key(|p| p.metadata().and_then(|m| m.modified()).ok())
-                    });
-                    match newest {
-                        Some(p) => app.messages.push(ChatMessage::notice(format!(
-                            "dernier audit : {}\n\n/upgrade scan pour en refaire un.",
-                            p.display()
-                        ))),
-                        None => app.messages.push(ChatMessage::notice(
-                            "aucun audit. Lance `/upgrade scan` (dev).",
-                        )),
-                    }
+                    app.messages
+                        .push(ChatMessage::notice(crate::upgrade::status()));
                 }
+                Some("revert") => match crate::upgrade::revert() {
+                    Ok(files) if files.is_empty() => app
+                        .messages
+                        .push(ChatMessage::notice("rien à annuler : arbre propre.")),
+                    Ok(files) => app.messages.push(ChatMessage::notice(format!(
+                        "↩ patch annulé ({} fichier(s)) :\n  - {}",
+                        files.len(),
+                        files
+                            .iter()
+                            .take(6)
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .join("\n  - ")
+                    ))),
+                    Err(e) => app
+                        .messages
+                        .push(ChatMessage::notice(format!("/upgrade revert : {e}"))),
+                },
                 Some("fix") => {
                     let found = match crate::upgrade::findings() {
                         Ok(f) => f,
@@ -1082,7 +1086,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
                     });
                 }
                 Some(other) => app.messages.push(ChatMessage::notice(format!(
-                    "usage: /upgrade [scan|status|fix [id]] (reçu: {other})"
+                    "usage: /upgrade [scan|status|fix [id]|revert] (reçu: {other})"
                 ))),
             }
         }

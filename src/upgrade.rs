@@ -779,16 +779,60 @@ pub async fn fix(
     })
 }
 
-/// Refuse de travailler sur un arbre sale (le diff serait mélangé).
+/// Fichiers modifiés/non suivis du dépôt.
+pub fn dirty_files() -> Vec<String> {
+    git_text(&["status", "--porcelain"])
+        .unwrap_or_default()
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.get(3..).unwrap_or(l).trim().to_string())
+        .collect()
+}
+
+/// Refuse de travailler sur un arbre sale (le diff serait mélangé), en
+/// listant les fichiers et les issues possibles.
 pub fn ensure_clean_tree() -> Result<()> {
-    let out = git_text(&["status", "--porcelain"]).unwrap_or_default();
-    if !out.trim().is_empty() {
-        return Err(anyhow!(
-            "arbre git sale ({} fichier(s)) : commit ou stash avant `/upgrade fix`",
-            out.lines().count()
-        ));
+    let files = dirty_files();
+    if !files.is_empty() {
+        let mut msg = format!("arbre git sale ({} fichier(s)) :\n", files.len());
+        for f in files.iter().take(6) {
+            msg.push_str(&format!("  - {f}\n"));
+        }
+        msg.push_str("→ relis avec `git diff`, puis commit… ou `/upgrade revert` pour annuler.");
+        return Err(anyhow!(msg));
     }
     Ok(())
+}
+
+/// Annule les modifications en cours (patch d'un `fix` non commité).
+pub fn revert() -> Result<Vec<String>> {
+    let files = dirty_files();
+    if files.is_empty() {
+        return Ok(Vec::new());
+    }
+    let _ = git_text(&["checkout", "--", "."]);
+    let _ = git_text(&["clean", "-fd"]);
+    Ok(files)
+}
+
+/// Résumé de l'état : branche, fichiers sales, dernier audit.
+pub fn status() -> String {
+    let branch = git_text(&["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_else(|| "?".into());
+    let files = dirty_files();
+    let audit = latest_json()
+        .and_then(|p| p.file_stem().map(|s| s.to_string_lossy().to_string()))
+        .unwrap_or_else(|| "aucun".into());
+    let mut s = format!("branche: {branch}\naudit: {audit}\n");
+    if files.is_empty() {
+        s.push_str("arbre: propre");
+    } else {
+        s.push_str(&format!("arbre: {} fichier(s) modifié(s)\n", files.len()));
+        for f in files.iter().take(6) {
+            s.push_str(&format!("  - {f}\n"));
+        }
+        s.push_str("/upgrade revert pour annuler, ou commit.");
+    }
+    s
 }
 
 fn ensure_branch(branch: &str) -> Result<()> {
@@ -797,6 +841,20 @@ fn ensure_branch(branch: &str) -> Result<()> {
         let exists = git_text(&["rev-parse", "--verify", branch]).is_some();
         if exists {
             git_text(&["switch", branch]);
+            // La branche peut dater d'un essai précédent : si `main` a avancé,
+            // on refuse de corriger sur une base périmée.
+            let up_to_date = Command::new("git")
+                .current_dir(crate::mods::project_root())
+                .args(["merge-base", "--is-ancestor", "main", "HEAD"])
+                .status()
+                .map(|st| st.success())
+                .unwrap_or(true);
+            if !up_to_date {
+                return Err(anyhow!(
+                    "branche `{branch}` en retard sur `main` : `git merge main` \
+                     (ou `/upgrade revert` puis `git switch main` et supprime la branche)"
+                ));
+            }
         } else {
             git_text(&["switch", "-c", branch]);
         }

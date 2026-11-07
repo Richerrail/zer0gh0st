@@ -39,7 +39,9 @@ pub fn available() -> bool {
     use std::sync::{Mutex, OnceLock};
     static CACHE: OnceLock<Mutex<Option<(std::time::Instant, bool)>>> = OnceLock::new();
     let slot = CACHE.get_or_init(|| Mutex::new(None));
-    let mut slot = slot.lock().expect("mutex");
+    // Mutex empoisonné (panic d'un autre thread) : on récupère la garde plutôt
+    // que de paniquer — le cache n'est qu'une optimisation de `probe()`.
+    let mut slot = slot.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((t, v)) = *slot {
         if t.elapsed() < Duration::from_secs(5) {
             return v;
