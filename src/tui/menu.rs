@@ -178,6 +178,13 @@ pub const TREE: &[Node] = &[
         ],
     ),
     g("project", &[n("status", "/project"), n("set", "/project ")]),
+    g(
+        "git",
+        &[
+            n("zer0push", "/zer0push "),
+            n("zer0push dry-run", "/zer0push --dry-run"),
+        ],
+    ),
     g("whoami", &[n("status", "/whoami"), n("off", "/whoami off")]),
     g(
         "vault",

@@ -227,6 +227,37 @@ enum Command {
         /// Action : `up` (star), `down` (retrait), `status`, `login`, `logout`.
         action: Option<String>,
     },
+    /// Tests, push et pull request (gh) — même pipeline que `/zer0push`.
+    #[command(name = "zer0push")]
+    Zer0Push {
+        /// Titre de la PR (défaut : nom de la branche).
+        #[arg(long)]
+        title: Option<String>,
+        /// Branche de base (défaut : branche par défaut du remote).
+        #[arg(long)]
+        base: Option<String>,
+        /// Corps de la PR.
+        #[arg(long)]
+        body: Option<String>,
+        /// Remote à pousser (défaut : origin).
+        #[arg(long, default_value = "origin")]
+        remote: String,
+        /// Créer la PR en brouillon.
+        #[arg(long)]
+        draft: bool,
+        /// Ne pas lancer `cargo test` avant le push.
+        #[arg(long)]
+        no_tests: bool,
+        /// Committer l'arbre sale avant le push.
+        #[arg(long)]
+        commit: bool,
+        /// Autoriser le push direct sur main/master (déconseillé).
+        #[arg(long)]
+        allow_main: bool,
+        /// Afficher le plan sans rien exécuter.
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -730,6 +761,37 @@ async fn run_command(cmd: Command) -> Result<()> {
                         "action inconnue : {other}\nusage : zer0 vote [up|down|status|login|logout]"
                     ));
                 }
+            }
+            Ok(())
+        }
+        Command::Zer0Push {
+            title,
+            base,
+            body,
+            remote,
+            draft,
+            no_tests,
+            commit,
+            allow_main,
+            dry_run,
+        } => {
+            let opts = crate::zer0push::PushOptions {
+                title,
+                body,
+                base,
+                draft,
+                no_tests,
+                dry_run,
+                commit,
+                allow_main,
+                remote,
+            };
+            let report = tokio::task::spawn_blocking(move || crate::zer0push::run(&opts)).await??;
+            for line in &report.lines {
+                println!("{line}");
+            }
+            if !report.ok {
+                return Err(anyhow!("zer0push : arrêté avant la fin (voir ci-dessus)"));
             }
             Ok(())
         }

@@ -582,3 +582,19 @@ Vote pour zer0gh0st : le pouce haut = une star GitHub, le bas = son retrait
 |---|---|
 | ` <ACTION>` | Action : `up` (star), `down` (retrait), `status`, `login`, `logout` |
 
+### `zer0 zer0push`
+
+Tests, push et pull request (gh) — même pipeline que `/zer0push`
+
+| Option | Description |
+|---|---|
+| `--title <TITLE>` | Titre de la PR (défaut : nom de la branche) |
+| `--base <BASE>` | Branche de base (défaut : branche par défaut du remote) |
+| `--body <BODY>` | Corps de la PR |
+| `--remote <REMOTE>` | Remote à pousser (défaut : origin) |
+| `--draft <DRAFT>` | Créer la PR en brouillon |
+| `--no-tests <NO_TESTS>` | Ne pas lancer `cargo test` avant le push |
+| `--commit <COMMIT>` | Committer l'arbre sale avant le push |
+| `--allow-main <ALLOW_MAIN>` | Autoriser le push direct sur main/master (déconseillé) |
+| `--dry-run <DRY_RUN>` | Afficher le plan sans rien exécuter |
+
