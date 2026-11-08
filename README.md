@@ -666,7 +666,7 @@ Le jeton est aussi cherché dans l'environnement
 | `/etc/zer0-gw/keys.env` | clés « style variable d'env » (injectées par systemd) |
 | `<projet>/data/memory.jsonl` | mémoire persistante |
 | `<projet>/data/conversation.jsonl` | historique de conversation (rechargé au démarrage) |
-| `<projet>/data/personas/` | personas (`/whoami`) |
+| `<projet>/data/personas/` | personas (`/whoami`) — la persona fournie `zero-audit` s'installe avec `zer0 whoami add zero-audit personas/zero-audit.md` |
 | `<projet>/knowledge.db` | base de connaissance (SQLite + FTS5) |
 | `<projet>/base_connaissance/` | sources indexables (texte/markdown/tsv) |
 | `<projet>/knowledge.db` | base de connaissance (SQLite + FTS5) **+ table `public_apis`** |
@@ -713,6 +713,7 @@ Le projet assume ses limites (principe directeur, §12) :
 | [`BRAINSTORM_ZEROCHAN.md`](./BRAINSTORM_ZEROCHAN.md) | analyse & roadmap Zero-chan |
 | [`CHANGELOG.md`](./CHANGELOG.md) | historique des versions |
 | [`docs/COMMANDS.md`](./docs/COMMANDS.md) | référence des commandes, générée depuis le CLI |
+| [`personas/zero-audit.md`](./personas/zero-audit.md) | persona *auditeur de code* : cherche les bugs, exige des preuves, écrit `AUDIT_<date>.md` |
 | [`LICENSE`](./LICENSE) | MIT |
 
 **Principe directeur :**
