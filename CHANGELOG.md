@@ -14,7 +14,8 @@
   rejeu pour le même modèle.
 - **README** : démo en **GIF** (900 px, 12 fps) affichée directement, plus
   `demo.mp4` en 1920×1080, et deux captures (palette `/` filtrante, `zer0CL`).
-  Régénération : `./scripts/demo.sh` (VHS + `scripts/demo.tape`).
+  Les médias sont versionnés ; `scripts/demo.sh` et `scripts/demo.tape`
+  (outils de tournage) sont retirés du dépôt.
 
 ## v0.7.44 — `/zer0push` : tests, push et pull request (2026-11-08)
 

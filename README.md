@@ -32,9 +32,10 @@ les vidéos.
 5. `/pong` contre l'agent ;
 6. bascule sur un modèle `deepseek` → **animation « baleine »** dans un overlay.
 
-> Pour la régénérer : `./scripts/demo.sh` (VHS + `scripts/demo.tape`), puis le
-> GIF : `ffmpeg -i demo.mp4 -vf "fps=12,scale=900:-1:flags=lanczos,palettegen" pal.png`
-> et `ffmpeg -i demo.mp4 -i pal.png -lavfi "fps=12,scale=900:-1:flags=lanczos[x];[x][1:v]paletteuse" demo.gif`.
+> Les deux médias sont **versionnés** tels quels (aucun script de génération dans
+> le dépôt). Le GIF se refait depuis le MP4 :
+> `ffmpeg -i demo.mp4 -vf "fps=12,scale=900:-1:flags=lanczos,palettegen" pal.png`
+> puis `ffmpeg -i demo.mp4 -i pal.png -lavfi "fps=12,scale=900:-1:flags=lanczos[x];[x][1:v]paletteuse" demo.gif`.
 
 | Palette `/` (103 commandes) et Zero-chan | `zer0CL` : un shell dans le panneau |
 |---|---|
