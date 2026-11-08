@@ -5927,10 +5927,14 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn fast_repeated_keys_are_not_dropped() {
         // Régression : la déduplication des `Press` (< 50 ms) s'appliquait à
         // toutes les plateformes et perdait la moitié des lettres doublées
         // (« deepseek » → « depsek », « llama » → « lama »).
+        //
+        // Sous Windows la dédup reste active (ConPTY rejoue des `Press`) :
+        // ce test n'y a donc pas de sens — c'est le comportement voulu là-bas.
         let mut app = test_app();
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         for ch in "deepseek".chars() {
