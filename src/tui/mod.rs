@@ -4407,18 +4407,18 @@ fn finalize_buffer(f: &mut Frame, app: &mut App) {
         rows.push(s);
     }
     app.screen = rows;
-    // surligne la sélection
+    // surligne la sélection (linéaire, pas rectangulaire : voir selection_text)
     if let (Some(a), Some(h)) = (app.sel_anchor, app.sel_head) {
-        let x0 = a.0.min(h.0);
-        let x1 = a.0.max(h.0);
-        let y0 = a.1.min(h.1);
-        let y1 = a.1.max(h.1);
-        let sel = theme::selection_bg();
-        for y in y0..=y1 {
-            for x in x0..=x1 {
-                if x < buf.area.width && y < buf.area.height {
-                    let st = buf[(x, y)].style();
-                    buf[(x, y)].set_style(st.bg(sel));
+        if a != h {
+            let ((x0, y0), (x1, y1)) = sel_normalized(a, h);
+            let sel = theme::selection_bg();
+            for y in y0..=y1 {
+                let (rx0, rx1) = sel_row_bounds(y, (x0, y0), (x1, y1), buf.area.width);
+                for x in rx0..=rx1 {
+                    if x < buf.area.width && y < buf.area.height {
+                        let st = buf[(x, y)].style();
+                        buf[(x, y)].set_style(st.bg(sel));
+                    }
                 }
             }
         }
@@ -5351,30 +5351,61 @@ fn input_height(app: &App, width: u16) -> u16 {
     wrap_text(&app.input, inner_w).len().clamp(1, 8) as u16
 }
 
-fn copy_selection(app: &mut App) {
-    if let (Some(a), Some(h)) = (app.sel_anchor, app.sel_head) {
-        let x0 = a.0.min(h.0);
-        let x1 = a.0.max(h.0);
-        let y0 = a.1.min(h.1);
-        let y1 = a.1.max(h.1);
+/// Ancre/curseur normalisés en ordre de lecture (ligne, puis colonne),
+/// quelle que soit la direction du glisser (bas→haut, droite→gauche…).
+fn sel_normalized(a: (u16, u16), h: (u16, u16)) -> ((u16, u16), (u16, u16)) {
+    if (a.1, a.0) <= (h.1, h.0) {
+        (a, h)
+    } else {
+        (h, a)
+    }
+}
 
-        let mut text = String::new();
-        for y in y0..=y1 {
-            if let Some(row) = app.screen.get(y as usize) {
-                let chars: Vec<char> = row.chars().collect();
-                let mut line = String::new();
-                for x in x0..=x1 {
-                    if let Some(c) = chars.get(x as usize) {
-                        line.push(*c);
-                    }
-                }
-                text.push_str(line.trim_end());
-                if y < y1 {
-                    text.push('\n');
+/// Colonnes [début, fin] incluses de la ligne `y` dans une sélection linéaire
+/// de `(x0,y0)` à `(x1,y1)`, sur une ligne de `width` colonnes :
+/// 1ʳᵉ ligne = x0→fin, dernière = début→x1, intermédiaires = entières.
+fn sel_row_bounds(y: u16, start: (u16, u16), end: (u16, u16), width: u16) -> (u16, u16) {
+    let last = width.saturating_sub(1);
+    match (y == start.1, y == end.1) {
+        (true, true) => (start.0.min(last), end.0.min(last)),
+        (true, false) => (start.0.min(last), last),
+        (false, true) => (0, end.0.min(last)),
+        (false, false) => (0, last),
+    }
+}
+
+/// Texte d'une sélection linéaire sur les lignes capturées `screen`.
+/// (Avant : rectangle x0..=x1 × y0..=y1 — il fallait « dessiner un carré »
+/// et chaque ligne comprenait les colonnes hors propos.)
+fn selection_text(screen: &[String], a: (u16, u16), h: (u16, u16)) -> String {
+    if a == h {
+        return String::new(); // simple clic, pas de glisser : rien à copier
+    }
+    let ((x0, y0), (x1, y1)) = sel_normalized(a, h);
+    let mut text = String::new();
+    for y in y0..=y1 {
+        if let Some(row) = screen.get(y as usize) {
+            let chars: Vec<char> = row.chars().collect();
+            let width = chars.len() as u16;
+            let (rx0, rx1) = sel_row_bounds(y, (x0, y0), (x1, y1), width);
+            let mut line = String::new();
+            for x in rx0..=rx1 {
+                if let Some(c) = chars.get(x as usize) {
+                    line.push(*c);
                 }
             }
+            text.push_str(line.trim_end());
+            if y < y1 {
+                text.push('\n');
+            }
         }
-        let text = text.trim().to_string();
+    }
+    text.trim().to_string()
+}
+
+fn copy_selection(app: &mut App) {
+    if let (Some(a), Some(h)) = (app.sel_anchor, app.sel_head) {
+        let text = selection_text(&app.screen, a, h);
         if !text.is_empty() {
             crate::clipboard::copy(&text);
             app.messages.push(ChatMessage::notice(format!(
@@ -5810,6 +5841,26 @@ mod tests {
             app.sel_anchor.is_none(),
             "le clic sur l'upvote a été traité comme une sélection de texte"
         );
+    }
+
+    #[test]
+    fn selection_is_linear_not_a_rectangle() {
+        // Écran : 3 lignes de 10 colonnes.
+        let scr: Vec<String> = vec![
+            "0123456789".into(),
+            "abcdefghij".into(),
+            "ABCDEFGHIJ".into(),
+        ];
+        // De (8,0) à (2,2) : avant, le rectangle x=2..=8 × y=0..=2 donnait
+        // « 23456789\ncdefghi\nCDEFGHI ». En linéaire : fin de la 1ʳᵉ ligne,
+        // ligne du milieu entière, début de la dernière.
+        assert_eq!(selection_text(&scr, (8, 0), (2, 2)), "89\nabcdefghij\nABC");
+        // Même sélection, glissée en sens inverse (bas→haut, droite→gauche).
+        assert_eq!(selection_text(&scr, (2, 2), (8, 0)), "89\nabcdefghij\nABC");
+        // Une seule ligne : seulement le segment, pas la ligne entière.
+        assert_eq!(selection_text(&scr, (3, 1), (6, 1)), "defg");
+        // Simple clic sans glisser : rien (avant : 1 caractère copié).
+        assert_eq!(selection_text(&scr, (4, 1), (4, 1)), "");
     }
 
     #[test]
