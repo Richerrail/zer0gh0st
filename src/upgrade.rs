@@ -907,7 +907,7 @@ fn git_text(args: &[&str]) -> Option<String> {
 async fn run_tests() -> (bool, String) {
     let mut cmd = tokio::process::Command::new("cargo");
     cmd.current_dir(crate::mods::project_root())
-        .args(["test", "--offline", "--lib", "-j", "2"])
+        .args(["test", "--offline", "--all-targets", "-j", "2"])
         .env("CARGO_BUILD_JOBS", "2")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
