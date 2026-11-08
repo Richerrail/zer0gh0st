@@ -52,9 +52,8 @@ run-zer0-gw.ps1
 *.key
 *_api_key*
 
-# Démo : demo.mp4 est versionnée (aperçu du README). Les fichiers
-# intermédiaires de VHS restent hors du dépôt.
-/demo.gif
+# Démo : demo.mp4 (qualité) et demo.gif (aperçu du README) sont versionnés.
+# Seul l'`Output` par défaut de VHS reste hors du dépôt quand il diffère.
 
 # Clone local du dépôt GitHub + notes de travail
 /gh0st

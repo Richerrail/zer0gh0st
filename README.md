@@ -19,7 +19,11 @@
 
 ## ▶ Démo (59 s)
 
-**[Voir la démo en 1920×1080](./demo.mp4)** — `demo.mp4` (2,4 Mo) :
+![Démo ZER0│GH0ST : agent, thèmes, mods et animation](./demo.gif)
+
+**[Démo complète en 1920×1080](./demo.mp4)** (2,4 Mo). Le GIF ci-dessus est la
+version compressée (900 px, 12 fps) : GitHub affiche les GIF directement, pas
+les vidéos.
 
 1. `/codeexec` puis une phrase — l'agent lance **une vraie commande** (`ps`) et résume ;
 2. thème `castle` (Wolfenstein 3D) via le picker `/theme` ;
@@ -28,9 +32,9 @@
 5. `/pong` contre l'agent ;
 6. bascule sur un modèle `deepseek` → **animation « baleine »** dans un overlay.
 
-> GitHub n'affiche pas les vidéos dans un README : clique sur le lien, le fichier
-> s'ouvre dans le lecteur du navigateur. Pour la régénérer : `./scripts/demo.sh`
-> (VHS + `scripts/demo.tape`).
+> Pour la régénérer : `./scripts/demo.sh` (VHS + `scripts/demo.tape`), puis le
+> GIF : `ffmpeg -i demo.mp4 -vf "fps=12,scale=900:-1:flags=lanczos,palettegen" pal.png`
+> et `ffmpeg -i demo.mp4 -i pal.png -lavfi "fps=12,scale=900:-1:flags=lanczos[x];[x][1:v]paletteuse" demo.gif`.
 
 | Palette `/` (103 commandes) et Zero-chan | `zer0CL` : un shell dans le panneau |
 |---|---|
