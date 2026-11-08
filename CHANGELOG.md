@@ -1,3 +1,13 @@
+## v0.7.43 — Suppression de `/upgrade` (2026-11-08)
+
+- `/upgrade scan|fix|status|revert` **retiré** : outil dev-only qui produisait
+  surtout des non-bugs et des patchs à rejeter ; le vrai bug (tour sans
+  réponse finale, F7 en boucle) a été trouvé en lisant `turn.rs`.
+- Suppression de `src/upgrade.rs` (~1 000 lignes), du handler TUI, de
+  `docs/UPGRADE.md`, des données `~/.local/share/zer0gh0st/upgrade/` et du
+  test d'exclusion de menu.
+- Pour auditer : `cargo test --all-targets`, `clippy -D warnings`, `git diff`.
+
 ## v0.7.42 — Un tour se termine toujours (fin de F7) (2026-11-07)
 
 - **Bug principal** : quand le budget d'outils ou les itérations étaient
