@@ -1,3 +1,21 @@
+## v0.7.45 — Frappe rapide, baleine deepseek, démo (2026-11-08)
+
+- **fix(tui)** : la déduplication des frappes (`Press` identiques à < 50 ms)
+  ne vaut plus que sous **Windows** (ConPTY). Ailleurs, deux frappes légitimes
+  de la même touche arrivent souvent en moins de 50 ms et la seconde était
+  jetée : « deepseek » devenait « depsek », « allé » devenait « alé ».
+  Test de régression : `fast_repeated_keys_are_not_dropped`.
+- **Animation « baleine deepseek »** : quand le modèle actif **devient** un
+  `deepseek`, un overlay de 64×16 joue 3,2 s — la baleine sort de l'eau,
+  décrit un arc, puis plonge dans le profond (gerbe, bulles, dégradé `░▒`).
+  Silhouette **rasterisée en demi-blocs** et pivotée mathématiquement : tout
+  est une fonction du temps, sans état par frame ni aléatoire.
+  `ZER0_NO_ANIM=1` la désactive ; écran < 44×12 : pas d'overlay ; jamais de
+  rejeu pour le même modèle.
+- **README** : démo en **GIF** (900 px, 12 fps) affichée directement, plus
+  `demo.mp4` en 1920×1080, et deux captures (palette `/` filtrante, `zer0CL`).
+  Régénération : `./scripts/demo.sh` (VHS + `scripts/demo.tape`).
+
 ## v0.7.44 — `/zer0push` : tests, push et pull request (2026-11-08)
 
 - Nouvelle commande `/zer0push` (TUI) et `zer0 zer0push` (CLI) : enchaîne
