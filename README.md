@@ -17,7 +17,24 @@
 
 > Version : voir le badge *release* ci-dessus ou [`CHANGELOG.md`](./CHANGELOG.md).
 
-![Aperçu de ZER0│GH0ST](./screenshot.png)
+## ▶ Démo (59 s)
+
+**[Voir la démo en 1920×1080](./demo.mp4)** — `demo.mp4` (2,4 Mo) :
+
+1. `/codeexec` puis une phrase — l'agent lance **une vraie commande** (`ps`) et résume ;
+2. thème `castle` (Wolfenstein 3D) via le picker `/theme` ;
+3. `/0file` : explorateur de fichiers rétro (lecture seule) ;
+4. `/t0p` : moniteur système en direct ;
+5. `/pong` contre l'agent ;
+6. bascule sur un modèle `deepseek` → **animation « baleine »** dans un overlay.
+
+> GitHub n'affiche pas les vidéos dans un README : clique sur le lien, le fichier
+> s'ouvre dans le lecteur du navigateur. Pour la régénérer : `./scripts/demo.sh`
+> (VHS + `scripts/demo.tape`).
+
+| Palette `/` (103 commandes) et Zero-chan | `zer0CL` : un shell dans le panneau |
+|---|---|
+| ![Palette de commandes](./screenshot.png) | ![zer0CL](./screenshot1.png) |
 
 **Zer0** est un agent d'ingénierie qui vit dans un terminal. Réécrit de zéro en **Rust**,
 inspiré d'Agent Zero, Spynel et Synnoesis. Son nom — *ghost in the shell* — dit tout :
