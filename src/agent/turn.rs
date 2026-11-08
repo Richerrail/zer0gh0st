@@ -222,6 +222,13 @@ pub async fn run_turn_budgeted(
     let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     let mut total_calls: usize = 0;
     let mut continuations: u32 = 0;
+    // `true` tant qu'aucune réponse finale en texte n'a été produite. Si la
+    // boucle s'arrête (budget, itérations, boucle détectée), on force une
+    // dernière génération SANS outils : l'utilisateur ne doit jamais avoir à
+    // appuyer sur F7 pour obtenir une synthèse.
+    let mut need_final = true;
+    let mut cancelled = false;
+    let mut stop_reason: Option<String> = None;
 
     for _ in 0..max_iterations {
         let assistant = if options.tools_mode == ToolsMode::Prompt && !calls.is_empty() {
@@ -262,17 +269,20 @@ pub async fn run_turn_budgeted(
                     }
                     Err(e) => {
                         let _ = ui.send(UiEvent::Error(format!("{e}")));
-                        return;
+                        cancelled = true;
+                        break;
                     }
                 }
             }
+            need_final = false;
             break;
         }
 
         for call in &calls {
             if crate::cancel::is_cancelled() {
                 let _ = ui.send(UiEvent::Error("⏹ interrompu par /stop".into()));
-                return;
+                cancelled = true;
+                break;
             }
             // Loop containment: repeated identical calls or a global budget.
             total_calls += 1;
@@ -284,13 +294,15 @@ pub async fn run_turn_budgeted(
                     "boucle détectée : `{}` appelé {} fois avec les mêmes arguments → arrêt",
                     call.function.name, *n
                 )));
-                return;
+                stop_reason = Some("boucle détectée".into());
+                break;
             }
             if total_calls > max_tool_calls {
                 let _ = ui.send(UiEvent::Error(format!(
                     "budget d'appels d'outils dépassé ({max_tool_calls}) → arrêt"
                 )));
-                return;
+                stop_reason = Some("budget d'outils".into());
+                break;
             }
 
             let _ = ui.send(UiEvent::ToolCall {
@@ -313,6 +325,12 @@ pub async fn run_turn_budgeted(
             messages.push(tool_msg);
         }
 
+        // Budget/boucle/annulation : on ne relance pas le modèle avec des
+        // outils, on passe à la réponse finale.
+        if cancelled || stop_reason.is_some() {
+            break;
+        }
+
         // subsequent calls stay on the chosen endpoint
         match client
             .stream_chat(&system, &messages, &tools, &options, &ui)
@@ -325,7 +343,35 @@ pub async fn run_turn_budgeted(
             }
             Err(e) => {
                 let _ = ui.send(UiEvent::Error(format!("{e}")));
-                return;
+                cancelled = true;
+                break;
+            }
+        }
+    }
+
+    // Réponse finale forcée : sans elle, un tour qui a consommé son budget
+    // d'outils se terminerait sur un outil, sans synthèse (l'utilisateur
+    // devait taper F7 à répétition).
+    if need_final && !cancelled {
+        let why = stop_reason.unwrap_or_else(|| "limite d'itérations".into());
+        let _ = ui.send(UiEvent::Info(format!(
+            "⏳ {why} atteinte → réponse finale sans outils"
+        )));
+        messages.push(ChatMessage::user(
+            "Tu as atteint la limite d'outils pour ce tour. Réponds MAINTENANT en texte, \
+             sans appeler d'outil : résume ce qui a été fait, ce qui reste, et l'état exact.",
+        ));
+        match client
+            .stream_chat(&system, &messages, &[], &options, &ui)
+            .await
+        {
+            Ok((c, _cs, _f)) => {
+                if !c.trim().is_empty() {
+                    messages.push(ChatMessage::assistant(c, Vec::new()));
+                }
+            }
+            Err(e) => {
+                let _ = ui.send(UiEvent::Error(format!("réponse finale impossible : {e}")));
             }
         }
     }

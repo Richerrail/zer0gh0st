@@ -1,3 +1,16 @@
+## v0.7.42 — Un tour se termine toujours (fin de F7) (2026-11-07)
+
+- **Bug principal** : quand le budget d'outils ou les itérations étaient
+  épuisés, `run_turn` s'arrêtait sur un appel d'outil **sans réponse finale**
+  (et certains chemins sortaient sans `TurnComplete` → TUI bloquée, F7 en
+  boucle).
+- Désormais : dernière génération **sans outils** (« résume ce qui a été fait
+  et ce qui reste »), puis `TurnComplete` dans tous les cas (budget, boucle,
+  annulation, erreur de flux).
+- `fix` lance `cargo test --all-targets` : les tests d'intégration
+  (`tests/streaming.rs`) n'étaient pas exécutés par `--lib`.
+- Test de régression : budget épuisé → « Synthèse finale. » et 3 requêtes.
+
 ## v0.7.41 — `scan` : tests hors `#[cfg(test)]` (2026-11-07)
 
 - La partie « production » s'arrête au **premier test**, qu'il soit une

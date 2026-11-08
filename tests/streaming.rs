@@ -406,3 +406,80 @@ async fn tool_specs_are_sent_to_the_provider() {
     assert!(body.contains(r#""tool_choice":"auto""#), "{body}");
     assert!(body.contains(r#""name":"code_exec""#), "{body}");
 }
+
+/// Régression : quand le budget d'outils est épuisé, le tour doit produire une
+/// **réponse finale en texte** (sans outils) et toujours envoyer `TurnComplete`.
+/// Avant, la boucle s'arrêtait sur un outil : l'utilisateur devait taper F7
+/// (nudge) à répétition pour obtenir une synthèse.
+#[tokio::test]
+async fn tool_budget_forces_a_final_text_answer() {
+    use zer0::agent::turn::run_turn_budgeted;
+
+    let call = r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"no_such_tool","arguments":"{}"}}]}}]}"#;
+    let mock = Mock::start(vec![
+        sse(&[
+            call,
+            r#"{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#,
+            "[DONE]",
+        ]),
+        sse(&[
+            call,
+            r#"{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#,
+            "[DONE]",
+        ]),
+        sse(&[
+            r#"{"choices":[{"delta":{"content":"Synthèse finale."}}]}"#,
+            r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+            "[DONE]",
+        ]),
+    ])
+    .await;
+
+    let suffix = std::process::id();
+    let endpoints = vec![Endpoint {
+        provider_id: "mock".into(),
+        label: format!("mock-{suffix}"),
+        base_url: mock.base.clone(),
+        api_key: None,
+        model: "m".into(),
+    }];
+
+    let (tx, mut rx) = unbounded_channel::<UiEvent>();
+    let handle = tokio::spawn(async move {
+        run_turn_budgeted(
+            endpoints,
+            "system".into(),
+            vec![ChatMessage::user("fais un truc")],
+            vec![],
+            ChatOptions::default(),
+            tx,
+            1, // une seule itération d'outils…
+            5,
+        )
+        .await;
+    });
+
+    let mut completed = None;
+    let timeout = tokio::time::timeout(Duration::from_secs(10), async {
+        while let Some(ev) = rx.recv().await {
+            if let UiEvent::TurnComplete(msgs) = ev {
+                completed = Some(msgs);
+                break;
+            }
+        }
+    });
+    timeout
+        .await
+        .expect("pas de TurnComplete après épuisement du budget");
+    handle.await.unwrap();
+
+    let msgs = completed.expect("aucune conversation complétée");
+    let last = msgs.last().expect("historique vide");
+    assert_eq!(last.role, "assistant");
+    assert_eq!(last.content.as_deref(), Some("Synthèse finale."));
+    assert_eq!(
+        mock.requests().len(),
+        3,
+        "outil, second tour, puis réponse finale forcée"
+    );
+}
