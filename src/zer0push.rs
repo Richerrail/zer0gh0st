@@ -52,7 +52,8 @@ impl Default for PushOptions {
     }
 }
 
-const USAGE: &str = "usage: zer0push [titre…] [--base <branche>] [--body <texte>] [--remote <nom>] \
+const USAGE: &str =
+    "usage: zer0push [titre…] [--base <branche>] [--body <texte>] [--remote <nom>] \
 [--draft] [--no-tests] [--commit] [--allow-main] [--dry-run]";
 
 /// Parse les arguments (même syntaxe en TUI `/zer0push …` et CLI `zer0 zer0push …`).
@@ -68,26 +69,47 @@ pub fn parse_args(args: &[&str]) -> Result<PushOptions> {
             "--commit" => o.commit = true,
             "--allow-main" => o.allow_main = true,
             "--base" | "-B" => {
-                o.base = Some(it.next().map(|s| s.to_string()).ok_or_else(|| anyhow!("{USAGE}"))?)
+                o.base = Some(
+                    it.next()
+                        .map(|s| s.to_string())
+                        .ok_or_else(|| anyhow!("{USAGE}"))?,
+                )
             }
             "--body" | "-b" => {
-                o.body = Some(it.next().map(|s| s.to_string()).ok_or_else(|| anyhow!("{USAGE}"))?)
+                o.body = Some(
+                    it.next()
+                        .map(|s| s.to_string())
+                        .ok_or_else(|| anyhow!("{USAGE}"))?,
+                )
             }
             "--remote" | "-r" => {
-                o.remote = it.next().map(|s| s.to_string()).ok_or_else(|| anyhow!("{USAGE}"))?
+                o.remote = it
+                    .next()
+                    .map(|s| s.to_string())
+                    .ok_or_else(|| anyhow!("{USAGE}"))?
             }
             "--title" | "-t" => {
-                o.title = Some(it.next().map(|s| s.to_string()).ok_or_else(|| anyhow!("{USAGE}"))?)
+                o.title = Some(
+                    it.next()
+                        .map(|s| s.to_string())
+                        .ok_or_else(|| anyhow!("{USAGE}"))?,
+                )
             }
-            other if other.starts_with("--base=") => o.base = Some(other["--base=".len()..].to_string()),
+            other if other.starts_with("--base=") => {
+                o.base = Some(other["--base=".len()..].to_string())
+            }
             other if other.starts_with("--remote=") => {
                 o.remote = other["--remote=".len()..].to_string()
             }
             other if other.starts_with("--title=") => {
                 o.title = Some(other["--title=".len()..].to_string())
             }
-            other if other.starts_with("--body=") => o.body = Some(other["--body=".len()..].to_string()),
-            other if other.starts_with('-') => return Err(anyhow!("option inconnue `{other}` — {USAGE}")),
+            other if other.starts_with("--body=") => {
+                o.body = Some(other["--body=".len()..].to_string())
+            }
+            other if other.starts_with('-') => {
+                return Err(anyhow!("option inconnue `{other}` — {USAGE}"))
+            }
             other => title.push(other),
         }
     }
@@ -190,10 +212,7 @@ pub fn run_in(root: &Path, opts: &PushOptions) -> Result<PushReport> {
         .unwrap_or(0);
     validate(&branch, dirty, opts)?;
 
-    let title = opts
-        .title
-        .clone()
-        .unwrap_or_else(|| branch.clone());
+    let title = opts.title.clone().unwrap_or_else(|| branch.clone());
     let base = opts
         .base
         .clone()
@@ -228,7 +247,11 @@ pub fn run_in(root: &Path, opts: &PushOptions) -> Result<PushReport> {
             "   4. gh pr create --base {base} --title \"{title}\"{}",
             if opts.draft { " --draft" } else { "" }
         ));
-        return Ok(PushReport { lines, ok: true, pr_url });
+        return Ok(PushReport {
+            lines,
+            ok: true,
+            pr_url,
+        });
     }
 
     // 1. Tests
@@ -245,7 +268,11 @@ pub fn run_in(root: &Path, opts: &PushOptions) -> Result<PushReport> {
             Err(e) => {
                 lines.push(format!("❌ tests en échec : {e}"));
                 lines.push("push annulé — corrige, ou relance avec --no-tests".to_string());
-                return Ok(PushReport { lines, ok: false, pr_url });
+                return Ok(PushReport {
+                    lines,
+                    ok: false,
+                    pr_url,
+                });
             }
         }
     } else {
@@ -286,7 +313,11 @@ pub fn run_in(root: &Path, opts: &PushOptions) -> Result<PushReport> {
         }
         Err(e) => {
             lines.push(format!("❌ push en échec : {e}"));
-            return Ok(PushReport { lines, ok: false, pr_url });
+            return Ok(PushReport {
+                lines,
+                ok: false,
+                pr_url,
+            });
         }
     }
 
@@ -324,7 +355,11 @@ pub fn run_in(root: &Path, opts: &PushOptions) -> Result<PushReport> {
         }
     }
 
-    Ok(PushReport { lines, ok: true, pr_url })
+    Ok(PushReport {
+        lines,
+        ok: true,
+        pr_url,
+    })
 }
 
 #[cfg(test)]
@@ -340,7 +375,15 @@ mod tests {
 
     #[test]
     fn parse_title_and_flags() {
-        let o = parse_args(&["ajout", "zer0push", "--draft", "--base", "main", "--no-tests"]).unwrap();
+        let o = parse_args(&[
+            "ajout",
+            "zer0push",
+            "--draft",
+            "--base",
+            "main",
+            "--no-tests",
+        ])
+        .unwrap();
         assert_eq!(o.title.as_deref(), Some("ajout zer0push"));
         assert!(o.draft);
         assert!(o.no_tests);
@@ -367,21 +410,38 @@ mod tests {
         assert!(validate("main", 0, &o).is_err());
         assert!(validate("fix/x", 3, &o).is_err());
         assert!(validate("fix/x", 0, &o).is_ok());
-        let o = PushOptions { allow_main: true, ..Default::default() };
+        let o = PushOptions {
+            allow_main: true,
+            ..Default::default()
+        };
         assert!(validate("main", 0, &o).is_ok());
-        let o = PushOptions { commit: true, ..Default::default() };
+        let o = PushOptions {
+            commit: true,
+            ..Default::default()
+        };
         assert!(validate("fix/x", 3, &o).is_ok());
     }
 
     #[test]
     fn dry_run_on_temp_repo() {
         // Dépôt git temporaire minimal : Cargo.toml + .git, branche feature.
-        let dir: PathBuf = std::env::temp_dir().join(format!("zer0push-test-{}", std::process::id()));
+        let dir: PathBuf =
+            std::env::temp_dir().join(format!("zer0push-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("Cargo.toml"), "[package]\nname=\"x\"\nversion=\"0.1.0\"\n").unwrap();
+        std::fs::write(
+            dir.join("Cargo.toml"),
+            "[package]\nname=\"x\"\nversion=\"0.1.0\"\n",
+        )
+        .unwrap();
         let g = |a: &[&str]| {
-            assert!(Command::new("git").args(a).current_dir(&dir).output().unwrap().status.success());
+            assert!(Command::new("git")
+                .args(a)
+                .current_dir(&dir)
+                .output()
+                .unwrap()
+                .status
+                .success());
         };
         g(&["init", "-b", "fix/test"]);
         g(&["config", "user.email", "t@t"]);
@@ -389,7 +449,10 @@ mod tests {
         std::fs::write(dir.join("a.txt"), "x").unwrap();
         g(&["add", "."]);
         g(&["commit", "-m", "init"]);
-        let o = PushOptions { dry_run: true, ..Default::default() };
+        let o = PushOptions {
+            dry_run: true,
+            ..Default::default()
+        };
         let r = run_in(&dir, &o).unwrap();
         assert!(r.ok);
         assert!(r.lines.iter().any(|l| l.contains("dry-run")));

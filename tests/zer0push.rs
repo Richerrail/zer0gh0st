@@ -139,7 +139,9 @@ fn refuses_a_directory_that_is_not_a_checkout() {
     let dir = std::env::temp_dir().join(format!("zer0push-nogit-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let err = run_in(&dir, &PushOptions::default()).unwrap_err().to_string();
+    let err = run_in(&dir, &PushOptions::default())
+        .unwrap_err()
+        .to_string();
     assert!(err.contains("checkout"), "erreur : {err}");
     let _ = std::fs::remove_dir_all(&dir);
 }
