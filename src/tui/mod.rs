@@ -920,6 +920,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
         "/embeddings" => handle_embeddings(app, &args),
         "/img" => handle_img(app, &args),
         "/update" => cmd_update(app, &args, ui_tx),
+        "/zer0push" => cmd_zer0push(app, &args, ui_tx),
         "/remember" => cmd_remember(&args, ui_tx),
         "/recall" => cmd_recall(&args, ui_tx),
         "/forget" => handle_forget(app, &args),
@@ -1358,6 +1359,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
              /model                     modèle actuel + sélection (liste)\n\
              /img <chemin>              joint une image au prochain message (vision)\n\
              /update [check]            met à jour le binaire (Releases GitHub)\n\
+             /zer0push [titre] [--base <b>] [--draft] [--commit] [--dry-run]  tests + push + PR (gh)\n\
              /theme [nom]              menu des thèmes (castle, noir, noir-rouge)\n\
              /sound [on|off]           sons d'interface (défaut : off)\n\
              /0cl                      shell dans le panneau (zer0CL)\n\
@@ -1671,6 +1673,43 @@ fn cmd_update(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
             Err(e) => format!("échec : {e}"),
         };
         let _ = ui.send(UiEvent::Info(format!("⬆ {msg}")));
+    });
+}
+
+/// `/zer0push` : tests → push → pull request (`gh`).
+/// Le travail est long (cargo test) : il part dans une tâche, le rapport revient
+/// en `UiEvent::Info`. Aucune action destructive : jamais de `--force`.
+fn cmd_zer0push(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
+    let opts = match crate::zer0push::parse_args(args) {
+        Ok(o) => o,
+        Err(e) => {
+            app.messages.push(ChatMessage::notice(format!("{e}")));
+            return;
+        }
+    };
+    app.messages.push(ChatMessage::notice(if opts.dry_run {
+        "🧪 zer0push (dry-run) : plan seulement…"
+    } else {
+        "🚀 zer0push : tests → push → PR…"
+    }));
+    let ui = ui_tx.clone();
+    tokio::spawn(async move {
+        let report = tokio::task::spawn_blocking(move || crate::zer0push::run(&opts))
+            .await
+            .unwrap_or_else(|e| Err(anyhow::anyhow!("tâche interrompue : {e}")));
+        let text = match report {
+            Ok(r) => {
+                let mut s = r.lines.join("\n");
+                s.push_str(if r.ok {
+                    "\n✅ terminé"
+                } else {
+                    "\n❌ arrêté (voir ci-dessus)"
+                });
+                s
+            }
+            Err(e) => format!("❌ zer0push : {e}"),
+        };
+        let _ = ui.send(UiEvent::Info(text));
     });
 }
 

@@ -47,6 +47,7 @@ pub mod update;
 pub mod util;
 pub mod vault;
 pub mod vote;
+pub mod zer0push;
 pub mod zerochan;
 
 /// Prompt système par défaut (`src/prompts/system.md`).
