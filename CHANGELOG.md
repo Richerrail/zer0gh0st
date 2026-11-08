@@ -1,3 +1,17 @@
+## v0.7.44 — `/zer0push` : tests, push et pull request (2026-11-08)
+
+- Nouvelle commande `/zer0push` (TUI) et `zer0 zer0push` (CLI) : enchaîne
+  `cargo test` → `git push -u` → `gh pr create`.
+- Garde-fous : jamais de `--force` ; push sur `main`/`master` refusé sans
+  `--allow-main` ; arbre sale refusé sans `--commit` ; push annulé si les
+  tests échouent ; `--dry-run` affiche le plan sans rien exécuter.
+- `--commit` ajoute aussi les **nouveaux** fichiers (`git add -u` les
+  oubliait → module absent du commit, CI rouge en `E0583`).
+- Options : `[titre…] [--base <b>] [--body <t>] [--remote <n>] [--draft]
+  [--no-tests] [--commit] [--allow-main] [--dry-run]`.
+- Tests : 6 unitaires dans `src/zer0push.rs`, 7 d'intégration dans
+  `tests/zer0push.rs` (dépôt git temporaire, sans réseau ni `gh`).
+
 ## v0.7.43 — Suppression de `/upgrade` (2026-11-08)
 
 - `/upgrade scan|fix|status|revert` **retiré** : outil dev-only qui produisait
