@@ -33,7 +33,7 @@ fi
 # Sources / manifestes / licences / docs
 cp Cargo.toml Cargo.lock LICENSE config.example.toml \
    README.md SPEC.md SAFETY.md ARCHITECTURE.md ECOSYSTEM.md CHANGELOG.md \
-   ROADMAP.md ROADMAP_FUN.md ROADMAP_PORT_SLASH.md BRAINSTORM_ZEROCHAN.md 0BOX-TEST.md \
+   ROADMAP.md ROADMAP_FUN.md ROADMAP_PORT_SLASH.md BRAINSTORM_ZEROCHAN.md \
    "$OUT/"
 
 # Images (capture d'écran + illustration hero), optionnelles
@@ -79,9 +79,7 @@ cat > "$OUT/.gitignore" <<'EOF'
 *.key
 *_api_key*
 
-# Démo (générée par VHS ; non versionnée)
-/demo.gif
-/demo.mp4
+# Démo versionnée dans le dépôt : demo.gif (aperçu) + demo.mp4 (qualité)
 EOF
 
 # mods/README.md public
