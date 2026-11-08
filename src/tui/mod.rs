@@ -3618,13 +3618,20 @@ fn handle_input(ev: Event, app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
             let code = k.code;
             let mods = k.modifiers;
 
-            // Vérifier si c'est un doublon (même touche + mêmes modifs < 50ms)
-            if let Some((last_code, last_mods, last_time)) = app.last_key_event {
-                if last_code == code
-                    && last_mods == mods
-                    && now.duration_since(last_time).as_millis() < 50
-                {
-                    return; // Ignorer le doublon
+            // Doublon = même touche, mêmes modifs, < 50 ms. **Windows
+            // uniquement** : c'est ConPTY qui rejoue des `Press`. Ailleurs,
+            // deux frappes légitimes de la même touche arrivent souvent en
+            // moins de 50 ms (frappe rapide, `tmux send-keys`, script, presse-
+            // papier) et étaient perdues — « deepseek » devenait « depsek »,
+            // « allé » devenait « alé ».
+            if cfg!(windows) {
+                if let Some((last_code, last_mods, last_time)) = app.last_key_event {
+                    if last_code == code
+                        && last_mods == mods
+                        && now.duration_since(last_time).as_millis() < 50
+                    {
+                        return; // Ignorer le doublon
+                    }
                 }
             }
             app.last_key_event = Some((code, mods, now));
@@ -5916,6 +5923,70 @@ mod tests {
         assert!(
             app.sel_anchor.is_none(),
             "le clic sur l'upvote a été traité comme une sélection de texte"
+        );
+    }
+
+    #[test]
+    fn fast_repeated_keys_are_not_dropped() {
+        // Régression : la déduplication des `Press` (< 50 ms) s'appliquait à
+        // toutes les plateformes et perdait la moitié des lettres doublées
+        // (« deepseek » → « depsek », « llama » → « lama »).
+        let mut app = test_app();
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        for ch in "deepseek".chars() {
+            handle_input(
+                Event::Key(crossterm::event::KeyEvent::new(
+                    KeyCode::Char(ch),
+                    KeyModifiers::NONE,
+                )),
+                &mut app,
+                &tx,
+            );
+        }
+        assert_eq!(app.input, "deepseek");
+    }
+
+    #[test]
+    fn whale_triggers_on_a_deepseek_model_change() {
+        let mut app = test_app();
+        app.model = "openai/gpt-4o".into();
+        whale_on_model_change(&mut app, "openai/gpt-4o-mini");
+        assert!(app.whale.is_none(), "gpt ne doit rien déclencher");
+
+        app.model = "deepseek/deepseek-chat".into();
+        whale_on_model_change(&mut app, "openai/gpt-4o");
+        assert!(app.whale.is_some(), "deepseek doit déclencher l'animation");
+
+        // Même modèle re-sélectionné : pas de rejeu.
+        app.whale = None;
+        whale_on_model_change(&mut app, "deepseek/deepseek-chat");
+        assert!(app.whale.is_none(), "pas de rejeu pour le même modèle");
+    }
+
+    #[test]
+    fn whale_overlay_is_painted_by_the_full_draw() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let mut app = test_app();
+        // 55 % de la durée : l'apex, donc la baleine hors de l'eau.
+        app.whale = Some(whale::Whale::from_start(
+            std::time::Instant::now() - whale::DURATION.mul_f32(0.55),
+        ));
+        let mut term = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let mut text = String::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                text.push_str(buf[(x, y)].symbol());
+            }
+            text.push('\n');
+        }
+        assert!(text.contains("deepseek"), "titre de l'overlay absent");
+        assert!(
+            text.contains('▀') || text.contains('▄') || text.contains('█'),
+            "baleine absente du rendu"
         );
     }
 
