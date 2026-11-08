@@ -5354,7 +5354,11 @@ fn input_height(app: &App, width: u16) -> u16 {
 /// Ancre/curseur normalisés en ordre de lecture (ligne, puis colonne),
 /// quelle que soit la direction du glisser (bas→haut, droite→gauche…).
 fn sel_normalized(a: (u16, u16), h: (u16, u16)) -> ((u16, u16), (u16, u16)) {
-    if (a.1, a.0) <= (h.1, h.0) { (a, h) } else { (h, a) }
+    if (a.1, a.0) <= (h.1, h.0) {
+        (a, h)
+    } else {
+        (h, a)
+    }
 }
 
 /// Colonnes [début, fin] incluses de la ligne `y` dans une sélection linéaire
@@ -5850,15 +5854,9 @@ mod tests {
         // De (8,0) à (2,2) : avant, le rectangle x=2..=8 × y=0..=2 donnait
         // « 23456789\ncdefghi\nCDEFGHI ». En linéaire : fin de la 1ʳᵉ ligne,
         // ligne du milieu entière, début de la dernière.
-        assert_eq!(
-            selection_text(&scr, (8, 0), (2, 2)),
-            "89\nabcdefghij\nABC"
-        );
+        assert_eq!(selection_text(&scr, (8, 0), (2, 2)), "89\nabcdefghij\nABC");
         // Même sélection, glissée en sens inverse (bas→haut, droite→gauche).
-        assert_eq!(
-            selection_text(&scr, (2, 2), (8, 0)),
-            "89\nabcdefghij\nABC"
-        );
+        assert_eq!(selection_text(&scr, (2, 2), (8, 0)), "89\nabcdefghij\nABC");
         // Une seule ligne : seulement le segment, pas la ligne entière.
         assert_eq!(selection_text(&scr, (3, 1), (6, 1)), "defg");
         // Simple clic sans glisser : rien (avant : 1 caractère copié).
