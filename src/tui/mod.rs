@@ -2,6 +2,7 @@ mod banner;
 mod menu;
 mod neon;
 mod picker;
+mod whale;
 mod wizard;
 
 use anyhow::Result;
@@ -206,6 +207,8 @@ pub struct App {
     pub menu_sel: usize,
     /// Dernier événement clavier traité (pour déduplication sur Windows).
     pub last_key_event: Option<(KeyCode, KeyModifiers, std::time::Instant)>,
+    /// Animation « baleine deepseek » en cours (None = rien à l'écran).
+    pub whale: Option<whale::Whale>,
 }
 
 impl App {
@@ -412,6 +415,7 @@ pub async fn run(
         arrow_rect: Rect::default(),
         menu_sel: 0,
         last_key_event: None,
+        whale: None,
         thinking: options.thinking || g_initial.thinking,
         max_tokens: options.max_tokens,
         temperature: options.temperature,
@@ -594,10 +598,17 @@ async fn event_loop(
                 || app.task_view.is_some()
                 // Onde néon autour de la page (menu ouvert).
                 || app.menu_visible
+                // Animation « baleine deepseek » en cours.
+                || app.whale.is_some()
                 // Clignotement de l'avertissement F4 (shell désarmé).
                 || !app.code_exec =>
             {
                 app.anim_phase = app.anim_phase.wrapping_add(6);
+                // L'animation de la baleine se termine toute seule : on la retire
+                // pour que le ticker (`if … || app.whale.is_some()`) s'arrête.
+                if app.whale.as_ref().is_some_and(|w| w.done()) {
+                    app.whale = None;
+                }
                 // Animation des tâches en cours (un pas toutes les ~480 ms).
                 if let Some((idx, tasks)) = app.task_view.clone() {
                     let still_there = app
@@ -1605,9 +1616,23 @@ fn handle_picker_key(
     }
 }
 
+/// Lance l'animation « baleine deepseek » quand le modèle actif **devient** un
+/// deepseek. Jamais deux fois pour le même modèle, jamais au démarrage, et
+/// désactivable par `ZER0_NO_ANIM=1`.
+fn whale_on_model_change(app: &mut App, before: &str) {
+    if before == app.model || !whale::wanted(&app.model) {
+        return;
+    }
+    if std::env::var("ZER0_NO_ANIM").is_ok_and(|v| !v.trim().is_empty() && v.trim() != "0") {
+        return;
+    }
+    app.whale = Some(whale::Whale::new());
+}
+
 /// Applique un modèle (refuse les embedders pour le chat).
 fn set_model(app: &mut App, m: &str, ui_tx: &UnboundedSender<UiEvent>) {
     let local_mode = app.provider_id == "local";
+    let before = app.model.clone();
     if select::is_embedding_or_rerank(m) {
         app.messages.push(ChatMessage::notice(format!(
             "❌ {m} est un modèle d'embedding/rerank — inutilisable en chat \
@@ -1631,6 +1656,7 @@ fn set_model(app: &mut App, m: &str, ui_tx: &UnboundedSender<UiEvent>) {
         });
     }
     probe_context(app, ui_tx);
+    whale_on_model_change(app, &before);
     app.messages
         .push(ChatMessage::notice(format!("Modèle actif: {m}")));
 }
@@ -1650,7 +1676,9 @@ fn set_provider(app: &mut App, id: &str, ui_tx: &UnboundedSender<UiEvent>) {
             app.provider_name = s.provider_name.clone();
             app.base_url = s.base_url.clone();
             app.api_key = s.api_key.clone();
+            let before = app.model.clone();
             app.model = s.model.clone();
+            whale_on_model_change(app, &before);
             app.messages
                 .push(ChatMessage::notice(format!("Provider actif: {}", p.name)));
             probe_context(app, ui_tx);
@@ -1930,7 +1958,9 @@ fn handle_model(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) 
             // Même contrôle et même persistance que `zer0 model use <id>`.
             match crate::commands::set_model(m) {
                 Ok(lines) => {
+                    let before = app.model.clone();
                     app.model = m.to_string();
+                    whale_on_model_change(app, &before);
                     probe_context(app, ui_tx);
                     for line in lines {
                         app.messages.push(ChatMessage::notice(line));
@@ -4427,6 +4457,12 @@ fn draw(f: &mut Frame, app: &mut App) {
     draw_chats_popup(f, area, app);
     finalize_buffer(f, app);
 
+    // Animation « baleine deepseek » : par-dessus le chat, sous les overlays
+    // interactifs (picker), et **hors** de la capture de sélection (`screen`).
+    if let Some(w) = &app.whale {
+        whale::draw(f, area, w);
+    }
+
     // Sélecteur (/model, /provider) par-dessus tout le reste.
     if let Some(p) = &app.picker {
         picker::draw(f, area, p);
@@ -5808,6 +5844,7 @@ mod tests {
             arrow_rect: Rect::default(),
             menu_sel: 0,
             last_key_event: None,
+            whale: None,
         }
     }
 
