@@ -255,7 +255,22 @@ pub fn run_in(root: &Path, opts: &PushOptions) -> Result<PushReport> {
     // 2. Commit éventuel
     if dirty > 0 && opts.commit {
         lines.push("📝 commit de l'arbre sale…".to_string());
+        // `git add -u` seul laisse les **nouveaux** fichiers hors du commit :
+        // c'est ce qui a produit une CI rouge (module absent du dépôt).
+        // On ajoute donc aussi les fichiers non suivis, en respectant .gitignore.
         git(root, &["add", "-u"])?;
+        let untracked = git(root, &["ls-files", "--others", "--exclude-standard"])?;
+        let new_files: Vec<&str> = untracked
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect();
+        if !new_files.is_empty() {
+            let mut add: Vec<&str> = vec!["add", "--"];
+            add.extend(new_files.iter().copied());
+            git(root, &add)?;
+            lines.push(format!("   + {} nouveau(x) fichier(s)", new_files.len()));
+        }
         git(root, &["commit", "-m", &title])?;
         lines.push("✅ commité".to_string());
     }

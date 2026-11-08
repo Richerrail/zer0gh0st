@@ -109,6 +109,32 @@ fn dry_run_plans_without_touching_the_remote() {
 }
 
 #[test]
+fn commit_mode_includes_new_untracked_files() {
+    // Régression : `git add -u` seul laissait les nouveaux fichiers hors du
+    // commit → la CI compilait un module absent (E0583).
+    let dir = temp_repo("commit");
+    std::fs::write(dir.join("nouveau.rs"), "// neuf\n").unwrap();
+    let opts = PushOptions {
+        commit: true,
+        no_tests: true,
+        ..Default::default()
+    };
+    // Le push échouera (aucun remote) : on ne teste que l'étape commit.
+    let _ = run_in(&dir, &opts);
+    let tracked = Command::new("git")
+        .args(["ls-files"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let tracked = String::from_utf8_lossy(&tracked.stdout);
+    assert!(
+        tracked.lines().any(|l| l.trim() == "nouveau.rs"),
+        "fichier non suivi absent du commit : {tracked}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn refuses_a_directory_that_is_not_a_checkout() {
     let dir = std::env::temp_dir().join(format!("zer0push-nogit-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
