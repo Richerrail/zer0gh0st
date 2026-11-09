@@ -20,6 +20,7 @@ use crate::event::UiEvent;
 use crate::llm::llama::ChatOptions;
 use crate::route;
 use crate::tools::ToolSpec;
+use crate::tui::known_context;
 
 const API: &str = "https://api.telegram.org";
 const MAX_MSG: usize = 3800;
@@ -105,6 +106,9 @@ struct Bot {
     /// Un auto-claim seul n'ouvre pas le shell : sinon, quiconque trouve le bot
     /// avant son propriétaire obtient un `bash` sur la machine.
     exec_trusted: bool,
+    /// Fenêtre de contexte du modèle (tokens), pour le seuil de compaction.
+    /// B6 : sans elle, le bot compactait à 4 000 en dur.
+    context_window: u64,
 }
 /// Shell distant explicitement autorisé malgré un auto-claim.
 fn exec_optin() -> bool {
@@ -427,7 +431,10 @@ impl Bot {
         let mut base = history.clone();
         let options = self.options.clone();
 
-        if crate::agent::compact::estimate_tokens(&base) >= 4000 {
+        // B6 : même seuil que la TUI et le CLI. Avant, 4 000 en dur : sur un
+        // modèle 200 k on compactait 50× trop tôt, sur un 8 k trop tard.
+        let budget = crate::agent::compact::budget_for(self.context_window);
+        if crate::agent::compact::estimate_tokens(&base) >= budget {
             let (b, _) = crate::agent::compact::compact_now(utility, &system, base, 6).await;
             base = b;
         }
@@ -645,7 +652,10 @@ pub fn spawn(
     let (stop_tx, mut stop_rx) = tokio::sync::watch::channel(false);
     let join = tokio::spawn(async move {
         if let Err(e) = run_loop(token, allow, &mut stop_rx, notify).await {
-            eprintln!("telegram: {e}");
+            crate::logging::log_error(
+                "telegram_loop",
+                serde_json::json!({ "error": e.to_string() }),
+            );
         }
     });
     Ok(Handle {
@@ -673,11 +683,13 @@ async fn run_loop(
     let system = crate::enrich_system(system);
 
     let allow_is_empty = allow.is_empty();
+    let settings = config::resolve();
+    let settings_model = settings.model.clone();
     let mut bot = Bot {
         http: reqwest::Client::new(),
         token,
         allow,
-        settings: config::resolve(),
+        settings,
         system,
         tools: crate::tools::all(),
         options: ChatOptions {
@@ -695,6 +707,9 @@ async fn run_loop(
         // Une allowlist fournie par l'utilisateur (--allow ou config) est de
         // confiance ; une liste vide = auto-claim au premier contact.
         exec_trusted: !allow_is_empty,
+        // B6 : fenêtre réelle du modèle, sinon le seuil de compaction retombe
+        // sur un 4 000 en dur (trop tôt sur un 200 k, trop tard sur un 8 k).
+        context_window: known_context(&settings_model).unwrap_or(128_000),
     };
 
     let me = bot.api("getMe", serde_json::json!({})).await?;
@@ -734,7 +749,10 @@ async fn run_loop(
                     }
                 }
                 Err(e) => {
-                    eprintln!("⚠ getUpdates: {e}");
+                    crate::logging::log_warn(
+                        "telegram_get_updates",
+                        serde_json::json!({ "error": e.to_string() }),
+                    );
                     tokio::time::sleep(Duration::from_secs(3)).await;
                 }
             },

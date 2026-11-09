@@ -12,6 +12,16 @@ pub fn estimate_tokens(messages: &[ChatMessage]) -> usize {
     chars / 4
 }
 
+/// Seuil de compaction pour une fenêtre de contexte donnée.
+///
+/// 60 % de la fenêtre **réelle** du modèle, avec un plancher de 4 000 tokens.
+/// Avant, ce calcul était dupliqué (TUI ×2) et `telegram.rs` utilisait 4 000
+/// en dur : sur un modèle 200 k il compactait 50× trop tôt, sur un 8 k trop
+/// tard. Une seule définition, un seul comportement.
+pub fn budget_for(context_window: u64) -> usize {
+    ((context_window as f64 * 0.6) as usize).max(4_000)
+}
+
 /// Why a compaction did or did not happen.
 #[derive(Debug, Clone)]
 pub enum CompactOutcome {
@@ -122,4 +132,39 @@ pub async fn compact_now(
     }
 
     (messages, CompactOutcome::Failed(last_err))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// B6 : seuil unique = 60 % de la fenêtre, plancher 4 000.
+    #[test]
+    fn budget_for_follows_the_window_with_a_floor() {
+        // Fenêtre inconnue (0) : plancher.
+        assert_eq!(budget_for(0), 4_000);
+        // Petite fenêtre : le plancher domine.
+        assert_eq!(budget_for(4_000), 4_000);
+        assert_eq!(budget_for(6_000), 4_000);
+        // 8 k -> 4 800 (au-dessus du plancher).
+        assert_eq!(budget_for(8_000), 4_800);
+        // 128 k -> 76 800.
+        assert_eq!(budget_for(128_000), 76_800);
+        // 200 k -> 120 000 : c'est le cas que le 4 000 en dur de Telegram
+        // compactait 30× trop tôt.
+        assert_eq!(budget_for(200_000), 120_000);
+        assert_eq!(budget_for(1_000_000), 600_000);
+    }
+
+    /// B6 : le seuil doit croître avec la fenêtre, jamais régresser.
+    #[test]
+    fn budget_for_is_monotonic() {
+        let windows = [
+            0u64, 1_000, 4_000, 8_000, 32_000, 128_000, 200_000, 1_000_000,
+        ];
+        let budgets: Vec<usize> = windows.iter().map(|w| budget_for(*w)).collect();
+        for pair in budgets.windows(2) {
+            assert!(pair[1] >= pair[0], "seuil non monotone : {budgets:?}");
+        }
+    }
 }

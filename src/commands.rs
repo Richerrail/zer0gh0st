@@ -786,11 +786,8 @@ pub async fn kb_ingest(dir: Option<std::path::PathBuf>, embed: bool) -> Result<V
     if !d.exists() {
         return Err(anyhow!("dossier introuvable: {}", d.display()));
     }
-    let (files, chunks) = crate::knowledge::ingest_dir(&d, embed).await?;
-    let mut out = vec![format!(
-        "Indexé : {files} fichier(s), {chunks} chunk(s) depuis {}",
-        d.display()
-    )];
+    let report = crate::knowledge::ingest_dir(&d, embed).await?;
+    let mut out = vec![report.summary(&d)];
     if embed && crate::memory::embedder_id().is_none() {
         out.push("(aucun embedder configuré → vecteurs non calculés)".to_string());
     }

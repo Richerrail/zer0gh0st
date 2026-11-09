@@ -83,7 +83,10 @@ pub fn path() -> PathBuf {
             &crate::config::data_dir(),
         );
         if let Some(legacy) = migrate_legacy(&p) {
-            eprintln!("🗂️  tâches migrées depuis {}", legacy.display());
+            crate::logging::log_info(
+                "tasks_migrated",
+                serde_json::json!({ "from": legacy.display().to_string() }),
+            );
         }
         p
     })

@@ -24,6 +24,7 @@ pub mod jimmy;
 pub mod knowledge;
 pub mod llm;
 pub mod local;
+pub mod logging;
 pub mod memory;
 pub mod models;
 pub mod mods;

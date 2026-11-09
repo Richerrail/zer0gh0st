@@ -34,12 +34,7 @@ pub fn text(path: &str) -> Result<String> {
     if t.is_empty() {
         Ok("(aucun texte extractible — PDF scanné/image ?)".to_string())
     } else {
-        let max = 20_000;
-        if t.len() > max {
-            Ok(format!("{}…\n(tronqué à {max} caractères)", &t[..max]))
-        } else {
-            Ok(t.to_string())
-        }
+        Ok(truncate_text(t, 20_000))
     }
 }
 
@@ -113,4 +108,44 @@ pub fn merge(inputs: &[String], output: &str) -> Result<String> {
         "{} pages fusionnées → {output}",
         documents_pages.len()
     ))
+}
+
+/// Tronque `t` à `max` octets sans casser un caractère UTF-8.
+///
+/// Même classe que B2 : `&t[..max]` paniquait si `max` tombait au milieu d'un
+/// caractère accentué — cas courant sur un PDF français de plus de 20 000 octets.
+fn truncate_text(t: &str, max: usize) -> String {
+    if t.len() <= max {
+        return t.to_string();
+    }
+    let cut = crate::util::floor_char_boundary(t, max);
+    format!("{}…\n(tronqué à {max} caractères)", &t[..cut])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn short_text_untouched() {
+        assert_eq!(truncate_text("bonjour", 100), "bonjour");
+    }
+
+    #[test]
+    fn truncate_text_never_panics_on_multibyte() {
+        // 'é' = 2 octets : on fait tomber la coupe sur son 2e octet.
+        for offset in 0..4 {
+            let t = format!("{}é{}", "a".repeat(19_999 + offset), "b".repeat(10));
+            let out = truncate_text(&t, 20_000);
+            assert!(out.contains("tronqué à 20000 caractères"));
+            assert!(out.len() <= 20_000 + 40);
+        }
+    }
+
+    #[test]
+    fn truncate_text_keeps_the_head() {
+        let t = format!("DEBUT{}", "x".repeat(25_000));
+        let out = truncate_text(&t, 20_000);
+        assert!(out.starts_with("DEBUT"));
+    }
 }

@@ -77,6 +77,13 @@ pub async fn run_subagent_budgeted(
     let mut last_endpoint: Option<String> = None;
     let mut last_tool = String::new();
     while let Some(ev) = rx.recv().await {
+        // B5 : `/stop` doit couper un tour de débat en cours, pas seulement
+        // empêcher le suivant de démarrer. Sans ce test, la boucle attendait
+        // `TurnComplete` jusqu'au bout (débat de plusieurs minutes).
+        if crate::cancel::is_cancelled() {
+            result = "⏹ interrompu par /stop".to_string();
+            break;
+        }
         match ev {
             UiEvent::TurnComplete(full) => {
                 // Dernier message assistant AYANT du texte : un tour peut se terminer sur

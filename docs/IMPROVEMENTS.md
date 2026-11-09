@@ -41,7 +41,6 @@ une capture, repérer un alignement cassé — demande :
 
 ## Divers
 
-- `knowledge_delete` par `source` (l'API existe, l'outil non) ;
 - exécution planifiée des tâches (M9 ne fait qu'un **rappel**) : nécessiterait
   un démon, donc un choix d'architecture ;
 - échéances en date absolue (`2026-11-02 09:00`) en plus de `+2h` ;
