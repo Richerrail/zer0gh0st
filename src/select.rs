@@ -27,25 +27,43 @@ impl Category {
 }
 
 /// Whole-word (boundary) match, so `api` does not match inside `rapide`.
+///
+/// `start` must advance by one **char**, never one byte: `hay` is UTF-8 and
+/// French text contains multibyte chars (`é`, `à`…). Slicing at a non-boundary
+/// byte index panics ("byte index is not a char boundary").
 fn contains_word(hay: &str, needle: &str) -> bool {
-    let bytes = hay.as_bytes();
+    if needle.is_empty() {
+        return false;
+    }
     let mut start = 0;
     while let Some(pos) = hay[start..].find(needle) {
         let i = start + pos;
         let end = i + needle.len();
-        let before_ok = i == 0 || !bytes[i - 1].is_ascii_alphanumeric();
-        let after_ok = end >= bytes.len() || !bytes[end].is_ascii_alphanumeric();
+        // `i` and `end` are char boundaries (find/len of a match), so slicing is safe.
+        // Accented letters count as word chars: `derivee` must not match in `prederivee`.
+        let before_ok = hay[..i]
+            .chars()
+            .next_back()
+            .is_none_or(|c| !c.is_alphanumeric());
+        let after_ok = hay[end..]
+            .chars()
+            .next()
+            .is_none_or(|c| !c.is_alphanumeric());
         if before_ok && after_ok {
             return true;
         }
-        start = i + 1;
+        // advance one CHARACTER, not one byte (B1: byte advance panicked on `é`)
+        let step = hay[i..].chars().next().map_or(1, |c| c.len_utf8());
+        start = i + step;
     }
     false
 }
 
 /// Keyword-based task classifier (French + English).
 pub fn classify(problem: &str) -> Category {
-    let p = problem.to_ascii_lowercase();
+    // `to_lowercase`, NOT `to_ascii_lowercase`: the latter strips accents and
+    // makes every accented keyword (`équation`, `dérivée`, `écris`...) dead.
+    let p = problem.to_lowercase();
     let has = |words: &[&str]| words.iter().any(|w| contains_word(&p, w));
 
     if has(&[
@@ -325,5 +343,56 @@ pub fn capability_note(m: &ModelEntry) -> String {
         "pas de benchmark publié".to_string()
     } else {
         format!("intel {intel:.0} · code {code:.0} · agentic {agentic:.0}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn contains_word_boundaries() {
+        assert!(contains_word("api", "api"));
+        assert!(!contains_word("rapide", "api"));
+        assert!(contains_word("un api ici", "api"));
+        // les lettres accentuées sont des caractères de mot, pas des séparateurs
+        assert!(!contains_word("les dérivées de f", "dérivée"));
+        assert!(contains_word("les dérivées de f", "dérivées"));
+    }
+
+    /// Régression B1 : une borne droite refusée sur un mot-clé multioctet
+    /// faisait avancer `start` d'un octet, en plein milieu d'un `é` -> panic.
+    #[test]
+    fn contains_word_no_panic_on_multibyte() {
+        // Le panic exige un mot-clé COMMENÇANT par un accent : le match est
+        // refusé (borne droite), puis l'ancien code faisait start = i + 1,
+        // soit le 2e octet du 'é' -> "byte index is not a char boundary".
+        assert!(!contains_word("les équations du système", "équation"));
+        assert!(!contains_word("il écrit vite", "écris"));
+        assert!(!contains_word("les dérivées de f", "dérivée"));
+        assert!(!contains_word("des probabilités faibles", "probabilité"));
+        assert!(!contains_word("deux intégrales", "intégrale"));
+        // aucun match, texte accentué : doit terminer sans panic
+        assert!(!contains_word("éèàçûô", "zzz"));
+        assert!(!contains_word("réponse brève", "api"));
+        // et les cas positifs fonctionnent toujours
+        assert!(contains_word("les équations du système", "équations"));
+    }
+
+    #[test]
+    fn classify_french_sentence() {
+        assert_eq!(
+            classify("j'ai un bug dans mon programme, ça plante"),
+            Category::Code
+        );
+        assert_eq!(classify("réponds vite, bref"), Category::Fast);
+        assert_eq!(
+            classify("explique-moi pourquoi ça marche"),
+            Category::Reasoning
+        );
+        // les mots-clés accentués doivent survivre au lowercase
+        // (to_ascii_lowercase les tuait)
+        assert_eq!(classify("résous cette équation"), Category::Math);
+        assert_eq!(classify("écris un poème"), Category::Writing);
     }
 }

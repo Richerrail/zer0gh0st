@@ -42,4 +42,8 @@ pub enum UiEvent {
     FreeModels(Vec<crate::models::ModelEntry>),
     /// Le bot Telegram a demandé à s'éteindre (/shutdown).
     TelegramShutdown,
+    /// Un débat 0box s'est terminé (ou a été interrompu par `/stop`).
+    /// La TUI s'en sert pour remettre `streaming` à `false` : sans ça, `/stop`
+    /// restait armé après la fin du débat et le message final mentait.
+    DebateEnd { cancelled: bool },
 }

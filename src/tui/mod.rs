@@ -812,9 +812,8 @@ fn start_turn(app: &mut App, text: String, ui_tx: &UnboundedSender<UiEvent>) {
         }
         let mut base = messages;
         // Seuil de compaction : 60 % de la fenêtre **réelle** du modèle (min
-        // 4 000). Avant, 4 000 en dur : sur un modèle 200 k on résumait un
-        // historique parfaitement utilisable ; sur un 8 k on compactait trop tard.
-        let budget = ((ctx_window as f64 * 0.6) as usize).max(4_000);
+        // 4 000). Définition unique dans `compact::budget_for`.
+        let budget = crate::agent::compact::budget_for(ctx_window);
         if crate::agent::compact::estimate_tokens(&base) >= budget {
             let (b, outcome) = crate::agent::compact::compact_now(utility, &system, base, 6).await;
             if matches!(outcome, crate::agent::compact::CompactOutcome::Compacted) {
@@ -2327,8 +2326,8 @@ fn handle_context(app: &mut App) {
         .map(|c| c.chars().count())
         .sum();
     let tokens = chars / 4;
-    // Même règle que `start_turn` : 60 % de la fenêtre, minimum 4 000.
-    let budget = ((app.context_window as f64 * 0.6) as usize).max(4_000);
+    // Même règle que `start_turn` : définition unique dans `compact::budget_for`.
+    let budget = crate::agent::compact::budget_for(app.context_window);
     let pct = if app.context_window > 0 {
         (tokens as f64 / app.context_window as f64 * 100.0).round() as u64
     } else {
@@ -2524,6 +2523,12 @@ pub fn cmd_0box(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) 
         topic,
         perspectives.join(", ")
     )));
+    // B5 : sans `streaming = true`, `/stop` répondait « Rien à interrompre. »
+    // alors qu'un débat de plusieurs minutes tournait.
+    crate::cancel::clear();
+    app.streaming = true;
+    app.streaming_text.clear();
+    app.auto_scroll = true;
 
     tokio::spawn(async move {
         run_0box_debate(
@@ -2576,6 +2581,8 @@ pub async fn run_0box_debate(topic: String, perspectives: Vec<String>, setup: De
         all_tools,
         ui,
     } = setup;
+    // B5 : un `/stop` antérieur ne doit pas tuer ce débat dès la première ligne.
+    crate::cancel::clear();
     // Build tools available (respect F3/F4)
     let tools: Vec<crate::tools::ToolSpec> = all_tools
         .iter()
@@ -2673,7 +2680,16 @@ pub async fn run_0box_debate(topic: String, perspectives: Vec<String>, setup: De
     }
 
     // Tour 1 : Premier participant (pas d'historique de débat)
+    let total_turns = debate_perspectives.len();
+    let mut done_turns = 0usize;
+    let mut cancelled = false;
     for (turn_idx, role) in debate_perspectives.iter().enumerate() {
+        // B5 : sans ce test, un débat de plusieurs minutes ne pouvait pas être
+        // arrêté — `/stop` posait le drapeau, personne ne le lisait.
+        if crate::cancel::is_cancelled() {
+            cancelled = true;
+            break;
+        }
         let is_last = turn_idx == debate_perspectives.len() - 1;
         let role_label = if is_last {
             if actionable {
@@ -2760,6 +2776,13 @@ pub async fn run_0box_debate(topic: String, perspectives: Vec<String>, setup: De
         )
         .await;
 
+        // Un tour interrompu n'est PAS une réponse de la perspective : ne pas
+        // l'ajouter à la conversation ni l'afficher comme un « 📝 [code]: ».
+        if crate::cancel::is_cancelled() {
+            cancelled = true;
+            break;
+        }
+
         // Ajoute à la conversation partagée
         conversation.push(ChatMessage::assistant(
             format!("[{}]: {}", speaker, response),
@@ -2769,17 +2792,39 @@ pub async fn run_0box_debate(topic: String, perspectives: Vec<String>, setup: De
         // Affiche dans l'UI
         let _ = ui.send(UiEvent::Info(format!("📝 [{}]:\n{}", speaker, response)));
 
-        // Petite pause entre les tours
+        done_turns += 1;
+
+        // Petite pause entre les tours.
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
 
-    // Fin du débat
-    let _ = ui.send(UiEvent::Info(
-        "✅ [0box] Débat terminé — synthèse et plan d'action ci-dessus.".to_string(),
-    ));
+    // Fin du débat — le message doit dire la VÉRITÉ : un débat interrompu au
+    // tour 1/3 n'a pas produit de synthèse, et l'annoncer « terminé » était un
+    // mensonge (B5).
+    let _ = ui.send(UiEvent::Info(debate_end_message(
+        cancelled,
+        done_turns,
+        total_turns,
+    )));
+    let _ = ui.send(UiEvent::DebateEnd { cancelled });
 }
 
-/// Formate la conversation pour l'injection dans le prompt
+/// Message de fin de débat 0box, honnête sur l'interruption.
+///
+/// `done_turns` = nombre de tours réellement terminés, `total_turns` = nombre
+/// de perspectives prévues. Extrait en fonction pure pour être testable.
+fn debate_end_message(cancelled: bool, done_turns: usize, total_turns: usize) -> String {
+    if cancelled {
+        format!(
+            "⏹ [0box] Débat interrompu par /stop après {done_turns}/{total_turns} tour(s) — pas de synthèse complète."
+        )
+    } else {
+        format!(
+            "✅ [0box] Débat terminé ({done_turns}/{total_turns} tours) — synthèse et plan d'action ci-dessus."
+        )
+    }
+}
+
 /// Exécute un tour du débat 0box avec retry automatique et validation de la réponse.
 /// Retourne (speaker, response) garanti valide (non vide, non erreur).
 async fn run_0box_turn_with_retry(
@@ -2799,6 +2844,10 @@ async fn run_0box_turn_with_retry(
     let mut last_error = String::new();
 
     for attempt in 0..=max_retries {
+        // B5 : ne pas relancer un tour complet (plusieurs minutes) après `/stop`.
+        if crate::cancel::is_cancelled() {
+            return (role.to_string(), "⏹ interrompu par /stop".to_string());
+        }
         if attempt > 0 {
             let _ = ui.send(UiEvent::Info(format!(
                 "🔄 [0box:{}] Retry {}/{} — nouvelle tentative…",
@@ -4389,6 +4438,15 @@ fn handle_ui(ev: UiEvent, app: &mut App) {
                 app.context_window = c;
             }
         }
+        UiEvent::DebateEnd { cancelled } => {
+            // B5 : sans ça, `app.streaming` restait faux pendant tout le débat
+            // (`/stop` répondait « Rien à interrompre. ») et le restait après.
+            app.streaming = false;
+            app.streaming_text.clear();
+            if cancelled {
+                crate::sound::event(crate::sound::Event::Error);
+            }
+        }
         UiEvent::TelegramShutdown => {
             if let Some(h) = app.tg.take() {
                 h.stop();
@@ -5300,7 +5358,10 @@ fn ctx_window_label(c: u64) -> String {
 }
 
 /// Contexte connu pour les modèles dont le provider ne le rapporte pas.
-fn known_context(model: &str) -> Option<u64> {
+/// Fenêtre de contexte connue pour un modèle (table statique).
+///
+/// `pub` : le bot Telegram en a besoin pour son seuil de compaction (B6).
+pub fn known_context(model: &str) -> Option<u64> {
     let m = model.to_ascii_lowercase();
     let has = |s: &str| m.contains(s);
     if has("kimi-k3") || has("kimi-k2") || has("kimi-latest") {
@@ -6012,6 +6073,63 @@ mod tests {
         assert_eq!(selection_text(&scr, (3, 1), (6, 1)), "defg");
         // Simple clic sans glisser : rien (avant : 1 caractère copié).
         assert_eq!(selection_text(&scr, (4, 1), (4, 1)), "");
+    }
+
+    /// B5 : le message de fin de débat doit dire la vérité sur une interruption.
+    #[test]
+    fn debate_end_message_is_honest_about_interruption() {
+        let stopped = debate_end_message(true, 1, 3);
+        assert!(stopped.contains("interrompu"), "{stopped}");
+        assert!(stopped.contains("1/3"), "{stopped}");
+        assert!(!stopped.contains("✅"), "{stopped}");
+        assert!(!stopped.contains("terminé"), "{stopped}");
+
+        let done = debate_end_message(false, 3, 3);
+        assert!(done.contains("terminé"), "{done}");
+        assert!(done.contains("3/3"), "{done}");
+        assert!(!done.contains("interrompu"), "{done}");
+    }
+
+    /// B5 : `/stop` pendant un débat doit être ACCEPTÉ (avant, `streaming`
+    /// restait faux et `/stop` répondait « Rien à interrompre. »).
+    #[tokio::test]
+    async fn stop_is_accepted_while_a_debate_runs() {
+        let mut app = test_app();
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        crate::cancel::clear();
+
+        // Avant le débat : rien à interrompre, et le drapeau ne bouge pas.
+        handle_command(&mut app, "/stop", &tx);
+        assert!(!crate::cancel::is_cancelled(), "drapeau posé sans débat");
+
+        // Pendant le débat : `cmd_0box` doit armer `streaming`.
+        cmd_0box(&mut app, &["sujet de test"], &tx);
+        assert!(
+            app.streaming,
+            "cmd_0box n'arme pas `streaming` : /stop répondra « Rien à interrompre. »"
+        );
+        handle_command(&mut app, "/stop", &tx);
+        assert!(
+            crate::cancel::is_cancelled(),
+            "/stop ignoré alors qu'un débat tourne"
+        );
+
+        // Fin de débat : la TUI doit se débloquer.
+        handle_ui(UiEvent::DebateEnd { cancelled: true }, &mut app);
+        assert!(!app.streaming, "streaming non remis à false après le débat");
+        crate::cancel::clear();
+    }
+
+    /// B5 : `/stop` doit être lisible par la boucle de débat, et un nouveau
+    /// débat doit repartir d'un drapeau propre.
+    #[test]
+    fn cancel_flag_roundtrip() {
+        crate::cancel::clear();
+        assert!(!crate::cancel::is_cancelled());
+        crate::cancel::request();
+        assert!(crate::cancel::is_cancelled());
+        crate::cancel::clear();
+        assert!(!crate::cancel::is_cancelled());
     }
 
     #[test]

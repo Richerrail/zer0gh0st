@@ -333,10 +333,12 @@ fn import_legacy_if_empty(c: &Connection, current: &Path) {
             "INSERT INTO knowledge_fts(knowledge_fts) VALUES('rebuild')",
             [],
         );
-        eprintln!(
-            "📚 base de connaissance importée depuis {} ({imported} chunks) — \
-             vecteurs à recalculer : `zer0 kb ingest --embed`",
-            legacy.display()
+        crate::logging::log_info(
+            "knowledge_migrated",
+            serde_json::json!({
+                "from": legacy.display().to_string(),
+                "chunks": imported,
+            }),
         );
     }
     let _ = c.execute("DETACH DATABASE legacy", []);
@@ -778,9 +780,50 @@ fn cosine(a: &[f32], b: &[f32]) -> f32 {
 
 // ------------------------------------------------------------------- ingestion
 
+/// Bilan d'une ingestion : ce qui a réussi **et** ce qui a échoué.
+///
+/// Avant, `ingest_dir` retournait `(fichiers, chunks)` et avalait les erreurs
+/// d'embedding (`if let Ok(v) = embed(...)`). Résultat mesuré : 249 chunks
+/// indexés, **32 vecteurs**, et la commande affichait un succès. Un index
+/// couvert à 13 % sans le dire est pire qu'un échec franc.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct IngestReport {
+    pub files: usize,
+    pub chunks: usize,
+    /// Chunks dont le vecteur a été calculé et stocké.
+    pub embedded: usize,
+    /// Chunks dont l'embedding a échoué (le chunk reste indexé en FTS5).
+    pub embed_failed: usize,
+    /// Première erreur rencontrée, pour ne pas laisser l'utilisateur deviner.
+    pub first_error: Option<String>,
+}
+
+impl IngestReport {
+    /// Message lisible : ne cache jamais un échec partiel.
+    pub fn summary(&self, dir: &Path) -> String {
+        let mut s = format!(
+            "Indexé : {} fichier(s), {} chunk(s) depuis {}",
+            self.files,
+            self.chunks,
+            dir.display()
+        );
+        if self.embed_failed > 0 {
+            s.push_str(&format!(
+                "\n⚠ {} chunk(s) SANS vecteur ({} avec) — la recherche reste FTS5 pour eux",
+                self.embed_failed, self.embedded
+            ));
+            if let Some(e) = &self.first_error {
+                s.push_str(&format!("\n  première erreur : {e}"));
+            }
+        } else if self.embedded > 0 {
+            s.push_str(&format!("\n{} vecteur(s) calculé(s)", self.embedded));
+        }
+        s
+    }
+}
+
 /// Indexe un dossier (récursif). `embed=true` calcule les embeddings (si embedder configuré).
-/// Retourne (fichiers, chunks).
-pub async fn ingest_dir(dir: &Path, embed: bool) -> Result<(usize, usize)> {
+pub async fn ingest_dir(dir: &Path, embed: bool) -> Result<IngestReport> {
     let mut files = Vec::new();
     collect_files(dir, &mut files);
     if files.is_empty() {
@@ -795,8 +838,7 @@ pub async fn ingest_dir(dir: &Path, embed: bool) -> Result<(usize, usize)> {
     } else {
         None
     };
-    let mut nfiles = 0usize;
-    let mut nchunks = 0usize;
+    let mut report = IngestReport::default();
 
     for f in &files {
         let Ok(text) = std::fs::read_to_string(f) else {
@@ -816,7 +858,7 @@ pub async fn ingest_dir(dir: &Path, embed: bool) -> Result<(usize, usize)> {
             .file_stem()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_default();
-        nfiles += 1;
+        report.files += 1;
 
         for ch in chunks(&text, 1200) {
             if ch.trim().is_empty() {
@@ -832,18 +874,30 @@ pub async fn ingest_dir(dir: &Path, embed: bool) -> Result<(usize, usize)> {
                 params![id, sujet, ch],
             )?;
             if let Some(emb) = &embedder {
-                if let Ok(v) = crate::memory::embed(&ch).await {
-                    c.execute(
-                        "INSERT OR REPLACE INTO embeddings(knowledge_id, embedder, vector) VALUES (?1, ?2, ?3)",
-                        params![id, emb, f32_to_blob(&v)],
-                    )?;
+                // Ne JAMAIS avaler l'erreur : un chunk sans vecteur doit être
+                // compté et signalé (constat : 249 chunks, 32 vecteurs, succès
+                // affiché). Le chunk reste indexé en FTS5, ce n'est pas fatal.
+                match crate::memory::embed(&ch).await {
+                    Ok(v) => {
+                        c.execute(
+                            "INSERT OR REPLACE INTO embeddings(knowledge_id, embedder, vector) VALUES (?1, ?2, ?3)",
+                            params![id, emb, f32_to_blob(&v)],
+                        )?;
+                        report.embedded += 1;
+                    }
+                    Err(e) => {
+                        report.embed_failed += 1;
+                        if report.first_error.is_none() {
+                            report.first_error = Some(format!("{e}"));
+                        }
+                    }
                 }
             }
-            nchunks += 1;
+            report.chunks += 1;
         }
     }
     c.execute_batch("COMMIT")?;
-    Ok((nfiles, nchunks))
+    Ok(report)
 }
 
 /// Ajoute un texte libre à la base, avec **le même pipeline** que l'ingestion
@@ -931,11 +985,31 @@ pub fn stats() -> Result<String> {
         r.get(0)
     })?;
     let vecs: i64 = c.query_row("SELECT COUNT(*) FROM embeddings", [], |r| r.get(0))?;
+    let embedder = crate::memory::embedder_id();
     Ok(format!(
-        "Base de connaissance : {}\n  entrées (chunks) : {entries}\n  fichiers         : {files}\n  vecteurs         : {vecs}\n  embedder         : {}\n  FTS5             : activé",
+        "Base de connaissance : {}\n  entrées (chunks) : {entries}\n  fichiers         : {files}\n  vecteurs         : {vecs}\n  embedder         : {}\n  recherche        : {}",
         db_path().display(),
-        crate::memory::embedder_id().unwrap_or_else(|| "(aucun)".into())
+        embedder.as_deref().unwrap_or("(aucun)"),
+        search_mode(embedder.as_deref(), vecs)
     ))
+}
+
+/// Mode de recherche effectif, dit sans ambiguïté.
+///
+/// M6 : la doc annonçait « hybride » alors que la base tourne en FTS5 pur tant
+/// qu'aucun embedder n'est configuré (`/embeddings set <provider> <model>`).
+/// Un utilisateur doit pouvoir lire l'état réel, pas le mode théorique.
+fn search_mode(embedder: Option<&str>, vectors: i64) -> String {
+    match (embedder, vectors) {
+        (None, _) => {
+            "FTS5 seul (aucun embedder — `/embeddings set <provider> <model>`)".to_string()
+        }
+        (Some(_), 0) => {
+            "FTS5 seul (embedder configuré mais aucun vecteur — relance `/kb ingest --embed`)"
+                .to_string()
+        }
+        (Some(id), n) => format!("hybride FTS5 + {n} vecteur(s) via {id}"),
+    }
 }
 
 // ---------------------------------------------------------------------- log
@@ -1019,6 +1093,29 @@ mod tests {
             params![sujet, contenu, source],
         )
         .unwrap();
+    }
+
+    /// M6 : le mode de recherche doit être dit sans ambiguïté, pas « hybride »
+    /// quand la base tourne en FTS5 pur.
+    #[test]
+    fn search_mode_states_the_truth() {
+        // Aucun embedder : FTS5 seul, et on indique comment en configurer un.
+        let none = search_mode(None, 0);
+        assert!(none.contains("FTS5 seul"), "{none}");
+        assert!(none.contains("/embeddings set"), "{none}");
+        assert!(!none.contains("hybride"), "{none}");
+
+        // Embedder configuré mais base jamais ingérée avec : toujours FTS5 seul.
+        let idle = search_mode(Some("local/bge-m3"), 0);
+        assert!(idle.contains("FTS5 seul"), "{idle}");
+        assert!(idle.contains("--embed"), "{idle}");
+        assert!(!idle.contains("hybride"), "{idle}");
+
+        // Embedder + vecteurs : là seulement, c'est hybride.
+        let hybrid = search_mode(Some("local/bge-m3"), 249);
+        assert!(hybrid.contains("hybride"), "{hybrid}");
+        assert!(hybrid.contains("249"), "{hybrid}");
+        assert!(hybrid.contains("local/bge-m3"), "{hybrid}");
     }
 
     #[test]

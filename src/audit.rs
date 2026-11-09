@@ -42,7 +42,8 @@ pub fn record(tool: &str, args: &str, result: &str) {
     });
     let line = format_line(tool, args, result);
     if let Err(e) = append_to(&audit_dir(), &line) {
-        eprintln!("⚠ audit: écriture impossible ({e})");
+        // M4 : diagnostic structuré (filtrable via ZER0_LOG), pas une sortie CLI.
+        crate::logging::log_error("audit_write", serde_json::json!({ "error": e.to_string() }));
     }
 }
 

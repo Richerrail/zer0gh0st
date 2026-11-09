@@ -365,12 +365,13 @@ pub fn load_global() -> GlobalConfig {
     } else if cfg.schema_version > SCHEMA_VERSION {
         static WARNED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
         WARNED.get_or_init(|| {
-            eprintln!(
-                "⚠ {} : schéma {} > {} (écrit par un binaire plus récent) — \
-                 mets à jour ZER0|GH0ST avant de modifier la configuration.",
-                path.display(),
-                cfg.schema_version,
-                SCHEMA_VERSION
+            crate::logging::log_warn(
+                "config_schema_newer",
+                serde_json::json!({
+                    "path": path.display().to_string(),
+                    "found": cfg.schema_version,
+                    "supported": SCHEMA_VERSION,
+                }),
             );
         });
     }

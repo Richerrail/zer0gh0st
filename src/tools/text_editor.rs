@@ -216,6 +216,16 @@ fn str_replace(path: &str, old: &str, new: &str) -> String {
 }
 
 fn insert(path: &str, line: usize, text: &str) -> String {
+    // B7 : aligné sur `create`/`str_replace`/`delete`. `insert` réécrit tout le
+    // fichier (`lines.join`), c'est l'opération la plus risquée : sans ces
+    // gardes, une ligne 0 insérait silencieusement en tête et un texte vide
+    // ajoutait une ligne fantôme.
+    if text.is_empty() {
+        return format!("Erreur: `new_str` vide pour {path} — rien n'a été inséré");
+    }
+    if line == 0 {
+        return format!("Erreur: `insert_line` doit être >= 1 (reçu 0) pour {path}");
+    }
     let content = match fs::read_to_string(path) {
         Ok(c) => c,
         Err(e) => return format!("Erreur de lecture: {e}"),
@@ -224,15 +234,16 @@ fn insert(path: &str, line: usize, text: &str) -> String {
     // ne doit pas réécrire la fin du fichier.
     let had_trailing_newline = content.ends_with('\n');
     let mut lines: Vec<&str> = content.lines().collect();
-    let idx = line.saturating_sub(1).min(lines.len());
+    let idx = (line - 1).min(lines.len());
     lines.insert(idx, text);
     let mut updated = lines.join("\n");
     if had_trailing_newline {
         updated.push('\n');
     }
+    let note = backup_note(Path::new(path));
     match fs::write(path, &updated) {
         Ok(()) => format!(
-            "Insertion effectuée dans {path} à la ligne {line} ({})",
+            "Insertion effectuée dans {path} à la ligne {line} ({}){note}",
             stats(&updated)
         ),
         Err(e) => format!("Erreur d'écriture: {e}"),
@@ -331,6 +342,53 @@ mod tests {
         fs::write(&p, "un\ndeux\n").unwrap();
         insert(&p, 2, "milieu");
         assert_eq!(fs::read_to_string(&p).unwrap(), "un\nmilieu\ndeux\n");
+        let _ = fs::remove_file(&p);
+    }
+
+    /// B7 : `insert` doit sauvegarder comme `create`/`str_replace`/`delete`.
+    #[test]
+    fn insert_creates_a_backup_like_the_other_commands() {
+        let p = tmp("b7_backup.txt");
+        fs::write(&p, "un\ndeux\n").unwrap();
+        let msg = insert(&p, 2, "milieu");
+        assert!(msg.contains("sauvegarde"), "pas de sauvegarde : {msg}");
+        let bak = format!("{p}.zer0.bak");
+        assert!(
+            std::path::Path::new(&bak).exists(),
+            "fichier .zer0.bak absent : {bak}"
+        );
+        assert_eq!(fs::read_to_string(&bak).unwrap(), "un\ndeux\n");
+        let _ = fs::remove_file(&p);
+        let _ = fs::remove_file(&bak);
+    }
+
+    /// B7 : une ligne 0 insérait silencieusement en tête du fichier.
+    #[test]
+    fn insert_rejects_line_zero() {
+        let p = tmp("b7_line0.txt");
+        fs::write(&p, "un\ndeux\n").unwrap();
+        let msg = insert(&p, 0, "intrus");
+        assert!(msg.contains(">= 1"), "ligne 0 acceptée : {msg}");
+        assert_eq!(
+            fs::read_to_string(&p).unwrap(),
+            "un\ndeux\n",
+            "le fichier a été modifié malgré l'erreur"
+        );
+        let _ = fs::remove_file(&p);
+    }
+
+    /// B7 : un texte vide ajoutait une ligne fantôme.
+    #[test]
+    fn insert_rejects_empty_text() {
+        let p = tmp("b7_empty.txt");
+        fs::write(&p, "un\ndeux\n").unwrap();
+        let msg = insert(&p, 2, "");
+        assert!(msg.contains("vide"), "texte vide accepté : {msg}");
+        assert_eq!(
+            fs::read_to_string(&p).unwrap(),
+            "un\ndeux\n",
+            "le fichier a été modifié malgré l'erreur"
+        );
         let _ = fs::remove_file(&p);
     }
 

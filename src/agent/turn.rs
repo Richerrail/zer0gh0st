@@ -59,6 +59,11 @@ pub async fn run_turn(
     options: ChatOptions,
     ui: UnboundedSender<UiEvent>,
 ) {
+    // B5 : le drapeau d'annulation n'est remis à zéro QUE pour un tour de haut
+    // niveau (TUI / CLI / Telegram). Il était auparavant dans
+    // `run_turn_budgeted`, donc chaque tour de sous-agent 0box l'effaçait :
+    // un `/stop` posé pendant le tour N était annulé au démarrage du tour N+1.
+    crate::cancel::clear();
     run_turn_budgeted(
         endpoints,
         system,
@@ -102,7 +107,6 @@ pub async fn run_turn_budgeted(
         max_iterations
     };
 
-    crate::cancel::clear();
     // Budget partagé par tous les appels LLM de ce tour, sous-agents `0box`
     // compris. Le compteur n'est remis à zéro qu'au premier niveau.
     let _budget = crate::budget::TurnGuard::enter();

@@ -92,8 +92,11 @@ pub async fn run(args: &str) -> String {
     };
 
     let perspectives_for_prompt = perspectives.clone();
+    // Le sujet part dans la tâche ; on garde une copie pour le message d'erreur
+    // ci-dessous (M3 : il doit nommer le vrai sujet, pas « (sujet inconnu) »).
+    let topic_for_report = topic.clone();
     tokio::spawn(async move {
-        crate::tui::run_0box_debate(topic.clone(), perspectives, setup).await;
+        crate::tui::run_0box_debate(topic, perspectives, setup).await;
     });
 
     // Collecte la transcription du débat (les autres events sont ignorés :
@@ -107,23 +110,29 @@ pub async fn run(args: &str) -> String {
     }
 
     if report.trim().is_empty() {
+        // M3 : le sujet est connu ici (`topic` survit au `clone` passé au spawn).
+        // Avant, `topic_for_report` ignorait son argument et affichait toujours
+        // « (sujet inconnu) » — le message mentait sur le sujet du débat.
         return format!(
-            "0box : débat terminé sans sortie exploitable sur « {} » (perspectives : {}).",
-            topic_for_report(&report),
+            "0box : débat terminé sans sortie exploitable sur « {topic_for_report} » (perspectives : {}).",
             perspectives_for_prompt.join(", ")
         );
     }
-    if report.len() > MAX_REPORT {
-        let cut = report.len() - MAX_REPORT;
-        report = format!("… (début tronqué)\n{}", &report[cut..]);
-    }
-    report
+    truncate_report(report)
 }
 
-/// Sujet repris de la configuration d'appel (utilisé seulement dans le message
-/// d'erreur, où le rapport est vide).
-fn topic_for_report(_report: &str) -> &str {
-    "(sujet inconnu)"
+/// Tronque la transcription à `MAX_REPORT` octets en gardant la fin.
+///
+/// B2 : `report.len() - MAX_REPORT` tombait au milieu d'un caractère accentué
+/// et `&report[cut..]` paniquait ("byte index is not a char boundary") dans la
+/// tâche de génération, laissant la TUI bloquée en « streaming ». On recule
+/// sur une frontière UTF-8 avant de découper.
+fn truncate_report(report: String) -> String {
+    if report.len() <= MAX_REPORT {
+        return report;
+    }
+    let cut = crate::util::floor_char_boundary(&report, report.len() - MAX_REPORT);
+    format!("… (début tronqué)\n{}", &report[cut..])
 }
 
 #[cfg(test)]
@@ -153,5 +162,36 @@ mod tests {
     fn parse_ignores_empty_perspectives_list() {
         let (_, p) = parse_args(r#"{"topic":"x","perspectives":[]}"#).unwrap();
         assert_eq!(p.len(), 3);
+    }
+
+    #[test]
+    fn short_report_is_untouched() {
+        let r = "débat court".to_string();
+        assert_eq!(truncate_report(r.clone()), r);
+    }
+
+    /// B2 : la coupe tombait au milieu d'un `é` -> panic, TUI bloquée.
+    #[test]
+    fn truncate_report_never_panics_on_multibyte() {
+        // 'é' = 2 octets. On construit un rapport dont la coupe à
+        // len - MAX_REPORT tombe pile sur le 2e octet d'un 'é'.
+        for offset in 0..4 {
+            let mut r = String::from("é");
+            r.push_str(&"a".repeat(MAX_REPORT - 1 + offset));
+            let out = truncate_report(r);
+            assert!(out.starts_with("… (début tronqué)"));
+            // le contenu conservé est valide et de taille bornée
+            assert!(out.len() <= MAX_REPORT + 32);
+        }
+    }
+
+    #[test]
+    fn truncate_report_keeps_the_tail() {
+        let mut r = String::from("DEBUT");
+        r.push_str(&"x".repeat(MAX_REPORT));
+        r.push_str("FIN");
+        let out = truncate_report(r);
+        assert!(out.ends_with("FIN"));
+        assert!(!out.contains("DEBUT"));
     }
 }

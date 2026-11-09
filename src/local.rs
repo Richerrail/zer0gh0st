@@ -454,10 +454,24 @@ pub fn stop_if_owned() -> bool {
     killed
 }
 
+/// Faut-il redémarrer ? Uniquement si un fichier PID existe **et** désigne
+/// encore notre `llama-server` (B4 : un fichier périmé ne compte pas).
+///
+/// Fonction pure : `pid_path()` dépend de `config::data_dir()`, figé par un
+/// `OnceLock`, donc non injectable dans un test.
+fn should_restart(pid_file_exists: bool, owned: Option<&OwnedPid>) -> bool {
+    pid_file_exists && owned.is_some_and(is_owned_llama)
+}
+
 /// Redémarre le serveur local sur un autre modèle, seulement si c'est le nôtre.
 /// Retourne un message quand une action a eu lieu.
 pub async fn restart_if_owned(wanted: &str) -> Option<String> {
-    if !pid_path().exists() {
+    // B4 : nettoyer AVANT le test `exists()`. Un fichier PID périmé (serveur
+    // mort, PID réutilisé) faisait entrer dans la branche : `stop_if_owned`
+    // supprimait le fichier sans rien tuer, puis `ensure` démarrait un serveur
+    // et on annonçait « redémarré » alors qu'aucun serveur ne tournait.
+    cleanup_stale_pid();
+    if !should_restart(pid_path().exists(), read_owned_pid().as_ref()) {
         return None;
     }
     stop_if_owned();
@@ -623,6 +637,23 @@ mod tests {
         assert!(LOCAL_SYSTEM.chars().count() <= 60, "trop long pour du CPU");
         assert!(LOCAL_SYSTEM.contains("Zer0"));
         assert_eq!(system_local(), LOCAL_SYSTEM);
+    }
+
+    /// B4 : un fichier PID périmé ne doit pas déclencher un « redémarrage ».
+    #[test]
+    fn should_restart_ignores_a_stale_pid_file() {
+        // Pas de fichier : rien à redémarrer.
+        assert!(!should_restart(false, None));
+        // Fichier présent mais illisible/invalide : rien à redémarrer.
+        assert!(!should_restart(true, None));
+        // Fichier présent, PID mort : `is_owned_llama` est faux -> pas de restart.
+        let dead = OwnedPid {
+            pid: u32::MAX,
+            starttime: None,
+        };
+        assert!(!should_restart(true, Some(&dead)));
+        // Fichier absent mais PID lisible (course) : pas de restart non plus.
+        assert!(!should_restart(false, Some(&dead)));
     }
 
     #[test]

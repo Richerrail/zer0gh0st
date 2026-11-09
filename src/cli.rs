@@ -1,6 +1,6 @@
 use crate::{
-    agent, commands, config, enrich_system, fun, http_client, jimmy, models, providers, route,
-    telegram, tools, tui, update, vault, zerochan, DEFAULT_SYSTEM,
+    agent, commands, config, enrich_system, fun, http_client, jimmy, local, models, providers,
+    route, telegram, tools, tui, update, vault, zerochan, DEFAULT_SYSTEM,
 };
 use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand};
@@ -548,6 +548,10 @@ fn render_command(cmd: &mut clap::Command, path: &str, out: &mut String, level: 
 
 /// Point d'entrée du binaire `zer0` (CLI + TUI).
 pub async fn entry() -> Result<()> {
+    // B4 : un fichier PID périmé (serveur mort, PID réutilisé) ne doit pas
+    // survivre au démarrage — sinon `restart_if_owned`/`stop_if_owned` croient
+    // posséder un serveur qui n'existe plus.
+    let _ = local::cleanup_stale_pid();
     // Ancien schéma `gw-<id>` → identifiant simple (migration silencieuse, une fois).
     let _ = config::migrate_gateway_prefix();
     // Une config illisible ne doit jamais être silencieuse : on sauvegarde, on
