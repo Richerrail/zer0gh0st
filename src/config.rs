@@ -448,7 +448,9 @@ pub fn endpoint_for(p: &Provider) -> (String, Option<String>) {
     // `local` ne passe JAMAIS par la passerelle : pas de clé à cacher, et le
     // proxy ajoutait un délai bloquant (constaté : /local/chat > 110 s alors
     // que llama-server répond en 20 s). Direct = simple et fiable.
-    if p.id == "local" {
+    // `local` et `local-embed` sont sur la boucle locale : aucune clé à cacher,
+    // et passer par la passerelle ajouterait un saut pour rien.
+    if p.id == "local" || p.id == "local-embed" {
         return (p.base_url.to_string(), None);
     }
     if gateway_enabled() && !p.custom {

@@ -3206,7 +3206,9 @@ fn handle_embeddings(app: &mut App, args: &[&str]) {
         ),
         Some("unset") | Some("clear") | Some("off") => crate::commands::embeddings_unset(),
         _ => Err(anyhow::anyhow!(
-            "usage: /embeddings [show|set <provider> <model>|unset]"
+            "usage: /embeddings [show|set <provider> <model>|unset]\n       \
+             local (hors ligne, sans clé) : /embeddings set local-embed bge-m3-q8_0\n       \
+             le GGUF se récupère par `zer0 kb embed fetch`"
         )),
     };
     match res {

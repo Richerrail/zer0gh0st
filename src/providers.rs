@@ -59,6 +59,17 @@ const BUILTINS: &[Builtin] = &[
         signup: "",
         free: FreeKind::Local,
     },
+    // Embedding local (bge-m3) : **aucune clé, aucun réseau**. `memory::embed`
+    // POSTe sur `{base}/embeddings` sans rien savoir du transport ; le serveur
+    // est démarré à la demande par `local::ensure_embed`.
+    Builtin {
+        id: "local-embed",
+        name: "Local embedder (llama.cpp)",
+        base_url: "http://127.0.0.1:8082/v1",
+        env_key: "",
+        signup: "",
+        free: FreeKind::Local,
+    },
     Builtin {
         id: "openrouter",
         name: "OpenRouter",
