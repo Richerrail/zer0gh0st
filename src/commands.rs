@@ -780,13 +780,23 @@ pub async fn kb_search(query: &str, k: usize) -> Result<Vec<String>> {
 
 /// Indexe un dossier (défaut : `base_connaissance`).
 pub async fn kb_ingest(dir: Option<std::path::PathBuf>, embed: bool) -> Result<Vec<String>> {
+    kb_ingest_with(dir, embed, &|_| {}).await
+}
+
+/// Comme `kb_ingest`, en publiant l'avancement (ligne déjà formatée).
+pub async fn kb_ingest_with(
+    dir: Option<std::path::PathBuf>,
+    embed: bool,
+    progress: &(dyn Fn(String) + Sync),
+) -> Result<Vec<String>> {
     let d = dir.unwrap_or_else(crate::knowledge::default_dir);
     // Vérifié avant d'ouvrir la base : « dossier inexistant » ne doit pas créer
     // une base vide au passage.
     if !d.exists() {
         return Err(anyhow!("dossier introuvable: {}", d.display()));
     }
-    let report = crate::knowledge::ingest_dir(&d, embed).await?;
+    let show = |p: crate::knowledge::IngestProgress| progress(crate::knowledge::progress_text(p));
+    let report = crate::knowledge::ingest_dir_with(&d, embed, &show).await?;
     let mut out = vec![report.summary(&d)];
     if embed && crate::memory::embedder_id().is_none() {
         out.push("(aucun embedder configuré → vecteurs non calculés)".to_string());
