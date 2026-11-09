@@ -198,6 +198,12 @@ pub async fn embed(text: &str) -> Result<Vec<f32>> {
         .ok_or_else(|| anyhow!("modèle d'embedding manquant"))?;
     let provider =
         providers::find(&provider_id).ok_or_else(|| anyhow!("provider inconnu: {provider_id}"))?;
+    // Embedder local : le serveur (llama-server --embeddings) est démarré à la
+    // demande. Pas de clé, pas de réseau — et une erreur explicite si le GGUF
+    // manque (`zer0 kb embed fetch`).
+    if provider.id == "local-embed" {
+        crate::local::ensure_embed(Some(&model)).await?;
+    }
     // Même transport que le chat : passerelle si elle tourne (clé jamais dans
     // l'agent), sinon direct. Sinon l'embedding partait en direct → 401.
     let (base_url, key) = config::endpoint_for(&provider);

@@ -407,6 +407,28 @@ Réglages : tous les cœurs détectés (génération), moitié en préfill, cont
 
 `scripts/serve.sh` reste disponible pour lancer le serveur à la main.
 
+### Embedder local (mémoire sémantique hors ligne)
+
+La base de connaissance interroge un embedder OpenAI-compatible. Par défaut il
+est distant (une clé, du réseau, et une requête **par recherche**) ; l'option
+locale supprime les trois :
+
+```bash
+zer0 kb embed fetch          # bge-m3 Q8_0 (~605 Mo), SHA256 vérifié
+zer0 kb embed status         # serveur, modèle, empreinte
+/embeddings set local-embed bge-m3-q8_0     # dans la TUI (ou `zer0 embeddings set …`)
+```
+
+- `llama-server --embeddings --pooling mean` est démarré **à la demande** sur
+  `127.0.0.1:8082`, 2 threads (`ZER0_EMBED_THREADS`), et arrêté par
+  `zer0 kb embed stop`.
+- `bge-m3` est **multilingue** : une question en français retrouve une fiche
+  d'API en anglais — ce qu'un embedder anglais ne sait pas faire.
+- Le GGUF vit hors du binaire (`<données>/models/`, ou `ZER0_EMBED_MODEL`) :
+  `zer0` ne grossit pas de 600 Mo.
+- Changer d'embedder **invalide les vecteurs existants** (ils sont rangés par
+  identifiant) : réindexer avec `zer0 kb ingest <dir> --embed`.
+
 ### zer0CL — un shell dans le panneau
 
 ```bash

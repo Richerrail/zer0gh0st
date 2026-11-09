@@ -463,6 +463,13 @@ enum KbAction {
         #[arg(long, default_value_t = 15)]
         lines: usize,
     },
+    /// Embedder local (bge-m3) : `fetch`, `status`, `start`, `stop`, `list`.
+    Embed {
+        /// Action (défaut : status).
+        action: Option<String>,
+        /// Nom du modèle pour `fetch` (défaut : bge-m3-q8_0).
+        name: Option<String>,
+    },
 }
 
 /// Catalogue d'APIs publiques (public-apis/public-apis).
@@ -946,6 +953,56 @@ async fn stt_cmd(file: String) -> Result<()> {
     }
 }
 
+/// `zer0 kb embed [list|fetch|status|start|stop] [nom]` — embedder local.
+async fn kb_embed_cmd(action: Option<&str>, name: Option<&str>) -> Result<()> {
+    use crate::local;
+    let lines = match action.unwrap_or("status") {
+        "list" | "models" => local::EMBED_MODELS
+            .iter()
+            .map(|m| {
+                let present = if local::embed_model_present(m.name) {
+                    "présent"
+                } else {
+                    "absent"
+                };
+                format!(
+                    "{}  ({}, {:.0} Mo, {}) — {}",
+                    m.name,
+                    present,
+                    m.bytes as f64 / 1_048_576.0,
+                    m.note,
+                    m.url
+                )
+            })
+            .collect(),
+        "fetch" | "download" => {
+            let name = name
+                .map(|s| s.to_string())
+                .or_else(|| local::EMBED_MODELS.first().map(|m| m.name.to_string()))
+                .unwrap_or_default();
+            vec![local::fetch_embed_model(&name).await?]
+        }
+        "status" => local::embed_status().await,
+        "start" => vec![local::ensure_embed(name).await?],
+        "stop" => {
+            if local::stop_embed_if_owned() {
+                vec!["serveur d'embedding arrêté".to_string()]
+            } else {
+                vec!["aucun serveur d'embedding détenu par Zer0".to_string()]
+            }
+        }
+        other => {
+            return Err(anyhow!(
+                "action inconnue : {other} (list|fetch|status|start|stop)"
+            ))
+        }
+    };
+    for line in lines {
+        println!("{line}");
+    }
+    Ok(())
+}
+
 async fn kb_cmd(action: KbAction) -> Result<()> {
     let lines = match action {
         KbAction::Stats => commands::kb_stats()?,
@@ -960,6 +1017,9 @@ async fn kb_cmd(action: KbAction) -> Result<()> {
         KbAction::Dedupe => commands::kb_dedupe()?,
         KbAction::Drop { source } => commands::kb_drop(&source)?,
         KbAction::Log { lines } => commands::kb_log(lines),
+        KbAction::Embed { action, name } => {
+            return kb_embed_cmd(action.as_deref(), name.as_deref()).await
+        }
     };
     for line in lines {
         println!("{line}");

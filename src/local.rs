@@ -141,7 +141,12 @@ pub struct OwnedPid {
 
 /// Lit et parse le fichier PID. `None` si absent/illisible/invalide.
 pub fn read_owned_pid() -> Option<OwnedPid> {
-    let raw = std::fs::read_to_string(pid_path()).ok()?;
+    read_pid_at(&pid_path())
+}
+
+/// Même chose pour un fichier arbitraire (le serveur d'embedding a le sien).
+fn read_pid_at(path: &Path) -> Option<OwnedPid> {
+    let raw = std::fs::read_to_string(path).ok()?;
     parse_owned_pid(&raw)
 }
 
@@ -155,12 +160,17 @@ fn parse_owned_pid(raw: &str) -> Option<OwnedPid> {
 /// Écrit le fichier PID au format `pid starttime` (starttime lu dans
 /// `/proc/<pid>/stat` ; absent si illisible — repli sur le seul PID).
 fn write_owned_pid(pid: u32) {
+    write_pid_at(&pid_path(), pid);
+}
+
+/// Écrit `pid starttime` à l'emplacement donné (chat ou embedder).
+fn write_pid_at(path: &Path, pid: u32) {
     let start = proc_starttime(pid);
     let content = match start {
         Some(t) => format!("{pid} {t}\n"),
         None => format!("{pid}\n"),
     };
-    let _ = std::fs::write(pid_path(), content);
+    let _ = std::fs::write(path, content);
 }
 
 /// Champ 22 de `/proc/<pid>/stat` (jiffies depuis le boot). `None` si le
@@ -729,5 +739,463 @@ mod tests {
         for key in ["role", "route", "0box"] {
             assert!(text.contains(key), "manque {key}");
         }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Serveur d'embedding local (`local-embed`)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Pourquoi un second serveur ? Le serveur de chat charge UN modèle et sert
+// `/chat/completions`. L'embedding a besoin d'un modèle différent (bge-m3) et
+// de `--embeddings --pooling mean`. Deux processus, deux ports, deux fichiers
+// PID : le chat peut redémarrer ou changer de modèle sans invalider les
+// vecteurs déjà calculés.
+//
+// Ce que ça supprime : la dépendance réseau. `memory::embed` ne change pas
+// d'une ligne — il POSTe sur `{base}/embeddings`, ici en boucle locale.
+
+/// Port du serveur d'embedding (le chat garde 8080).
+pub const EMBED_PORT: u16 = 8082;
+
+/// Un modèle d'embedding connu : URL, taille et empreinte.
+///
+/// L'empreinte est vérifiée après téléchargement : un fichier corrompu, tronqué
+/// ou remplacé par autre chose est refusé au lieu de produire des vecteurs
+/// silencieusement faux.
+pub struct EmbedModel {
+    pub name: &'static str,
+    pub url: &'static str,
+    pub bytes: u64,
+    pub sha256: &'static str,
+    pub note: &'static str,
+}
+
+pub const EMBED_MODELS: &[EmbedModel] = &[EmbedModel {
+    name: "bge-m3-q8_0",
+    url: "https://huggingface.co/vonjack/bge-m3-gguf/resolve/main/bge-m3-q8_0.gguf",
+    // Mesurés sur l'artefact réel (téléchargé une fois, `sha256sum`). Un
+    // fichier d'une *autre* provenance peut être valide et différent : il n'est
+    // alors pas « vérifié », ce que `kb embed status` dit explicitement.
+    bytes: 617_542_656,
+    sha256: "25a1a713cc7e2c1b599a3c09dbf9a9a7774452312159434ceb335004ccc11255",
+    note: "bge-m3 Q8_0 — multilingue (100+ langues), 1024 dims, mean pooling",
+}];
+
+/// Dossier d'accueil des modèles d'embedding : `<données>/models`.
+pub fn embed_models_dir() -> PathBuf {
+    crate::config::data_dir().join("models")
+}
+
+/// Où est (ou serait) le GGUF d'embedding `name`.
+///
+/// Ordre : `ZER0_EMBED_MODEL` (chemin explicite) → `<données>/models/<nom>.gguf`
+/// → `<projet>/models/<nom>.gguf` (là où l'utilisateur a pu le déposer).
+pub fn embed_model_path(name: &str) -> PathBuf {
+    if let Ok(p) = std::env::var("ZER0_EMBED_MODEL") {
+        let p = PathBuf::from(p.trim());
+        if !p.as_os_str().is_empty() {
+            return p;
+        }
+    }
+    let data = embed_models_dir().join(format!("{name}.gguf"));
+    if data.is_file() {
+        return data;
+    }
+    let repo = models_dir().join(format!("{name}.gguf"));
+    if repo.is_file() {
+        return repo;
+    }
+    data
+}
+
+/// Le GGUF existe-t-il réellement ?
+pub fn embed_model_present(name: &str) -> bool {
+    embed_model_path(name).is_file()
+}
+
+pub fn embed_base_url() -> String {
+    std::env::var("ZER0_EMBED_URL")
+        .ok()
+        .map(|v| v.trim().trim_end_matches('/').to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| format!("http://127.0.0.1:{EMBED_PORT}"))
+}
+
+pub fn embed_pid_path() -> PathBuf {
+    crate::config::data_dir().join("llama-embed.pid")
+}
+
+pub fn embed_log_path() -> PathBuf {
+    crate::config::data_dir().join("llama-embed.log")
+}
+
+/// Arguments de `llama-server` pour l'embedding. Fonction **pure** : les
+/// drapeaux sont testables sans démarrer de processus.
+///
+/// `--pooling mean` : bge-m3 est entraîné avec un pooling moyen ; un `cls`
+/// donnerait des vecteurs silencieusement dégradés (pas d'erreur, juste de
+/// moins bons résultats — le pire des cas).
+pub fn embed_args(model: &Path, threads: u64, ctx: u64) -> Vec<String> {
+    vec![
+        "-m".into(),
+        model.display().to_string(),
+        "--embeddings".into(),
+        "--pooling".into(),
+        "mean".into(),
+        "--port".into(),
+        EMBED_PORT.to_string(),
+        "--host".into(),
+        "127.0.0.1".into(),
+        "-c".into(),
+        ctx.to_string(),
+        "-t".into(),
+        threads.to_string(),
+        // Pas de warmup : le chargement de bge-m3 prend ~2 s, inutile d'en
+        // ajouter dix de plus.
+        "--no-warmup".into(),
+        "-np".into(),
+        "1".into(),
+    ]
+}
+
+/// Le serveur d'embedding répond-il ?
+pub async fn embed_is_up() -> bool {
+    let url = format!("{}/v1/models", embed_base_url());
+    match crate::http_client::HTTP_CLIENT
+        .get(&url)
+        .timeout(Duration::from_millis(1200))
+        .send()
+        .await
+    {
+        Ok(r) => r.status().is_success(),
+        Err(_) => false,
+    }
+}
+
+fn cleanup_stale_embed_pid() -> bool {
+    let path = embed_pid_path();
+    let Some(owned) = read_pid_at(&path) else {
+        return false;
+    };
+    if is_owned_llama(&owned) {
+        return false;
+    }
+    let _ = std::fs::remove_file(&path);
+    true
+}
+
+/// Nombre de threads de l'embedding : `ZER0_EMBED_THREADS`, sinon 2.
+///
+/// Deux, volontairement : un embedding ne gagne presque rien à saturer les
+/// cœurs, et un serveur qui prend 4 cœurs sur 4 rend la machine inutilisable
+/// pendant l'ingestion (vécu : plantage du poste).
+pub fn embed_threads() -> u64 {
+    env_u64("ZER0_EMBED_THREADS", 2)
+}
+
+/// Contexte : 1024 tokens suffisent pour un chunk de ~1000 caractères.
+fn embed_ctx() -> u64 {
+    env_u64("ZER0_EMBED_CTX", 1024)
+}
+
+/// Démarre le serveur d'embedding si nécessaire. Retourne un message lisible.
+///
+/// Un seul démarrage à la fois (verrou) : la recherche et l'ingestion peuvent
+/// l'appeler en parallèle au premier tour.
+pub async fn ensure_embed(wanted: Option<&str>) -> Result<String> {
+    static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _guard = LOCK.lock().await;
+    cleanup_stale_embed_pid();
+    if embed_is_up().await {
+        return Ok("serveur d'embedding déjà actif".to_string());
+    }
+    let name = wanted
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| EMBED_MODELS.first().map(|m| m.name.to_string()))
+        .ok_or_else(|| anyhow!("aucun modèle d'embedding configuré"))?;
+    let model = embed_model_path(&name);
+    if !model.is_file() {
+        return Err(anyhow!(
+            "GGUF d'embedding absent : {} — lance `zer0 kb embed fetch {name}` \
+             (ou dépose le fichier à cet emplacement, ou définis ZER0_EMBED_MODEL)",
+            model.display()
+        ));
+    }
+    let bin = server_bin().ok_or_else(|| {
+        anyhow!("llama-server introuvable — installe llama.cpp ou définis ZER0_LLAMA_SERVER")
+    })?;
+    let threads = embed_threads();
+    let ctx = embed_ctx();
+    let log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(embed_log_path())
+        .ok();
+    let mut cmd = tokio::process::Command::new(&bin);
+    cmd.args(embed_args(&model, threads, ctx));
+    cmd.stdin(Stdio::null()).stdout(Stdio::null());
+    match log {
+        Some(f) => {
+            cmd.stderr(Stdio::from(f));
+        }
+        None => {
+            cmd.stderr(Stdio::null());
+        }
+    }
+    let child = cmd
+        .spawn()
+        .with_context(|| format!("démarrage de {}", bin.display()))?;
+    if let Some(pid) = child.id() {
+        write_pid_at(&embed_pid_path(), pid);
+    }
+    let deadline = std::time::Instant::now() + Duration::from_secs(90);
+    while std::time::Instant::now() < deadline {
+        if embed_is_up().await {
+            return Ok(format!(
+                "serveur d'embedding démarré — {} ({} threads, ctx {ctx}, port {EMBED_PORT})",
+                model.display(),
+                threads
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(400)).await;
+    }
+    Err(anyhow!(
+        "serveur d'embedding muet après 90 s — journal : {}",
+        embed_log_path().display()
+    ))
+}
+
+/// Arrête le serveur d'embedding **si c'est bien le nôtre**.
+pub fn stop_embed_if_owned() -> bool {
+    cleanup_stale_embed_pid();
+    let Some(owned) = read_pid_at(&embed_pid_path()) else {
+        return false;
+    };
+    if !is_owned_llama(&owned) {
+        let _ = std::fs::remove_file(embed_pid_path());
+        return false;
+    }
+    let pid = owned.pid;
+    #[cfg(unix)]
+    {
+        signal(pid, "-TERM");
+        for _ in 0..20 {
+            if !alive(pid) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        if alive(pid) {
+            signal(pid, "-9");
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/F"])
+            .status();
+    }
+    let _ = std::fs::remove_file(embed_pid_path());
+    true
+}
+
+/// État lisible du serveur d'embedding (CLI `/kb embed status`).
+pub async fn embed_status() -> Vec<String> {
+    let up = embed_is_up().await;
+    let owned = read_pid_at(&embed_pid_path());
+    let mut out = vec![format!(
+        "Serveur d'embedding : {}{}",
+        embed_base_url(),
+        if up { "  ✅ actif" } else { "  ⛔ arrêté" },
+    )];
+    if let Some(o) = owned {
+        out.push(format!("  PID détenu : {} (le nôtre)", o.pid));
+    }
+    out.push(format!(
+        "  Threads : {} (ZER0_EMBED_THREADS)",
+        embed_threads()
+    ));
+    for m in EMBED_MODELS {
+        let path = embed_model_path(m.name);
+        let state = if path.is_file() {
+            match std::fs::metadata(&path) {
+                Ok(md) if md.len() == m.bytes => {
+                    "présent, conforme à l'artefact épinglé ✅".to_string()
+                }
+                Ok(md) => format!(
+                    "présent ({} o ≠ {} o) — fichier local non vérifié, utilisable",
+                    md.len(),
+                    m.bytes
+                ),
+                Err(e) => format!("illisible ⚠ ({e})"),
+            }
+        } else {
+            "absent → `zer0 kb embed fetch`".to_string()
+        };
+        out.push(format!("  {:<14} {} — {}", m.name, path.display(), state));
+        out.push(format!("  {:<14} {}", "", m.note));
+    }
+    out
+}
+
+/// Télécharge un modèle d'embedding connu, vérifie son SHA256, puis le range
+/// de façon atomique. `Ok(message)` décrit ce qui a été fait.
+pub async fn fetch_embed_model(name: &str) -> Result<String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Write;
+
+    let Some(entry) = EMBED_MODELS.iter().find(|m| m.name == name) else {
+        let known: Vec<&str> = EMBED_MODELS.iter().map(|m| m.name).collect();
+        return Err(anyhow!(
+            "modèle inconnu : {name} (connus : {})",
+            known.join(", ")
+        ));
+    };
+    let target = embed_models_dir().join(format!("{}.gguf", entry.name));
+    if let Ok(md) = std::fs::metadata(&target) {
+        if md.len() == entry.bytes {
+            return Ok(format!("déjà présent : {}", target.display()));
+        }
+        return Err(anyhow!(
+            "{} existe mais fait {} o au lieu de {} o — supprime-le pour retélécharger",
+            target.display(),
+            md.len(),
+            entry.bytes
+        ));
+    }
+    std::fs::create_dir_all(embed_models_dir())?;
+    let part = target.with_extension("gguf.part");
+    let resp = crate::http_client::HTTP_CLIENT
+        .get(entry.url)
+        .send()
+        .await
+        .with_context(|| format!("téléchargement de {}", entry.url))?;
+    if !resp.status().is_success() {
+        return Err(anyhow!("téléchargement {} : {}", entry.url, resp.status()));
+    }
+    let mut file = std::fs::File::create(&part)?;
+    let mut hasher = Sha256::new();
+    let mut got: u64 = 0;
+    let mut stream = resp.bytes_stream();
+    use futures_util::StreamExt;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.context("flux interrompu")?;
+        hasher.update(&chunk);
+        file.write_all(&chunk)?;
+        got += chunk.len() as u64;
+    }
+    file.flush()?;
+    drop(file);
+    let digest = format!("{:x}", hasher.finalize());
+    if got != entry.bytes || digest != entry.sha256 {
+        let _ = std::fs::remove_file(&part);
+        return Err(anyhow!(
+            "fichier refusé : {got} o (attendu {}), sha256 {digest} (attendu {})",
+            entry.bytes,
+            entry.sha256
+        ));
+    }
+    std::fs::rename(&part, &target)?;
+    Ok(format!(
+        "modèle prêt : {} ({} Mo, sha256 vérifié)",
+        target.display(),
+        got / 1_048_576
+    ))
+}
+
+#[cfg(test)]
+mod embed_tests {
+    use super::*;
+
+    #[test]
+    fn known_models_are_well_formed() {
+        assert!(!EMBED_MODELS.is_empty());
+        for m in EMBED_MODELS {
+            assert!(m.sha256.len() == 64, "sha256 de {} invalide", m.name);
+            assert!(
+                m.sha256.chars().all(|c| c.is_ascii_hexdigit()),
+                "sha256 de {} non hexadécimal",
+                m.name
+            );
+            assert!(m.bytes > 100_000_000, "taille suspecte pour {}", m.name);
+            assert!(
+                m.url.starts_with("https://"),
+                "URL non https pour {}",
+                m.name
+            );
+            assert_eq!(m.name, m.name.trim());
+        }
+    }
+
+    #[test]
+    fn server_args_use_mean_pooling_and_embeddings() {
+        let args = embed_args(Path::new("/tmp/x.gguf"), 2, 1024);
+        let joined = args.join(" ");
+        assert!(args.contains(&"--embeddings".to_string()));
+        assert!(
+            joined.contains("--pooling mean"),
+            "pooling absent : {joined}"
+        );
+        assert!(joined.contains(&format!("--port {EMBED_PORT}")), "{joined}");
+        assert!(joined.contains("-t 2"), "threads absents : {joined}");
+        assert!(joined.contains("-m /tmp/x.gguf"), "{joined}");
+        // Deux serveurs distincts : l'embedding ne doit jamais prendre 8080.
+        assert!(!joined.contains("--port 8080"));
+    }
+
+    #[test]
+    fn stale_embed_pid_is_cleared() {
+        // Un PID manifestement mort ne doit pas survivre au démarrage.
+        // Le dossier de données peut ne pas exister sur une machine neuve
+        // (runner CI) : on le crée, sinon l'écriture échouerait en silence et
+        // le test mesurerait autre chose que ce qu'il annonce.
+        let path = embed_pid_path();
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let saved = std::fs::read(&path).ok();
+        std::fs::write(&path, "999999 1\n").expect("écriture du PID de test");
+        // La détection d'un PID mort dépend de la plateforme (`is_owned_llama`) :
+        //   Linux  : `/proc` (nom + starttime) ;
+        //   macOS  : `kill -0` (voir la PR d'audit) ;
+        //   Windows: aucun des deux → le PID est cru, repli documenté.
+        // On n'affirme donc le nettoyage que là où il est garanti aujourd'hui.
+        #[cfg(target_os = "linux")]
+        {
+            assert!(cleanup_stale_embed_pid());
+            assert!(!path.exists(), "fichier PID périmé non supprimé");
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = cleanup_stale_embed_pid();
+            let _ = std::fs::remove_file(&path);
+        }
+        match saved {
+            Some(bytes) => {
+                let _ = std::fs::write(&path, bytes);
+            }
+            None => {
+                let _ = std::fs::remove_file(&path);
+            }
+        }
+    }
+
+    #[test]
+    fn unknown_model_is_refused_with_the_known_names() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let err = rt
+            .block_on(fetch_embed_model("nope"))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("nope"), "{err}");
+        assert!(
+            err.contains("bge-m3"),
+            "les noms connus doivent être listés : {err}"
+        );
     }
 }

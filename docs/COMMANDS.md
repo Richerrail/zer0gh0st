@@ -548,6 +548,15 @@ Show the knowledge-injection log
 |---|---|
 | `--lines <LINES>` |  |
 
+#### `zer0 kb embed`
+
+Embedder local (bge-m3) : `fetch`, `status`, `start`, `stop`, `list`
+
+| Option | Description |
+|---|---|
+| ` <ACTION>` | Action (défaut : status) |
+| ` <NAME>` | Nom du modèle pour `fetch` (défaut : bge-m3-q8_0) |
+
 ### `zer0 telegram`
 
 Bot Telegram : converse avec Zer0 à distance (long polling)
