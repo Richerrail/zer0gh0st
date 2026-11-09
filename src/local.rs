@@ -218,10 +218,18 @@ fn is_owned_llama(pid: &OwnedPid) -> bool {
         }
         true
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(all(unix, not(target_os = "linux")))]
     {
-        // Hors Linux : pas de `/proc` fiable ; on se contente du PID
-        // (comportement historique).
+        // Pas de `/proc`, donc pas de vérification du nom : mais `kill -0` dit
+        // si le processus vit encore. Sans ça, un PID mort passait pour « le
+        // nôtre » et on annonçait un redémarrage fantôme (B4, macOS).
+        alive(pid.pid)
+    }
+    #[cfg(not(unix))]
+    {
+        // Windows : ni `/proc` ni `kill -0` sans dépendance supplémentaire.
+        // Repli assumé sur le PID (comportement historique) — un PID réutilisé
+        // par un autre processus n'est pas détecté ici.
         let _ = pid;
         true
     }
@@ -647,10 +655,13 @@ mod tests {
         // Fichier présent mais illisible/invalide : rien à redémarrer.
         assert!(!should_restart(true, None));
         // Fichier présent, PID mort : `is_owned_llama` est faux -> pas de restart.
+        // Vrai sous Linux (`/proc`) et macOS (`kill -0`) ; sous Windows il n'y a
+        // ni l'un ni l'autre, donc le repli fait confiance au PID (assumé).
         let dead = OwnedPid {
             pid: u32::MAX,
             starttime: None,
         };
+        #[cfg(not(windows))]
         assert!(!should_restart(true, Some(&dead)));
         // Fichier absent mais PID lisible (course) : pas de restart non plus.
         assert!(!should_restart(false, Some(&dead)));
