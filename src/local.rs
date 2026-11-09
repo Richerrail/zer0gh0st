@@ -1106,11 +1106,27 @@ mod embed_tests {
     #[test]
     fn stale_embed_pid_is_cleared() {
         // Un PID manifestement mort ne doit pas survivre au démarrage.
+        // Le dossier de données peut ne pas exister sur une machine neuve
+        // (runner CI) : on le crée, sinon l'écriture échouerait en silence et
+        // le test mesurerait autre chose que ce qu'il annonce.
         let path = embed_pid_path();
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
         let saved = std::fs::read(&path).ok();
-        let _ = std::fs::write(&path, "999999 1\n");
-        assert!(cleanup_stale_embed_pid());
-        assert!(!path.exists(), "fichier PID périmé non supprimé");
+        std::fs::write(&path, "999999 1\n").expect("écriture du PID de test");
+        // Sous Windows il n'y a ni `/proc` ni `kill -0` : le repli fait
+        // confiance au PID, donc un PID mort n'est pas détecté (assumé).
+        #[cfg(not(windows))]
+        {
+            assert!(cleanup_stale_embed_pid());
+            assert!(!path.exists(), "fichier PID périmé non supprimé");
+        }
+        #[cfg(windows)]
+        {
+            let _ = cleanup_stale_embed_pid();
+            let _ = std::fs::remove_file(&path);
+        }
         match saved {
             Some(bytes) => {
                 let _ = std::fs::write(&path, bytes);
