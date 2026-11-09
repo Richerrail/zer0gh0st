@@ -1115,14 +1115,17 @@ mod embed_tests {
         }
         let saved = std::fs::read(&path).ok();
         std::fs::write(&path, "999999 1\n").expect("écriture du PID de test");
-        // Sous Windows il n'y a ni `/proc` ni `kill -0` : le repli fait
-        // confiance au PID, donc un PID mort n'est pas détecté (assumé).
-        #[cfg(not(windows))]
+        // La détection d'un PID mort dépend de la plateforme (`is_owned_llama`) :
+        //   Linux  : `/proc` (nom + starttime) ;
+        //   macOS  : `kill -0` (voir la PR d'audit) ;
+        //   Windows: aucun des deux → le PID est cru, repli documenté.
+        // On n'affirme donc le nettoyage que là où il est garanti aujourd'hui.
+        #[cfg(target_os = "linux")]
         {
             assert!(cleanup_stale_embed_pid());
             assert!(!path.exists(), "fichier PID périmé non supprimé");
         }
-        #[cfg(windows)]
+        #[cfg(not(target_os = "linux"))]
         {
             let _ = cleanup_stale_embed_pid();
             let _ = std::fs::remove_file(&path);
