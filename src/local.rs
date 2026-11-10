@@ -849,6 +849,15 @@ pub fn embed_args(model: &Path, threads: u64, ctx: u64) -> Vec<String> {
         "127.0.0.1".into(),
         "-c".into(),
         ctx.to_string(),
+        // Batch physique = contexte. Sans ça llama.cpp garde 512 et refuse
+        // tout chunk de plus de 512 tokens : « input (520 tokens) is too large
+        // … increase the physical batch size (current batch size: 512) ».
+        // Deux chunks de 1200 octets dépassent 512 tokens → 2 vecteurs manquants
+        // sur 445, invisibles avant le comptage honnête d'`IngestReport`.
+        "-b".into(),
+        ctx.to_string(),
+        "-ub".into(),
+        ctx.to_string(),
         "-t".into(),
         threads.to_string(),
         // Pas de warmup : le chargement de bge-m3 prend ~2 s, inutile d'en
@@ -1148,6 +1157,12 @@ mod embed_tests {
         assert!(joined.contains(&format!("--port {EMBED_PORT}")), "{joined}");
         assert!(joined.contains("-t 2"), "threads absents : {joined}");
         assert!(joined.contains("-m /tmp/x.gguf"), "{joined}");
+        // Batch physique aligné sur le contexte : sinon llama.cpp garde 512 et
+        // refuse les chunks de plus de 512 tokens (erreur 500 silencieuse).
+        assert!(
+            joined.contains("-b 1024") && joined.contains("-ub 1024"),
+            "batch physique absent ou incohérent avec ctx : {joined}"
+        );
         // Deux serveurs distincts : l'embedding ne doit jamais prendre 8080.
         assert!(!joined.contains("--port 8080"));
     }
