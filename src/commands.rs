@@ -832,7 +832,15 @@ pub fn kb_drop(pattern: &str) -> Result<Vec<String>> {
 
 pub fn kb_rebuild() -> Result<Vec<String>> {
     crate::knowledge::rebuild_fts()?;
-    Ok(vec!["Index FTS5 reconstruit.".to_string()])
+    let pruned = crate::knowledge::prune_orphan_vectors().unwrap_or(0);
+    let mut out = vec!["Index FTS5 reconstruit.".to_string()];
+    match pruned {
+        0 => out.push("Aucun vecteur orphelin à supprimer.".to_string()),
+        n => out.push(format!(
+            "{n} vecteur(s) orphelin(s) supprimé(s) (chunks absents)."
+        )),
+    }
+    Ok(out)
 }
 
 pub fn kb_log(n: usize) -> Vec<String> {
