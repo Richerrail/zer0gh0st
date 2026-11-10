@@ -908,7 +908,14 @@ pub async fn ensure_embed(wanted: Option<&str>) -> Result<String> {
     let _guard = LOCK.lock().await;
     cleanup_stale_embed_pid();
     if embed_is_up().await {
-        return Ok("serveur d'embedding déjà actif".to_string());
+        // Les threads sont lus **au démarrage** du serveur : `ZER0_EMBED_THREADS`
+        // n'a aucun effet sur un serveur déjà lancé. Le dire, sinon on croit
+        // l'avoir accéléré (constaté : « j'ai mis 4 threads, rien ne change »).
+        return Ok(
+            "serveur d'embedding déjà actif — les threads sont lus à son \
+démarrage : `zer0 kb embed stop` puis relancer pour les changer"
+                .to_string(),
+        );
     }
     let name = wanted
         .map(|s| s.trim().to_string())

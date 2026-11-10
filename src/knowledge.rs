@@ -928,7 +928,6 @@ pub async fn ingest_dir_with(
     // Total connu à l'avance : la progression est honnête dès le premier chunk.
     let total = count_chunks(&files);
     let started = std::time::Instant::now();
-    let mut last = 0usize;
 
     let c = open()?;
     // Transaction par paquets de `COMMIT_EVERY` chunks : un fsync par chunk
@@ -999,24 +998,18 @@ pub async fn ingest_dir_with(
                 c.execute_batch("COMMIT")?;
                 c.execute_batch("BEGIN")?;
             }
-            if should_report(report.chunks, total) {
-                last = report.chunks;
-                progress(IngestProgress {
-                    done: report.chunks,
-                    total,
-                    elapsed: started.elapsed(),
-                });
-            }
+            // Un rapport **par chunk** : c'est l'appelant qui décide du rythme
+            // d'affichage (1 s en TTY, 5 % en pipe, 20 % dans la TUI). Signaler
+            // seulement tous les 5 % laissait l'écran muet plusieurs minutes au
+            // démarrage (constaté : « il n'y a rien à afficher »).
+            progress(IngestProgress {
+                done: report.chunks,
+                total,
+                elapsed: started.elapsed(),
+            });
         }
     }
     c.execute_batch("COMMIT")?;
-    if last != report.chunks && report.chunks > 0 {
-        progress(IngestProgress {
-            done: report.chunks,
-            total,
-            elapsed: started.elapsed(),
-        });
-    }
     Ok(report)
 }
 
