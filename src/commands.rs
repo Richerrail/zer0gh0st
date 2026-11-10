@@ -787,7 +787,7 @@ pub async fn kb_ingest(dir: Option<std::path::PathBuf>, embed: bool) -> Result<V
 pub async fn kb_ingest_with(
     dir: Option<std::path::PathBuf>,
     embed: bool,
-    progress: &(dyn Fn(String) + Sync),
+    progress: &(dyn Fn(crate::knowledge::IngestProgress) + Sync),
 ) -> Result<Vec<String>> {
     let d = dir.unwrap_or_else(crate::knowledge::default_dir);
     // Vérifié avant d'ouvrir la base : « dossier inexistant » ne doit pas créer
@@ -795,8 +795,7 @@ pub async fn kb_ingest_with(
     if !d.exists() {
         return Err(anyhow!("dossier introuvable: {}", d.display()));
     }
-    let show = |p: crate::knowledge::IngestProgress| progress(crate::knowledge::progress_text(p));
-    let report = crate::knowledge::ingest_dir_with(&d, embed, &show).await?;
+    let report = crate::knowledge::ingest_dir_with(&d, embed, progress).await?;
     let mut out = vec![report.summary(&d)];
     if embed && crate::memory::embedder_id().is_none() {
         out.push("(aucun embedder configuré → vecteurs non calculés)".to_string());
@@ -833,7 +832,15 @@ pub fn kb_drop(pattern: &str) -> Result<Vec<String>> {
 
 pub fn kb_rebuild() -> Result<Vec<String>> {
     crate::knowledge::rebuild_fts()?;
-    Ok(vec!["Index FTS5 reconstruit.".to_string()])
+    let pruned = crate::knowledge::prune_orphan_vectors().unwrap_or(0);
+    let mut out = vec!["Index FTS5 reconstruit.".to_string()];
+    match pruned {
+        0 => out.push("Aucun vecteur orphelin à supprimer.".to_string()),
+        n => out.push(format!(
+            "{n} vecteur(s) orphelin(s) supprimé(s) (chunks absents)."
+        )),
+    }
+    Ok(out)
 }
 
 pub fn kb_log(n: usize) -> Vec<String> {

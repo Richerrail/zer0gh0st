@@ -928,7 +928,6 @@ pub async fn ingest_dir_with(
     // Total connu à l'avance : la progression est honnête dès le premier chunk.
     let total = count_chunks(&files);
     let started = std::time::Instant::now();
-    let mut last = 0usize;
 
     let c = open()?;
     // Transaction par paquets de `COMMIT_EVERY` chunks : un fsync par chunk
@@ -999,24 +998,18 @@ pub async fn ingest_dir_with(
                 c.execute_batch("COMMIT")?;
                 c.execute_batch("BEGIN")?;
             }
-            if should_report(report.chunks, total) {
-                last = report.chunks;
-                progress(IngestProgress {
-                    done: report.chunks,
-                    total,
-                    elapsed: started.elapsed(),
-                });
-            }
+            // Un rapport **par chunk** : c'est l'appelant qui décide du rythme
+            // d'affichage (1 s en TTY, 5 % en pipe, 20 % dans la TUI). Signaler
+            // seulement tous les 5 % laissait l'écran muet plusieurs minutes au
+            // démarrage (constaté : « il n'y a rien à afficher »).
+            progress(IngestProgress {
+                done: report.chunks,
+                total,
+                elapsed: started.elapsed(),
+            });
         }
     }
     c.execute_batch("COMMIT")?;
-    if last != report.chunks && report.chunks > 0 {
-        progress(IngestProgress {
-            done: report.chunks,
-            total,
-            elapsed: started.elapsed(),
-        });
-    }
     Ok(report)
 }
 
@@ -1098,6 +1091,66 @@ pub fn rebuild_fts() -> Result<()> {
     Ok(())
 }
 
+/// Supprime les vecteurs dont le chunk n'existe plus (restes des réingestions).
+/// Retourne le nombre de lignes supprimées.
+pub fn prune_orphan_vectors() -> Result<usize> {
+    let c = open()?;
+    let n = c.execute(
+        "DELETE FROM embeddings WHERE knowledge_id NOT IN (SELECT id FROM knowledge)",
+        [],
+    )?;
+    Ok(n)
+}
+
+#[cfg(test)]
+mod orphan_tests {
+    use super::*;
+
+    #[test]
+    fn orphan_vectors_are_removed_and_real_ones_kept() {
+        let c = Connection::open_in_memory().unwrap();
+        init(&c).unwrap();
+        for (sujet, source) in [("a", "s1"), ("b", "s2")] {
+            c.execute(
+                "INSERT INTO knowledge (sujet, contenu, source) VALUES (?1, ?2, ?3)",
+                params![sujet, "x", source],
+            )
+            .unwrap();
+            let id = c.last_insert_rowid();
+            c.execute(
+                "INSERT INTO embeddings (knowledge_id, embedder, vector) VALUES (?1, 'e', x'00')",
+                params![id],
+            )
+            .unwrap();
+        }
+        // Un vecteur qui ne correspond à aucun chunk (id 999).
+        c.execute(
+            "INSERT INTO embeddings (knowledge_id, embedder, vector) VALUES (999, 'e', x'00')",
+            [],
+        )
+        .unwrap();
+        let orphans: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM embeddings WHERE knowledge_id NOT IN (SELECT id FROM knowledge)",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(orphans, 1);
+        let deleted = c
+            .execute(
+                "DELETE FROM embeddings WHERE knowledge_id NOT IN (SELECT id FROM knowledge)",
+                [],
+            )
+            .unwrap();
+        assert_eq!(deleted, 1);
+        let left: i64 = c
+            .query_row("SELECT COUNT(*) FROM embeddings", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(left, 2, "les vecteurs réels doivent rester");
+    }
+}
+
 pub fn stats() -> Result<String> {
     let c = open()?;
     let entries: i64 = c.query_row("SELECT COUNT(*) FROM knowledge", [], |r| r.get(0))?;
@@ -1105,13 +1158,27 @@ pub fn stats() -> Result<String> {
         r.get(0)
     })?;
     let vecs: i64 = c.query_row("SELECT COUNT(*) FROM embeddings", [], |r| r.get(0))?;
+    let orphans: i64 = c.query_row(
+        "SELECT COUNT(*) FROM embeddings WHERE knowledge_id NOT IN (SELECT id FROM knowledge)",
+        [],
+        |r| r.get(0),
+    )?;
     let embedder = crate::memory::embedder_id();
-    Ok(format!(
+    let mut out = format!(
         "Base de connaissance : {}\n  entrées (chunks) : {entries}\n  fichiers         : {files}\n  vecteurs         : {vecs}\n  embedder         : {}\n  recherche        : {}",
         db_path().display(),
         embedder.as_deref().unwrap_or("(aucun)"),
         search_mode(embedder.as_deref(), vecs)
-    ))
+    );
+    // Des vecteurs dont le chunk n'existe plus : restes des réingestions (chaque
+    // réingestion recrée des ids). Inertes pour la recherche, mais ils gonflent
+    // la base et faussent le compte affiché ci-dessus.
+    if orphans > 0 {
+        out.push_str(&format!(
+            "\n  orphelins        : {orphans} vecteur(s) sans chunk (nettoyage : `zer0 kb rebuild`)"
+        ));
+    }
+    Ok(out)
 }
 
 /// Mode de recherche effectif, dit sans ambiguïté.

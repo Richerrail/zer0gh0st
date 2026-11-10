@@ -1011,12 +1011,26 @@ async fn kb_cmd(action: KbAction) -> Result<()> {
         }
         KbAction::Ingest { dir, embed } => {
             use std::io::IsTerminal;
+            use std::sync::atomic::{AtomicU64, Ordering};
             let tty = std::io::stderr().is_terminal();
-            let show = move |line: String| {
+            // En TTY : une ligne réécrite en place, au plus toutes les secondes.
+            // En pipe/fichier : une ligne par palier de 5 % (pas 445 lignes).
+            let last_ms = AtomicU64::new(0);
+            let show = move |p: crate::knowledge::IngestProgress| {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0);
+                let due = p.done >= p.total
+                    || now.saturating_sub(last_ms.load(Ordering::Relaxed)) >= 1000;
                 if tty {
-                    eprint!("\r⏳ {line}\x1b[K");
-                } else {
-                    eprintln!("⏳ {line}");
+                    if !due {
+                        return;
+                    }
+                    last_ms.store(now, Ordering::Relaxed);
+                    eprint!("\r⏳ {}\x1b[K", crate::knowledge::progress_text(p));
+                } else if crate::knowledge::should_report(p.done, p.total) {
+                    eprintln!("⏳ {}", crate::knowledge::progress_text(p));
                 }
             };
             let lines =
