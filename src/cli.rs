@@ -1010,7 +1010,21 @@ async fn kb_cmd(action: KbAction) -> Result<()> {
             commands::kb_search(&query.join(" "), k.unwrap_or(5)).await?
         }
         KbAction::Ingest { dir, embed } => {
-            commands::kb_ingest(dir.map(std::path::PathBuf::from), embed).await?
+            use std::io::IsTerminal;
+            let tty = std::io::stderr().is_terminal();
+            let show = move |line: String| {
+                if tty {
+                    eprint!("\r⏳ {line}\x1b[K");
+                } else {
+                    eprintln!("⏳ {line}");
+                }
+            };
+            let lines =
+                commands::kb_ingest_with(dir.map(std::path::PathBuf::from), embed, &show).await?;
+            if tty {
+                eprintln!();
+            }
+            lines
         }
         KbAction::Rebuild => commands::kb_rebuild()?,
         KbAction::Purge => commands::kb_purge()?,

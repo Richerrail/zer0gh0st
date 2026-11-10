@@ -823,15 +823,116 @@ impl IngestReport {
 }
 
 /// Indexe un dossier (récursif). `embed=true` calcule les embeddings (si embedder configuré).
+/// Avancement d'une ingestion (chunks traités sur le total estimé).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IngestProgress {
+    pub done: usize,
+    pub total: usize,
+    pub elapsed: std::time::Duration,
+}
+
+impl IngestProgress {
+    pub fn pct(&self) -> usize {
+        match self.total {
+            0 => 100,
+            total => 100 * self.done / total,
+        }
+    }
+
+    /// Secondes par chunk (0 tant qu'aucun n'est traité).
+    pub fn secs_per_chunk(&self) -> f64 {
+        if self.done == 0 {
+            0.0
+        } else {
+            self.elapsed.as_secs_f64() / self.done as f64
+        }
+    }
+
+    /// Estimation du temps restant, `None` si on ne peut pas la calculer.
+    pub fn eta(&self) -> Option<std::time::Duration> {
+        if self.done == 0 || self.total <= self.done {
+            return None;
+        }
+        let secs = self.secs_per_chunk() * (self.total - self.done) as f64;
+        std::time::Duration::try_from_secs_f64(secs).ok()
+    }
+}
+
+/// Faut-il publier cet avancement ? Tous les 5 % (au moins 1 chunk) et à la fin.
+pub fn should_report(done: usize, total: usize) -> bool {
+    if done == 0 {
+        return false;
+    }
+    if done >= total {
+        return true;
+    }
+    let step = (total / 20).max(1);
+    done.is_multiple_of(step)
+}
+
+/// Ligne d'avancement lisible (pure : testable sans terminal).
+pub fn progress_text(p: IngestProgress) -> String {
+    let mut out = format!("[{} / {} chunks] {} %", p.done, p.total, p.pct());
+    if p.done > 0 {
+        out.push_str(&format!(" — {:.1} s/chunk", p.secs_per_chunk()));
+    }
+    // Une ETA n'a de sens qu'avec une mesure réelle : sans embedder, tout est
+    // instantané et « reste ≈ 1 min » serait un mensonge.
+    if let Some(eta) = p.eta() {
+        if p.secs_per_chunk() >= 0.5 {
+            let mins = (eta.as_secs_f64() / 60.0).round() as u64;
+            out.push_str(&format!(" · reste ≈ {mins} min"));
+        }
+    }
+    out
+}
+
+/// Nombre de chunks produits par un ensemble de fichiers (pré-passe).
+///
+/// Une pré-passe plutôt qu'une estimation : l'utilisateur voit un vrai
+/// « 128 / 249 », pas un compteur qui s'allonge en cours de route.
+fn count_chunks(files: &[PathBuf]) -> usize {
+    let mut total = 0;
+    for f in files {
+        if let Ok(text) = std::fs::read_to_string(f) {
+            total += chunks(&text, 1200)
+                .iter()
+                .filter(|c| !c.trim().is_empty())
+                .count();
+        }
+    }
+    total
+}
+
+/// Chunks validés entre deux `COMMIT`. Un `Ctrl+C` conserve donc les chunks
+/// déjà commités au lieu de perdre toute l'ingestion (constaté : 40 min de
+/// calcul perdues d'un coup).
+const COMMIT_EVERY: usize = 25;
+
 pub async fn ingest_dir(dir: &Path, embed: bool) -> Result<IngestReport> {
+    ingest_dir_with(dir, embed, &|_| {}).await
+}
+
+/// Comme `ingest_dir`, en publiant l'avancement (`progress`) au fil de l'eau.
+pub async fn ingest_dir_with(
+    dir: &Path,
+    embed: bool,
+    progress: &(dyn Fn(IngestProgress) + Sync),
+) -> Result<IngestReport> {
     let mut files = Vec::new();
     collect_files(dir, &mut files);
     if files.is_empty() {
         return Err(anyhow!("aucun fichier texte dans {}", dir.display()));
     }
 
+    // Total connu à l'avance : la progression est honnête dès le premier chunk.
+    let total = count_chunks(&files);
+    let started = std::time::Instant::now();
+    let mut last = 0usize;
+
     let c = open()?;
-    // Une seule transaction pour tout l'ingest : sinon 1 fsync par chunk (très lent).
+    // Transaction par paquets de `COMMIT_EVERY` chunks : un fsync par chunk
+    // serait très lent, une transaction unique perdrait tout en cas d'arrêt.
     c.execute_batch("BEGIN")?;
     let embedder = if embed {
         crate::memory::embedder_id()
@@ -894,9 +995,28 @@ pub async fn ingest_dir(dir: &Path, embed: bool) -> Result<IngestReport> {
                 }
             }
             report.chunks += 1;
+            if report.chunks.is_multiple_of(COMMIT_EVERY) {
+                c.execute_batch("COMMIT")?;
+                c.execute_batch("BEGIN")?;
+            }
+            if should_report(report.chunks, total) {
+                last = report.chunks;
+                progress(IngestProgress {
+                    done: report.chunks,
+                    total,
+                    elapsed: started.elapsed(),
+                });
+            }
         }
     }
     c.execute_batch("COMMIT")?;
+    if last != report.chunks && report.chunks > 0 {
+        progress(IngestProgress {
+            done: report.chunks,
+            total,
+            elapsed: started.elapsed(),
+        });
+    }
     Ok(report)
 }
 
@@ -1116,6 +1236,63 @@ mod tests {
         assert!(hybrid.contains("hybride"), "{hybrid}");
         assert!(hybrid.contains("249"), "{hybrid}");
         assert!(hybrid.contains("local/bge-m3"), "{hybrid}");
+    }
+
+    #[test]
+    fn progress_text_is_honest_about_what_it_knows() {
+        let p = IngestProgress {
+            done: 0,
+            total: 249,
+            elapsed: std::time::Duration::from_secs(5),
+        };
+        let t = progress_text(p);
+        assert!(t.contains("0 / 249"), "{t}");
+        assert!(!t.contains("s/chunk"), "pas de vitesse sans chunk : {t}");
+        assert!(!t.contains("reste"), "pas d'ETA sans mesure : {t}");
+
+        let p = IngestProgress {
+            done: 125,
+            total: 250,
+            elapsed: std::time::Duration::from_secs(500),
+        };
+        let t = progress_text(p);
+        assert!(t.contains("50 %"), "{t}");
+        assert!(t.contains("4.0 s/chunk"), "4 s/chunk attendu : {t}");
+        assert!(t.contains("reste"), "ETA attendue : {t}");
+
+        let p = IngestProgress {
+            done: 250,
+            total: 250,
+            elapsed: std::time::Duration::from_secs(1000),
+        };
+        let t = progress_text(p);
+        assert!(t.contains("100 %"), "{t}");
+        assert!(!t.contains("reste"), "{t}");
+    }
+
+    #[test]
+    fn progress_is_reported_every_five_percent_and_at_the_end() {
+        assert!(!should_report(0, 250));
+        assert!(should_report(12, 250));
+        assert!(!should_report(13, 250));
+        assert!(should_report(250, 250));
+        assert!(should_report(1, 3));
+        assert!(should_report(1, 0));
+    }
+
+    #[test]
+    fn chunk_count_matches_what_ingest_will_insert() {
+        let dir = std::env::temp_dir().join(format!("z0-chunks-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let a = dir.join("a.md");
+        std::fs::write(&a, "x".repeat(2500)).unwrap(); // 3 chunks de 1200
+        let b = dir.join("b.txt");
+        std::fs::write(&b, "court").unwrap(); // 1 chunk
+        let empty = dir.join("c.md");
+        std::fs::write(&empty, "   \n").unwrap(); // ignoré
+        let files = vec![a, b, empty];
+        assert_eq!(count_chunks(&files), 4);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
