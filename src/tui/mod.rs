@@ -3201,17 +3201,14 @@ fn handle_kb(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
                 // Un message par palier de 20 % : informer sans inonder le fil
                 // (une ingestion de 250 chunks dure des dizaines de minutes).
                 let notify = ui.clone();
-                let show = move |line: String| {
-                    let Some(pct) = line
-                        .split('%')
-                        .next()
-                        .and_then(|s| s.rsplit(']').next())
-                        .and_then(|s| s.trim().parse::<usize>().ok())
-                    else {
-                        return;
-                    };
-                    if pct.is_multiple_of(20) {
-                        let _ = notify.send(UiEvent::Info(format!("⏳ {line}")));
+                let show = move |p: crate::knowledge::IngestProgress| {
+                    // Un message par palier de 20 % (l'appelant reçoit chaque
+                    // chunk : c'est ici qu'on choisit de ne pas inonder le fil).
+                    if p.pct().is_multiple_of(20) {
+                        let _ = notify.send(UiEvent::Info(format!(
+                            "⏳ {}",
+                            crate::knowledge::progress_text(p)
+                        )));
                     }
                 };
                 let msg = match crate::commands::kb_ingest_with(dir, embed, &show).await {
