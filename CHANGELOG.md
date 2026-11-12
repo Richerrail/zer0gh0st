@@ -1,3 +1,29 @@
+## v0.7.46 — Audit corrigé, embedder local, ingestion visible (2026-11-10)
+
+- **Correctifs d'audit** (B1, B2, B4–B7, M3, M4, M6) : bornes UTF-8 qui
+  paniquaient sur un mot accentué, fichier `llama-server.pid` périmé traité
+  comme un serveur vivant, `/stop` qui n'interrompait pas un débat en cours,
+  seuil de compaction dupliqué (4 000 en dur dans Telegram), `.zer0.bak`
+  manquant sur `text_editor insert`, sujet de débat affiché « inconnu », et
+  une ingestion partiellement échouée annoncée comme un succès.
+  Nouveau module `logging` : diagnostics JSON sur stderr, filtrés par
+  `ZER0_LOG` (`off`/`error`/`warn`/`info`/`debug`), sans dépendance `tracing`.
+- **Embedder local `local-embed`** : `bge-m3` servi par un second
+  `llama-server --embeddings --pooling mean` sur `127.0.0.1:8082`, démarré à
+  la demande (2 threads par défaut, `ZER0_EMBED_THREADS`). Sans clé, sans
+  réseau, **multilingue** — une question française retrouve une fiche d'API
+  anglaise. `zer0 kb embed fetch|status|start|stop`, et côté TUI
+  `/embeddings set local-embed bge-m3-q8_0`. Le GGUF reste **hors du binaire**
+  (`zer0 kb embed fetch` vérifie le SHA256 en flux, écrit en `.part` puis
+  renomme).
+- **Ingestion visible et reprenable** : progression chaque seconde dans le
+  terminal (`[128 / 445 chunks] 28 % — 12,0 s/chunk`), `COMMIT` tous les
+  25 chunks (un arrêt ne perd plus 40 minutes de calcul), et `kb stats`
+  signale les **vecteurs orphelins** que `kb rebuild` purge désormais.
+- **fix(local)** : batch physique de l'embedding (`-b`/`-ub`) aligné sur le
+  contexte — les chunks de plus de 512 tokens n'étaient plus refusés par
+  llama.cpp (2 chunks sur 445 restaient sans vecteur, en silence).
+
 ## v0.7.45 — Frappe rapide, baleine deepseek, démo (2026-11-08)
 
 - **fix(tui)** : la déduplication des frappes (`Press` identiques à < 50 ms)
