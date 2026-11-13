@@ -51,6 +51,31 @@ fn failure_message(last_err: &str, skipped: &[String]) -> String {
     )
 }
 
+/// Copie des messages envoyée au provider : les blocs ```diff``` y sont
+/// plafonnés à `diff::MODEL_MAX_LINES`.
+///
+/// La conversation garde le diff complet (l'utilisateur le lit, replié ou non) ;
+/// le modèle, lui, n'a pas besoin de relire ce qu'il vient d'écrire.
+fn wire_messages(
+    messages: &[crate::agent::history::ChatMessage],
+) -> Vec<crate::agent::history::ChatMessage> {
+    messages
+        .iter()
+        .map(|m| {
+            let mut m = m.clone();
+            if let Some(c) = &m.content {
+                if c.contains("```diff") {
+                    m.content = Some(crate::diff::cap_diff_blocks(
+                        c,
+                        crate::diff::MODEL_MAX_LINES,
+                    ));
+                }
+            }
+            m
+        })
+        .collect()
+}
+
 pub async fn run_turn(
     endpoints: Vec<Endpoint>,
     system: String,
@@ -136,7 +161,7 @@ pub async fn run_turn_budgeted(
         let client = ep.client();
 
         match client
-            .stream_chat(&system, &messages, &tools, &options, &ui)
+            .stream_chat(&system, &wire_messages(&messages), &tools, &options, &ui)
             .await
         {
             Ok((content, calls, _)) if content.trim().is_empty() && calls.is_empty() => {
@@ -262,7 +287,7 @@ pub async fn run_turn_budgeted(
                     "↪ réponse tronquée → reprise automatique ({continuations}/{MAX_CONTINUATIONS})"
                 )));
                 match client
-                    .stream_chat(&system, &messages, &tools, &options, &ui)
+                    .stream_chat(&system, &wire_messages(&messages), &tools, &options, &ui)
                     .await
                 {
                     Ok((c, cs, f)) => {
@@ -337,7 +362,7 @@ pub async fn run_turn_budgeted(
 
         // subsequent calls stay on the chosen endpoint
         match client
-            .stream_chat(&system, &messages, &tools, &options, &ui)
+            .stream_chat(&system, &wire_messages(&messages), &tools, &options, &ui)
             .await
         {
             Ok((c, cs, f)) => {
@@ -366,7 +391,7 @@ pub async fn run_turn_budgeted(
              sans appeler d'outil : résume ce qui a été fait, ce qui reste, et l'état exact.",
         ));
         match client
-            .stream_chat(&system, &messages, &[], &options, &ui)
+            .stream_chat(&system, &wire_messages(&messages), &[], &options, &ui)
             .await
         {
             Ok((c, _cs, _f)) => {
@@ -385,6 +410,57 @@ pub async fn run_turn_budgeted(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn wire_copy_caps_diffs_but_the_conversation_keeps_them() {
+        // 20 lignes de diff dans le message d'outil.
+        let mut body =
+            String::from("Fichier écrit: /tmp/x.rs (+20 / -0)\n```diff\n@@ -0,0 +1,20 @@\n");
+        for i in 1..=20 {
+            body.push_str(&format!("+ ligne {i}\n"));
+        }
+        body.push_str("```");
+        let msgs = vec![crate::agent::history::ChatMessage::tool_result(
+            "id1",
+            body.clone(),
+        )];
+
+        let wire = wire_messages(&msgs);
+        let sent = wire[0].content.as_deref().unwrap();
+        // Lignes de contenu du bloc : l'en-tête `@@` compte, pas les fences ni la
+        // ligne « … omises ».
+        let kept = sent
+            .lines()
+            .filter(|l| l.starts_with("@@") || l.starts_with("+ "))
+            .count();
+        assert_eq!(
+            kept,
+            crate::diff::MODEL_MAX_LINES,
+            "plafond modèle non appliqué : {sent}"
+        );
+        assert!(sent.contains("ligne(s) de diff omises"), "{sent}");
+        assert!(
+            !sent.contains("+ ligne 12"),
+            "ligne au-delà du plafond envoyée : {sent}"
+        );
+
+        // La conversation d'origine n'est pas touchée : 20 lignes visibles.
+        let shown = msgs[0].content.as_deref().unwrap();
+        assert_eq!(shown.lines().filter(|l| l.starts_with("+ ")).count(), 20);
+        assert_eq!(shown, body);
+    }
+
+    #[test]
+    fn wire_copy_leaves_plain_tool_output_alone() {
+        let msgs = vec![crate::agent::history::ChatMessage::tool_result(
+            "id2",
+            "Code exécuté (exit 0)\na\nb\nc".to_string(),
+        )];
+        let wire = wire_messages(&msgs);
+        assert_eq!(wire[0].content, msgs[0].content);
+    }
+
     use super::{failure_message, should_failover};
 
     #[test]

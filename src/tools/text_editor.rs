@@ -154,6 +154,40 @@ fn view(path: &str, offset: Option<usize>, limit: Option<usize>) -> String {
     }
 }
 
+/// Lignes de diff affichées dans le résultat (repliable dans la TUI).
+const DIFF_MAX_LINES: usize = 40;
+
+/// Bloc ```diff``` à ajouter au résultat, ou chaîne vide si rien n'a bougé.
+///
+/// Le bloc part **dans le résultat de l'outil** : l'agent comme l'utilisateur
+/// voient la même chose, et la TUI n'a aucune lecture de fichier à refaire.
+fn diff_block(before: &str, after: &str) -> String {
+    let d = crate::diff::unified(before, after);
+    if d.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from("\n```diff\n");
+    out.push_str(&d.render(DIFF_MAX_LINES));
+    out.push_str("\n```");
+    out
+}
+
+/// Suffixe lisible : ` (+3 / -1)` + avertissement de réécriture.
+///
+/// Le compteur est ce qui reste visible quand le message est replié à 3 lignes :
+/// il doit donc porter l'information la plus utile.
+fn diff_suffix(before: &str, after: &str) -> String {
+    let d = crate::diff::unified(before, after);
+    if d.is_empty() {
+        return String::new();
+    }
+    let mut out = format!(" {}", d.stats.label());
+    if d.stats.looks_like_rewrite() {
+        out.push_str(" — réécriture complète ?");
+    }
+    out
+}
+
 fn create(path: &str, content: &str) -> String {
     // Guard: never silently write an empty file.
     if content.trim().is_empty() {
@@ -170,6 +204,9 @@ fn create(path: &str, content: &str) -> String {
             }
         }
     }
+    // Contenu précédent (le cas « create » sur un fichier existant est une
+    // réécriture : c'est justement ce que le diff doit rendre visible).
+    let before = fs::read_to_string(path).unwrap_or_default();
     let note = backup_note(Path::new(path));
     match fs::write(path, content) {
         Ok(()) => {
@@ -178,8 +215,10 @@ fn create(path: &str, content: &str) -> String {
                 Ok(m) if m.len() > 0 => {
                     let first = content.lines().next().unwrap_or("");
                     format!(
-                        "Fichier écrit: {path} ({}). Première ligne: {first}{note}",
-                        stats(content)
+                        "Fichier écrit: {path}{} ({}). Première ligne: {first}{note}{diff}",
+                        diff_suffix(&before, content),
+                        stats(content),
+                        diff = diff_block(&before, content)
                     )
                 }
                 _ => format!("Erreur: {path} est vide après écriture."),
@@ -208,8 +247,10 @@ fn str_replace(path: &str, old: &str, new: &str) -> String {
     let note = backup_note(Path::new(path));
     match fs::write(path, &updated) {
         Ok(()) => format!(
-            "Remplacement effectué dans {path} ({}){note}",
-            stats(&updated)
+            "Remplacement effectué dans {path}{} ({}){note}{diff}",
+            diff_suffix(&content, &updated),
+            stats(&updated),
+            diff = diff_block(&content, &updated)
         ),
         Err(e) => format!("Erreur d'écriture: {e}"),
     }
@@ -243,8 +284,10 @@ fn insert(path: &str, line: usize, text: &str) -> String {
     let note = backup_note(Path::new(path));
     match fs::write(path, &updated) {
         Ok(()) => format!(
-            "Insertion effectuée dans {path} à la ligne {line} ({}){note}",
-            stats(&updated)
+            "Insertion effectuée dans {path} à la ligne {line}{} ({}){note}{diff}",
+            diff_suffix(&content, &updated),
+            stats(&updated),
+            diff = diff_block(&content, &updated)
         ),
         Err(e) => format!("Erreur d'écriture: {e}"),
     }
@@ -258,9 +301,15 @@ fn delete(path: &str) -> String {
     if p.is_dir() {
         return format!("Erreur: {path} est un répertoire, supprime son contenu d'abord");
     }
+    let before = fs::read_to_string(p).unwrap_or_default();
     let note = backup_note(p);
     match fs::remove_file(p) {
-        Ok(()) => format!("Fichier supprimé: {path}{note}"),
+        Ok(()) => format!(
+            "Fichier supprimé: {path}{} ({}){note}{diff}",
+            diff_suffix(&before, ""),
+            stats(&before),
+            diff = diff_block(&before, "")
+        ),
         Err(e) => format!("Erreur de suppression: {e}"),
     }
 }
@@ -432,5 +481,96 @@ mod tests {
     #[test]
     fn delete_reports_missing_file() {
         assert!(delete("/tmp/zer0-inexistant-xyz").contains("n'existe pas"));
+    }
+}
+
+#[cfg(test)]
+mod diff_tests {
+    use super::*;
+
+    fn tmpf(name: &str, content: &str) -> String {
+        let p = std::env::temp_dir().join(format!("z0te-{}-{name}", std::process::id()));
+        std::fs::write(&p, content).unwrap();
+        p.to_string_lossy().to_string()
+    }
+
+    #[test]
+    fn str_replace_shows_the_hunk_and_the_counter() {
+        let path = tmpf(
+            "replace.rs",
+            "fn a() {\n    un();\n    deux();\n    trois();\n}\n",
+        );
+        let out = str_replace(&path, "    deux();\n", "    deux_modified();\n");
+        // Première ligne : lisible même replié (compteur visible).
+        let first = out.lines().next().unwrap();
+        assert!(first.contains("(+1 / -1)"), "compteur absent : {first}");
+        // Bloc diff exploitable par la TUI.
+        assert!(out.contains("```diff"), "bloc diff absent : {out}");
+        assert!(
+            out.contains("\n-     deux();"),
+            "ligne retirée absente : {out}"
+        );
+        assert!(
+            out.contains("\n+     deux_modified();"),
+            "ligne ajoutée absente : {out}"
+        );
+        assert!(
+            out.contains("@@ -1,5 +1,5 @@"),
+            "en-tête de hunk absent : {out}"
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn create_on_an_existing_file_warns_about_a_rewrite() {
+        let old = (1..=40)
+            .map(|i| format!("ligne {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let path = tmpf("rewrite.rs", &old);
+        let new = (1..=40)
+            .map(|i| format!("autre {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let out = create(&path, &new);
+        let first = out.lines().next().unwrap();
+        assert!(first.contains("(+40 / -40)"), "compteur absent : {first}");
+        assert!(
+            first.contains("réécriture complète"),
+            "une réécriture doit être nommée : {first}"
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn create_of_a_new_file_has_no_removal_side() {
+        let p = std::env::temp_dir().join(format!("z0te-neuf-{}.rs", std::process::id()));
+        let _ = std::fs::remove_file(&p);
+        let out = create(&p.to_string_lossy(), "a\nb\nc\n");
+        let first = out.lines().next().unwrap();
+        assert!(first.contains("(+3 / -0)"), "compteur absent : {first}");
+        assert!(!first.contains("réécriture"), "{first}");
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn delete_shows_every_removed_line() {
+        let path = tmpf("suppr.txt", "un\ndeux\n");
+        let out = delete(&path);
+        let first = out.lines().next().unwrap();
+        assert!(first.contains("(+0 / -2)"), "compteur absent : {first}");
+        assert!(out.contains("\n- un"), "{out}");
+        assert!(out.contains("\n- deux"), "{out}");
+    }
+
+    #[test]
+    fn insert_points_at_the_line_it_touched() {
+        let path = tmpf("insere.txt", "a\nb\nc\n");
+        let out = insert(&path, 2, "INSERE");
+        let first = out.lines().next().unwrap();
+        assert!(first.contains("à la ligne 2"), "{first}");
+        assert!(first.contains("(+1 / -0)"), "{first}");
+        assert!(out.contains("\n+ INSERE"), "{out}");
+        let _ = std::fs::remove_file(&path);
     }
 }

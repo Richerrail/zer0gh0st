@@ -16,6 +16,7 @@ pub mod commands;
 pub mod config;
 pub mod convo;
 pub mod debate;
+pub mod diff;
 pub mod event;
 pub mod fun;
 pub mod gwclient;
