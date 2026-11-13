@@ -134,6 +134,58 @@ impl Diff {
     }
 }
 
+/// Combien de lignes de diff un **modèle** reçoit dans un résultat d'outil.
+///
+/// L'utilisateur voit le diff complet (40 lignes repliables) ; le modèle n'a
+/// aucun besoin de relire ce qu'il vient d'écrire. Garder 40 lignes dans le
+/// contexte coûtait ~400 tokens par écriture, pour rien.
+pub const MODEL_MAX_LINES: usize = 12;
+
+/// Réduit les blocs ```diff``` d'un texte à `max` lignes de contenu.
+///
+/// Tout le reste du texte (et les autres blocs de code) est laissé intact :
+/// cette fonction ne sert qu'à préparer la copie envoyée au modèle.
+pub fn cap_diff_blocks(text: &str, max: usize) -> String {
+    if !text.contains("```diff") {
+        return text.to_string();
+    }
+    let mut out: Vec<String> = Vec::new();
+    let mut in_diff = false;
+    let mut shown = 0usize;
+    let mut omitted = 0usize;
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") {
+            if in_diff {
+                if omitted > 0 {
+                    out.push(format!("… {omitted} ligne(s) de diff omises"));
+                    omitted = 0;
+                }
+                in_diff = false;
+            } else if trimmed.trim_start_matches("```").trim() == "diff" {
+                in_diff = true;
+                shown = 0;
+            }
+            out.push(line.to_string());
+            continue;
+        }
+        if in_diff {
+            if shown < max {
+                out.push(line.to_string());
+                shown += 1;
+            } else {
+                omitted += 1;
+            }
+        } else {
+            out.push(line.to_string());
+        }
+    }
+    if omitted > 0 {
+        out.push(format!("… {omitted} ligne(s) de diff omises"));
+    }
+    out.join("\n")
+}
+
 /// Normalise les fins de ligne : un fichier réécrit avec les mêmes lignes en
 /// CRLF ne doit **pas** apparaître entièrement modifié.
 fn normalize(text: &str) -> Vec<String> {
@@ -406,6 +458,35 @@ mod tests {
             out.starts_with("@@ -0,0 +1,40 @@"),
             "en-tête absent : {out}"
         );
+    }
+
+    #[test]
+    fn only_diff_fences_are_capped() {
+        let text = "Remplacement (+3 / -1)\n```rust\nfn a() {}\n```\n```diff\n@@ -1,2 +1,2 @@\n a\n-b\n+c\n```\nfin";
+        let capped = cap_diff_blocks(text, 2);
+        // 2 lignes de diff gardées, le reste annoncé.
+        assert!(capped.contains("@@ -1,2 +1,2 @@\n a"), "{capped}");
+        assert!(capped.contains("2 ligne(s) de diff omises"), "{capped}");
+        assert!(
+            !capped.contains("+c"),
+            "ligne au-delà du plafond conservée : {capped}"
+        );
+        // Le bloc rust et la prose sont intacts.
+        assert!(capped.contains("fn a() {}"), "{capped}");
+        assert!(capped.starts_with("Remplacement (+3 / -1)"), "{capped}");
+        assert!(capped.ends_with("fin"), "{capped}");
+    }
+
+    #[test]
+    fn text_without_diff_is_returned_unchanged() {
+        let text = "sortie d'outil banale\nligne 2";
+        assert_eq!(cap_diff_blocks(text, 12), text);
+    }
+
+    #[test]
+    fn cap_under_the_limit_changes_nothing() {
+        let text = "```diff\n@@ -1 +1 @@\n-a\n+b\n```";
+        assert_eq!(cap_diff_blocks(text, 12), text);
     }
 
     #[test]
