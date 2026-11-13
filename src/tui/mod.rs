@@ -5053,7 +5053,9 @@ fn push_block(
     // Largeur **en colonnes** : `👤` et `🖳` ne valent pas 1 caractère.
     let indent = text_width(prefix);
     let mut first = true;
-    let mut in_code = false;
+    // `None` = hors bloc ; `Some("")` = bloc de code générique ;
+    // `Some("diff")` = diff unifié, coloré ligne par ligne (+ / - / @@).
+    let mut fence: Option<String> = None;
     let fill = |n: usize| {
         let s = Style::default();
         Span::styled(
@@ -5065,10 +5067,16 @@ fn push_block(
         )
     };
     for seg in wrap_text(text, w.saturating_sub(indent).max(1)) {
-        if seg.trim_start().starts_with("```") {
-            in_code = !in_code;
+        if let Some(lang) = seg.trim_start().strip_prefix("```") {
+            fence = if fence.is_some() {
+                None
+            } else {
+                Some(lang.trim().to_ascii_lowercase())
+            };
             continue;
         }
+        let in_code = fence.is_some();
+        let is_diff = fence.as_deref() == Some("diff");
         let mut spans: Vec<Span> = Vec::new();
         let pstyle = {
             let s = Style::default().fg(pcolor).add_modifier(Modifier::BOLD);
@@ -5084,13 +5092,28 @@ fn push_block(
             spans.push(fill(indent));
         }
         let base = {
-            let s = Style::default().fg(if in_code {
+            let fg = if is_diff {
+                // Un diff se lit par son préfixe : c'est tout l'intérêt.
+                match seg.chars().next() {
+                    Some('+') => theme::success(),
+                    Some('-') => theme::danger(),
+                    Some('@') => theme::highlight(),
+                    _ => theme::dim(),
+                }
+            } else if in_code {
                 theme::code()
             } else if dim_text {
                 theme::dim()
             } else {
                 theme::text()
-            });
+            };
+            let s = Style::default().fg(fg);
+            // `@@ -a,n +b,m @@` en gras : c'est l'ancre du hunk.
+            let s = if is_diff && seg.starts_with("@@") {
+                s.add_modifier(Modifier::BOLD)
+            } else {
+                s
+            };
             match bg {
                 Some(b) => s.bg(b),
                 None => s,
@@ -6024,6 +6047,103 @@ mod tests {
             );
         }
         assert_eq!(app.input, "deepseek");
+    }
+
+    #[test]
+    fn tool_diffs_are_coloured_by_prefix() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let diff = "Remplacement effectué dans src/x.rs (+1 / -1)\n\
+                    ```diff\n\
+                    @@ -1,3 +1,3 @@\n   un();\n-  deux();\n+  deux_modified();\n   trois();\n\
+                    ```";
+        let mut app = test_app();
+        app.messages.push(crate::agent::history::ChatMessage {
+            role: "tool".into(),
+            content: Some(diff.into()),
+            tool_calls: None,
+            tool_call_id: None,
+            image: None,
+            expanded: true,
+        });
+        let mut term = Terminal::new(TestBackend::new(100, 30)).unwrap();
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        let buf = term.backend().buffer().clone();
+
+        // On cherche la cellule du préfixe `+` / `-` et sa couleur.
+        let mut plus = None;
+        let mut minus = None;
+        for y in 0..buf.area.height {
+            let mut row = String::new();
+            for x in 0..buf.area.width {
+                row.push_str(buf[(x, y)].symbol());
+            }
+            if row.contains("+  deux_modified") {
+                plus = Some(x_of(&buf, y, '+'));
+            }
+            if row.contains("-  deux") {
+                minus = Some(x_of(&buf, y, '-'));
+            }
+        }
+        let plus = plus.expect("ligne ajoutée absente du rendu");
+        let minus = minus.expect("ligne retirée absente du rendu");
+        assert_eq!(
+            buf[(plus.0, plus.1)].fg,
+            theme::success(),
+            "la ligne `+` doit être en vert"
+        );
+        assert_eq!(
+            buf[(minus.0, minus.1)].fg,
+            theme::danger(),
+            "la ligne `-` doit être en rouge"
+        );
+    }
+
+    /// Vérification visuelle (ignorée en CI) : imprime le rendu d'un diff.
+    #[test]
+    #[ignore]
+    fn dump_tool_diff() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let diff = "Remplacement effectué dans src/agent/turn.rs (+4 / -2) (36.2 Ko, 1096 lignes) (sauvegarde : turn.rs.zer0.bak)\n\
+```diff\n\
+@@ -58,8 +58,10 @@\n   options: ChatOptions,\n   ui: UnboundedSender<UiEvent>,\n ) {\n\
+-      crate::cancel::clear();\n-      run_turn_budgeted(\n\
++      // B5 : le drapeau n'est remis à zéro QUE pour un tour de haut niveau.\n\
++      // Les sous-agents 0box ne l'effacent plus.\n\
++      crate::cancel::clear();\n+      run_turn_budgeted(\n   endpoints, system\n}\n```";
+        let mut app = test_app();
+        app.messages.push(crate::agent::history::ChatMessage {
+            role: "tool".into(),
+            content: Some(diff.into()),
+            tool_calls: None,
+            tool_call_id: None,
+            image: None,
+            expanded: true,
+        });
+        let mut term = Terminal::new(TestBackend::new(96, 26)).unwrap();
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        let buf = term.backend().buffer();
+        for y in 0..buf.area.height {
+            let mut row = String::new();
+            for x in 0..buf.area.width {
+                row.push_str(buf[(x, y)].symbol());
+            }
+            if !row.trim().is_empty() {
+                println!("{row}");
+            }
+        }
+    }
+
+    /// Colonne de la première occurrence de `ch` sur la ligne `y`.
+    fn x_of(buf: &ratatui::buffer::Buffer, y: u16, ch: char) -> (u16, u16) {
+        for x in 0..buf.area.width {
+            if buf[(x, y)].symbol().contains(ch) {
+                return (x, y);
+            }
+        }
+        (0, y)
     }
 
     #[test]
