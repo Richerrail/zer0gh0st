@@ -1,3 +1,31 @@
+## v0.7.47 — Le diff des écritures, enfin visible (2026-11-13)
+
+`text_editor` annonçait « Remplacement effectué dans `src/x.rs` (36.2 Ko,
+1096 lignes) » : ni *où* ni *quoi*. Un agent qui écrit du code sans montrer son
+diff oblige à le croire sur parole — et les erreurs coûteuses sont justement
+celles qu'on ne voit pas : une **réécriture totale déguisée en retouche**, une
+mauvaise occurrence, un test supprimé.
+
+- **`src/diff.rs`** (nouveau, **zéro dépendance**) : diff unifié ligne à ligne.
+  Préfixe/suffixe communs retirés avant l'alignement (une retouche de 3 lignes
+  dans 1000 ne coûte pas 1000×1000), **CRLF normalisé** (un fichier Windows
+  réécrit à l'identique ne produit aucun faux diff), plafond dur au-delà de
+  2000 lignes de part et d'autre (remplacement de bloc plutôt qu'une DP
+  quadratique), en-têtes `@@ -a,n +b,m @@` et statistiques `(+3 / -1)`.
+- **`text_editor`** : `create`, `str_replace`, `insert` et `delete` renvoient le
+  diff de l'opération dans un bloc ` ```diff `, avec le **compteur en première
+  ligne** (donc visible même replié à 3 lignes) :
+  `Remplacement effectué dans src/agent/turn.rs (+4 / -2) (36.2 Ko, 1096 lignes)`.
+  Une réécriture massive est **nommée** : `(+40 / -40) — réécriture complète ?`.
+  40 lignes affichées, le reste annoncé masqué.
+- **TUI** : les fences ` ```diff ` sont colorées par préfixe — `+` en vert,
+  `-` en rouge, `@@` en gras, contexte en gris. Repli à 3 lignes, `Ctrl+O` et
+  clic droit inchangés.
+- **Coût en contexte** : l'utilisateur voit 40 lignes, mais le **modèle n'en
+  reçoit que 12** (`wire_messages()` plafonne la copie envoyée au provider sur
+  les quatre chemins d'appel). 40 lignes ≈ 400 tokens par écriture, pour un
+  contenu que le modèle vient de produire.
+
 ## v0.7.46 — Audit corrigé, embedder local, ingestion visible (2026-11-10)
 
 - **Correctifs d'audit** (B1, B2, B4–B7, M3, M4, M6) : bornes UTF-8 qui
