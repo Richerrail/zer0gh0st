@@ -61,7 +61,7 @@ const HELP_SHORT: &str =
   /help all           la liste complète (26 commandes de plus)
   /quit  /new  /chats session
 
-  Touches : F2 menu · F3 écriture · F4 shell · F5 aide · F6 sessions
+  Touches : F2 palette · F3 écriture · F4 shell · F5 aide · F6 sessions
             F7 relance · F8 0chan · F10 micro · Ctrl+O déplier un outil";
 
 pub struct App {
@@ -189,22 +189,9 @@ pub struct App {
     pub ctx_manual: bool,
     /// Bot Telegram lancé depuis la TUI (None = arrêté).
     pub tg: Option<crate::telegram::Handle>,
-    /// Menu latéral : groupe déplié.
-    pub menu_open: Option<&'static str>,
-    /// Zones cliquables du menu (recalculées au rendu).
-    pub menu_hits: Vec<(Rect, menu::Hit)>,
-    /// Défilement du menu + sa zone écran (pour la molette).
-    pub menu_scroll: u16,
-    pub menu_rect: Rect,
-    /// Navigation clavier du menu (F2) : focus + index sélectionné.
-    pub menu_focus: bool,
-    /// Menu déroulant ouvert ? (sinon : rail `◀☰` à droite)
-    pub menu_visible: bool,
-    /// Zone écran du rail (clic pour ouvrir le menu).
-    pub rail_rect: Rect,
-    /// Zone écran de la flèche du rail (clic = ouvrir/fermer le menu).
-    pub arrow_rect: Rect,
-    pub menu_sel: usize,
+    /// Zone écran du panneau latéral quand un mod est ouvert : c'est de son
+    /// bord que part l'onde néon.
+    pub panel_rect: Rect,
     /// Dernier événement clavier traité (pour déduplication sur Windows).
     pub last_key_event: Option<(KeyCode, KeyModifiers, std::time::Instant)>,
     /// Animation « baleine deepseek » en cours (None = rien à l'écran).
@@ -212,16 +199,6 @@ pub struct App {
 }
 
 impl App {
-    /// Cellules voisines de la poignée (dessus et dessous) : c'est de là que
-    /// part l'onde qui fait le tour de la page.
-    fn arrow_sources(&self) -> [(u16, u16); 2] {
-        let r = self.arrow_rect;
-        if r.width == 0 || r.height == 0 {
-            return [(0, 0), (0, 0)];
-        }
-        [(r.x, r.y.saturating_sub(1)), (r.x, r.y + r.height)]
-    }
-
     fn settings(&self) -> Settings {
         Settings {
             provider_id: self.provider_id.clone(),
@@ -405,15 +382,7 @@ pub async fn run(
         context_window: ctx_win,
         ctx_manual: ctx_override.is_some(),
         tg: None,
-        menu_open: None,
-        menu_hits: Vec::new(),
-        menu_scroll: 0,
-        menu_rect: Rect::default(),
-        menu_focus: false,
-        menu_visible: false,
-        rail_rect: Rect::default(),
-        arrow_rect: Rect::default(),
-        menu_sel: 0,
+        panel_rect: Rect::default(),
         last_key_event: None,
         whale: None,
         thinking: options.thinking || g_initial.thinking,
@@ -596,8 +565,6 @@ async fn event_loop(
                 || app.side_mode.is_some()
                 || app.zc.on
                 || app.task_view.is_some()
-                // Onde néon autour de la page (menu ouvert).
-                || app.menu_visible
                 // Animation « baleine deepseek » en cours.
                 || app.whale.is_some()
                 // Clignotement de l'avertissement F4 (shell désarmé).
@@ -3748,52 +3715,9 @@ fn handle_input(ev: Event, app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
         };
         match me.kind {
             MouseEventKind::Down(MouseButton::Left) => {
-                // La poignée « tiroir » (ou le rail) ouvre *ou* ferme le menu.
-                if inside(Some(app.arrow_rect)) {
-                    app.menu_visible = !app.menu_visible;
-                    app.menu_focus = app.menu_visible;
-                    return;
-                }
-                if inside(Some(app.rail_rect)) {
-                    app.menu_visible = !app.menu_visible;
-                    app.menu_focus = app.menu_visible;
-                    return;
-                }
-                // Le menu passe EN PREMIER : ses zones sont des lignes entières
-                // et ne croisent pas les pouces (bas-droite). Le vote est
-                // ensuite vérifié, avant toute sélection de texte.
-                if let Some((idx, code, is_group)) = app
-                    .menu_hits
-                    .iter()
-                    .enumerate()
-                    .find(|(_, (r, _))| {
-                        me.column >= r.x
-                            && me.column < r.x + r.width
-                            && me.row >= r.y
-                            && me.row < r.y + r.height
-                    })
-                    .map(|(i, (_, h))| match h {
-                        menu::Hit::Group(l) => (i, *l, true),
-                        menu::Hit::Cmd(c) => (i, *c, false),
-                    })
-                {
-                    app.menu_focus = true;
-                    app.menu_sel = idx;
-                    if is_group {
-                        app.menu_open = if app.menu_open == Some(code) {
-                            None
-                        } else {
-                            Some(code)
-                        };
-                    } else if code.ends_with(' ') {
-                        input_set(app, code.to_string());
-                        app.menu_focus = false;
-                    } else {
-                        handle_command(app, code, ui_tx);
-                        // Après une commande, on rend la main à la saisie.
-                        app.menu_focus = false;
-                    }
-                } else if inside(app.btn_vote_up) {
+                // Les boutons (pouces, 0chan, micro) passent avant la sélection
+                // de texte : un clic dessus ne doit pas « dessiner » une zone.
+                if inside(app.btn_vote_up) {
                     vote_click(ui_tx, crate::vote::Action::Up);
                 } else if inside(app.btn_vote_down) {
                     vote_click(ui_tx, crate::vote::Action::Down);
@@ -3802,8 +3726,6 @@ fn handle_input(ev: Event, app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
                 } else if inside(app.btn_mic) {
                     toggle_mic(app, ui_tx);
                 } else {
-                    // Clic hors menu : on retire le focus du menu.
-                    app.menu_focus = false;
                     app.sel_anchor = Some((me.column, me.row));
                     app.sel_head = Some((me.column, me.row));
                 }
@@ -3833,8 +3755,6 @@ fn handle_input(ev: Event, app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
                 }
                 if let Some(p) = app.picker.as_mut() {
                     p.move_sel(1);
-                } else if inside(Some(app.menu_rect)) {
-                    app.menu_scroll = app.menu_scroll.saturating_add(3);
                 } else {
                     let (s, auto) = wheel_scroll(app.scroll, app.max_scroll, false);
                     app.scroll = s;
@@ -3856,8 +3776,6 @@ fn handle_input(ev: Event, app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
                 }
                 if let Some(p) = app.picker.as_mut() {
                     p.move_sel(-1);
-                } else if inside(Some(app.menu_rect)) {
-                    app.menu_scroll = app.menu_scroll.saturating_sub(3);
                 } else {
                     let (s, auto) = wheel_scroll(app.scroll, app.max_scroll, true);
                     app.scroll = s;
@@ -3947,53 +3865,6 @@ fn handle_input(ev: Event, app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
                 app.chats_popup = None;
             }
             return;
-        }
-        // Menu « Commandes » au clavier (focus via F2).
-        // Les touches gérées (↑↓ Entrée Esc) restent dans le menu ; toute autre
-        // touche RELÂCHE le focus et retombe dans la saisie normale (pas de blocage).
-        if app.menu_focus {
-            match k.code {
-                KeyCode::Up => {
-                    app.menu_sel = app.menu_sel.saturating_sub(1);
-                    return;
-                }
-                KeyCode::Down => {
-                    if !app.menu_hits.is_empty() {
-                        app.menu_sel = (app.menu_sel + 1).min(app.menu_hits.len() - 1);
-                    }
-                    return;
-                }
-                KeyCode::Enter => {
-                    let hit = app.menu_hits.get(app.menu_sel).map(|(_, h)| *h);
-                    if let Some(hit) = hit {
-                        match hit {
-                            menu::Hit::Group(label) => {
-                                app.menu_open = if app.menu_open == Some(label) {
-                                    None
-                                } else {
-                                    Some(label)
-                                };
-                            }
-                            menu::Hit::Cmd(code) => {
-                                if code.ends_with(' ') {
-                                    input_set(app, code.to_string());
-                                } else {
-                                    handle_command(app, code, ui_tx);
-                                }
-                            }
-                        }
-                    }
-                    app.menu_focus = false;
-                    return;
-                }
-                KeyCode::Esc | KeyCode::F(2) => {
-                    app.menu_focus = false;
-                    app.menu_visible = false;
-                    return;
-                }
-                // Toute autre touche : on sort du menu et on continue dessous.
-                _ => app.menu_focus = false,
-            }
         }
         // Side panel focus (right pane). On ne consomme QUE ses touches : toute
         // autre touche (F3–F10, etc.) relâche le focus et retombe dans la saisie.
@@ -4475,6 +4346,19 @@ fn handle_ui(ev: UiEvent, app: &mut App) {
 
 // ---------------------------------------------------------------- rendering
 
+/// Cellules d'où part l'onde néon : juste au-dessus et juste au-dessous du
+/// bord gauche du panneau latéral. (Avant : la « poignée » d'un menu disparu ;
+/// `Rect::default()` faisait donc partir l'onde du coin haut-gauche.)
+fn wave_sources(panel: Rect) -> [(u16, u16); 2] {
+    if panel.width == 0 || panel.height == 0 {
+        return [(0, 0), (0, 0)];
+    }
+    [
+        (panel.x, panel.y.saturating_sub(1)),
+        (panel.x, panel.y + panel.height),
+    ]
+}
+
 fn draw(f: &mut Frame, app: &mut App) {
     let area = f.area();
     // Le fond est posé avant tous les widgets : les thèmes noirs restent noirs
@@ -4510,7 +4394,6 @@ fn draw(f: &mut Frame, app: &mut App) {
 
     // Un mod ouvert occupe une large part de droite ; pas de menu permanent
     // (la palette `/` et F2 suffisent). Le chat garde le reste.
-    app.menu_hits.clear();
     if let Some(sm) = app.side_mode {
         if area.width >= 100 {
             let cols = Layout::default()
@@ -4519,20 +4402,17 @@ fn draw(f: &mut Frame, app: &mut App) {
                 .split(area);
             draw_agent(f, cols[0], app);
             draw_panel(f, cols[1], app, sm);
-            app.arrow_rect = cols[1];
+            app.panel_rect = cols[1];
         } else {
             draw_panel(f, area, app, sm);
-            app.arrow_rect = area;
+            app.panel_rect = area;
         }
-        app.menu_rect = Rect::default();
-        app.rail_rect = Rect::default();
-        // Onde néon autour de la page quand un mod est actif.
-        neon::draw_wave(f, area, app.arrow_sources(), app.anim_phase);
+        // Onde néon autour de la page quand un mod est actif : elle part du bord
+        // du panneau (là où l'œil se pose), en haut et en bas.
+        neon::draw_wave(f, area, wave_sources(app.panel_rect), app.anim_phase);
     } else {
         draw_agent(f, area, app);
-        app.menu_rect = Rect::default();
-        app.rail_rect = Rect::default();
-        app.arrow_rect = Rect::default();
+        app.panel_rect = Rect::default();
     }
     draw_chats_popup(f, area, app);
     finalize_buffer(f, app);
@@ -5940,15 +5820,7 @@ mod tests {
             context_window: 0,
             ctx_manual: false,
             tg: None,
-            menu_open: None,
-            menu_hits: vec![],
-            menu_scroll: 0,
-            menu_rect: Rect::default(),
-            menu_focus: false,
-            menu_visible: true,
-            rail_rect: Rect::default(),
-            arrow_rect: Rect::default(),
-            menu_sel: 0,
+            panel_rect: Rect::default(),
             last_key_event: None,
             whale: None,
         }
