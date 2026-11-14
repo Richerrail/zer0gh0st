@@ -8,7 +8,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStderr, Command, Stdio};
 
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
@@ -416,15 +416,25 @@ impl ZeroChan {
         format!("({left}{mouth}{right})")
     }
 
-    /// Petit bloc d'état (à droite du banner).
-    pub fn draw(&self, f: &mut Frame, area: Rect) {
-        let color = match self.state {
+    /// Couleur de l'état courant (bloc, ligne compacte, boutons).
+    pub fn state_color(&self) -> ratatui::style::Color {
+        match self.state {
             State::Off => theme::dim(),
             State::Idle => theme::accent(),
             State::Listening => theme::danger(),
             State::Thinking => theme::warning(),
             State::Speaking => theme::success(),
-        };
+        }
+    }
+
+    /// `(-_-) en veille` : version d'une ligne, pour les terminaux étroits.
+    pub fn compact_status(&self) -> String {
+        format!("{} {}", self.face(), self.state.label())
+    }
+
+    /// Petit bloc d'état (à droite du banner).
+    pub fn draw(&self, f: &mut Frame, area: Rect) {
+        let color = self.state_color();
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(color))
@@ -496,6 +506,25 @@ pub async fn transcribe(path: &PathBuf) -> anyhow::Result<String> {
         ));
     }
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// État de Zero-chan sur une seule ligne, aligné à droite (terminaux étroits,
+/// mod ouvert) : pas d'encadré, mais l'information reste visible.
+pub fn draw_inline(f: &mut Frame, area: Rect, zc: &ZeroChan) {
+    if area.width < 8 || area.height == 0 {
+        return;
+    }
+    let text = zc.compact_status();
+    // Troncature sûre : on ne coupe jamais un caractère multi-octets.
+    let mut text = text;
+    crate::util::truncate_utf8(&mut text, area.width.saturating_sub(2) as usize);
+    let line = Line::from(Span::styled(
+        text,
+        Style::default()
+            .fg(zc.state_color())
+            .add_modifier(Modifier::BOLD),
+    ));
+    f.render_widget(Paragraph::new(line).alignment(Alignment::Right), area);
 }
 
 /// Deux boutons à droite de la barre de saisie : 0chan et micro.
@@ -584,23 +613,116 @@ pub fn draw_buttons(f: &mut Frame, area: Rect, zc: &ZeroChan) -> (Option<Rect>, 
 }
 
 /// Zone du bloc d'état à droite du banner (largeur fixe).
-pub fn block_layout(banner_area: Rect, on: bool) -> (Rect, Rect) {
-    if on && banner_area.width >= 96 {
+/// Où loger l'état de Zero-chan selon la largeur disponible.
+///
+/// Le banner fait ~59 colonnes (art) et le bloc encadré 26 : sous ~92 colonnes,
+/// les deux ne tiennent plus côte à côte — c'est le cas dès qu'un mod est ouvert,
+/// puisque le chat ne garde alors que 56 % de la largeur. Auparavant le bloc
+/// disparaissait purement et simplement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Placement {
+    /// Bloc encadré à droite du banner.
+    Boxed(Rect),
+    /// Une ligne discrète alignée à droite, sur la ligne de la tagline.
+    Inline(Rect),
+    /// Rien : pas la place.
+    None,
+}
+
+/// Hauteur du banner (5 lignes d'art + la tagline).
+pub const BANNER_ROWS: u16 = 6;
+/// Largeur du bloc encadré.
+pub const BOX_WIDTH: u16 = 26;
+/// Sous cette largeur, plus rien : même la ligne compacte serait tronquée.
+pub const MIN_INLINE_WIDTH: u16 = 34;
+
+pub fn block_layout(banner_area: Rect, on: bool) -> (Rect, Placement) {
+    if !on || banner_area.width < MIN_INLINE_WIDTH || banner_area.height == 0 {
+        return (banner_area, Placement::None);
+    }
+    if banner_area.width >= 92 {
         let cols = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Min(70), Constraint::Length(26)])
+            .constraints([Constraint::Min(66), Constraint::Length(BOX_WIDTH)])
             .split(banner_area);
-        (cols[0], cols[1])
-    } else {
-        (
-            banner_area,
-            Rect {
-                x: 0,
-                y: 0,
-                width: 0,
-                height: 0,
-            },
-        )
+        return (cols[0], Placement::Boxed(cols[1]));
+    }
+    // Étroitis : on garde le banner entier et on écrit l'état sur sa dernière
+    // ligne (la tagline), aligné à droite. Visible, sans encadré.
+    let row = Rect {
+        x: banner_area.x,
+        y: banner_area.y + banner_area.height.saturating_sub(1),
+        width: banner_area.width,
+        height: 1,
+    };
+    (banner_area, Placement::Inline(row))
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+
+    fn rect(w: u16) -> Rect {
+        Rect {
+            x: 0,
+            y: 1,
+            width: w,
+            height: BANNER_ROWS,
+        }
+    }
+
+    #[test]
+    fn wide_banner_gets_the_boxed_block() {
+        let (banner, placement) = block_layout(rect(120), true);
+        match placement {
+            Placement::Boxed(r) => {
+                assert_eq!(r.width, BOX_WIDTH);
+                assert_eq!(
+                    banner.width + r.width,
+                    120,
+                    "les zones doivent se partager la largeur"
+                );
+            }
+            other => panic!("attendu Boxed, reçu {other:?}"),
+        }
+    }
+
+    #[test]
+    fn narrow_banner_keeps_an_inline_status() {
+        // 66 colonnes : c'est la colonne du chat quand un mod est ouvert sur un
+        // terminal de 120 (56 %). Avant, Zero-chan disparaissait entièrement.
+        let (banner, placement) = block_layout(rect(66), true);
+        match placement {
+            Placement::Inline(r) => {
+                assert_eq!(r.height, 1);
+                assert_eq!(r.width, 66);
+                assert_eq!(
+                    r.y,
+                    1 + BANNER_ROWS - 1,
+                    "l'état va sur la ligne de la tagline"
+                );
+                assert_eq!(banner.width, 66, "le banner garde toute la largeur");
+            }
+            other => panic!("attendu Inline, reçu {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tiny_banner_has_no_zero_chan() {
+        assert!(matches!(block_layout(rect(30), true).1, Placement::None));
+        // Et désactivée : rien, même en large.
+        assert!(matches!(block_layout(rect(200), false).1, Placement::None));
+    }
+
+    #[test]
+    fn compact_status_is_short_and_says_the_state() {
+        let zc = ZeroChan::new();
+        let s = zc.compact_status();
+        assert!(s.contains("en veille") || s.contains("off"), "{s}");
+        assert!(
+            s.chars().count() <= 24,
+            "trop long pour une ligne étroite : {s}"
+        );
     }
 }
 
