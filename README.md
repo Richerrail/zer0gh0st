@@ -183,8 +183,7 @@ Détail complet du modèle de menace : [`SAFETY.md`](./SAFETY.md).
 
 | Domaine | Détail |
 |---|---|
-| **Menu repliable** | rail `◀☰` (2 col) quand le menu est fermé ; `F2`/clic ouvre le menu déroulant **collé aux mods**, qui prennent la place libérée. Couleurs du thème actif |
-| **TUI** | banner `ZER0│GH0ST` (`ghost in the shell`) animé, statut, **palette `/` filtrante**, **sélection navigable** `/model` et `/provider`, **molette** (conversation / panneaux), raisonnement affiché, **panneau latéral**, **saisie style Pi**, **historique ↑↓** |
+| **TUI** | banner `ZER0│GH0ST` (`ghost in the shell`) animé, statut, **palette `/` filtrante** (`F2` l'ouvre aussi), **sélection navigable** `/model` et `/provider`, **molette** (conversation / panneaux), raisonnement affiché, **panneau latéral**, **saisie style Pi**, **historique ↑↓** |
 | **Boucle d'agent** | appels d'outils, streaming SSE, max 8 itérations, budget 24 outils/tour, détection de boucle |
 | **Containment** | réponse coupée à 1 Mo, timeout d'inactivité 240 s, `/stop` |
 | **Multi-provider** | 10 providers intégrés + personnalisés, **transport automatique** via `zer0-gw` (clés hors de l'agent) ou direct, failover |
@@ -198,7 +197,6 @@ par `ZER0_EXEC_TIMEOUT` ou par appel (`timeout_secs`).
 | **Connaissance** | base **SQLite + FTS5** (hybride **si** un embedder est configuré, sinon FTS5 seul), **injection auto** dans le prompt (+ `knowledge_search`/`knowledge_add`/`knowledge_delete`) |
 | **Catalogue d'APIs** | `/apis <besoin>` — 2 000+ APIs publiques (source community, **datée**), avec colonne « clé requise » et filtre `keyless` |
 | **Zero-chan** | assistante vocale **intégrée à la TUI** : bloc d'état à droite du banner + boutons `0chan`/`micro` à droite de la saisie. **Réutilise le chat et l'input de l'agent**. STT = Whisper local. |
-| **Menu cliquable** | panneau **Commandes** à droite (entre zero-chan et le badge 0chan/mic) : tous les groupes/sous-commandes **cliquables** (dépliage, exécution, ou insertion dans la saisie). Molette pour défiler. |
 | **Sorties d'outils** | repliées à **3 lignes**, dépliage **par bloc** (clic droit) ou `Ctrl+O` (dernier) ; appels d'outils résumés sur une ligne (fini le script entier dans le fil) |
 | **Vision** | `/img <fichier>` (TUI) et `--img` (CLI) : l'image part en **content-parts** vers un modèle multimodal ; **jamais persistée** dans l'historique |
 | **Mise à jour** | `zer0 update` / `/update` : binaire brut + `SHA256SUMS` depuis les Releases GitHub, intégrité vérifiée, remplacement atomique |
@@ -521,23 +519,6 @@ La TUI propose un menu de thèmes accessible de deux façons :
 Le choix est appliqué immédiatement à toute l'interface (chat, menus, picker,
 assistant et Zero-chan), puis persisté dans `~/.config/zer0/config.toml` avec
 `theme = "noir-rouge"`.
-
-#### La poignée « tiroir » du thème `noir-rouge`
-
-Dans le thème **Noir & Rouge**, le menu déroulant se tire comme **le tiroir
-d'une commode** : un rail vertical collé au **côté droit** de l'écran, avec une
-poignée ASCII au milieu (rien d'exotique : `>>` quand le tiroir est rentré,
-`<<` quand il est sorti) et une rainure `══`.
-
-- **clic sur la poignée** (ou `F2`) : on tire le menu vers l'extérieur ;
-- **menu ouvert** : une petite onde rouge de 1 pixel part de **chaque côté** de
-  la poignée, se **dégrade** (rouge vif → rouge → pointillés qui se dissolvent)
-  et fait le tour de la page en boucle (animation) ;
-- **menu refermé** : l'animation s'arrête et le trait disparaît (aucun contour
-  permanent autour de la page) ;
-- la poignée reste visible même menu ouvert : c'est elle qui le referme.
-
-Les autres thèmes gardent le bouton `◀☰` historique.
 
 ### Mise à jour
 

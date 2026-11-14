@@ -1,28 +1,14 @@
-//! Menu latéral de commandes (cliquable et défilable), entre le bloc zero-chan
-//! et le badge 0chan/mic. Les groupes se déplient (`▸`/`▾`) ; une commande sans
-//! argument s'exécute au clic, une commande avec argument s'insère dans la saisie.
-
-use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
-use ratatui::Frame;
-
-use crate::theme;
+//! Arbre des commandes de la palette `/` (et `F2`).
+//!
+//! Le panneau « Commandes » cliquable a été retiré (v0.7.32) : ce fichier ne
+//! sert plus qu'à produire la liste plate utilisée par la palette, avec les
+//! libellés groupés (« Contexte · /compact »).
 
 pub struct Node {
     pub label: &'static str,
     /// Commande exécutée/insérée. `None` = groupe (a des enfants).
     pub run: Option<&'static str>,
     pub children: &'static [Node],
-}
-
-#[derive(Clone, Copy)]
-pub enum Hit {
-    /// Déplier/replier un groupe.
-    Group(&'static str),
-    /// Exécuter (ou insérer) une commande.
-    Cmd(&'static str),
 }
 
 /// Liste plate des commandes (commande, « groupe · libellé ») pour la palette `/`.
@@ -233,114 +219,6 @@ pub const TREE: &[Node] = &[
         ],
     ),
 ];
-
-/// Dessine le menu et remplit `hits` (coordonnées écran). `scroll` est ajusté.
-/// `sel` = index sélectionné au clavier (surbrillance).
-#[allow(dead_code)] // plus de menu permanent : palette `/` et F2
-pub fn draw(
-    f: &mut Frame,
-    area: Rect,
-    open: Option<&'static str>,
-    scroll: &mut u16,
-    hits: &mut Vec<(Rect, Hit)>,
-    sel: Option<usize>,
-) {
-    hits.clear();
-    if area.width < 10 || area.height < 3 {
-        return;
-    }
-
-    // Construit toutes les lignes + l'action associée.
-    let mut rows: Vec<(Line<'static>, Option<Hit>)> = Vec::new();
-    for node in TREE {
-        if node.children.is_empty() {
-            rows.push((
-                Line::from(Span::styled(
-                    format!(" {}", node.label),
-                    Style::default().fg(theme::text()),
-                )),
-                node.run.map(Hit::Cmd),
-            ));
-        } else {
-            let expanded = open == Some(node.label);
-            let marker = if expanded { "▾" } else { "▸" };
-            rows.push((
-                Line::from(Span::styled(
-                    format!(" {marker} {}", node.label),
-                    Style::default()
-                        .fg(theme::highlight())
-                        .add_modifier(Modifier::BOLD),
-                )),
-                Some(Hit::Group(node.label)),
-            ));
-            if expanded {
-                for ch in node.children {
-                    rows.push((
-                        Line::from(Span::styled(
-                            format!("     {}", ch.label),
-                            Style::default().fg(theme::dim()),
-                        )),
-                        ch.run.map(Hit::Cmd),
-                    ));
-                }
-            }
-        }
-    }
-
-    let title = if sel.is_some() {
-        " Commandes ↑↓ ↵ Esc "
-    } else {
-        " Commandes "
-    };
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme::border()))
-        .title(Span::styled(
-            title,
-            Style::default()
-                .fg(theme::highlight())
-                .add_modifier(Modifier::BOLD),
-        ));
-    let inner = block.inner(area);
-    f.render_widget(block, area);
-
-    let max_scroll = rows.len().saturating_sub(inner.height as usize) as u16;
-    *scroll = (*scroll).min(max_scroll);
-    // Suivre la sélection clavier (la garder visible).
-    if let Some(s) = sel {
-        let h = inner.height as usize;
-        if s < *scroll as usize {
-            *scroll = s as u16;
-        } else if s >= *scroll as usize + h {
-            *scroll = (s + 1 - h).min(max_scroll as usize) as u16;
-        }
-    }
-    let start = *scroll as usize;
-    let visible = rows.iter().skip(start).take(inner.height as usize);
-
-    let mut lines: Vec<Line> = Vec::new();
-    let mut i = 0usize;
-    for (y, (line, hit)) in (inner.y..).zip(visible) {
-        let mut line = line.clone();
-        if let Some(h) = hit {
-            hits.push((
-                Rect {
-                    x: inner.x,
-                    y,
-                    width: inner.width,
-                    height: 1,
-                },
-                *h,
-            ));
-            if sel == Some(i) {
-                line = line.style(Style::default().bg(theme::menu_selection_bg()));
-            }
-            i += 1;
-        }
-        lines.push(line);
-    }
-    f.render_widget(Paragraph::new(lines), inner);
-}
 
 #[cfg(test)]
 mod tests {
