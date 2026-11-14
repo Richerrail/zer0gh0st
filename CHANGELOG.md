@@ -1,3 +1,25 @@
+## v0.7.48 — Le menu fantôme disparaît (README + code mort) (2026-11-14)
+
+Le panneau « Commandes » déroulant avait été retiré en v0.7.32, mais **le README
+le décrivait encore** et **tout son état tournait toujours** dans la TUI.
+
+- **README** : les lignes « Menu repliable » (rail `◀☰`, `F2` ouvre le menu) et
+  « Menu cliquable » (panneau cliquable à droite), ainsi que la section
+  « poignée « tiroir » du thème `noir-rouge` », décrivaient un menu inexistant —
+  retirées. La ligne TUI dit maintenant que la palette `/` existe et que `F2`
+  l'ouvre. L'aide intégrée annonçait `F2 menu` : c'est `F2 palette`.
+- **Code mort supprimé (−303 lignes)** : 9 champs d'`App` (`menu_visible`,
+  `menu_hits`, `menu_rect`, `rail_rect`, `arrow_rect`, `menu_focus`, `menu_sel`,
+  `menu_open`, `menu_scroll`) remplacés par un seul `panel_rect` ; branches
+  souris (poignée/rail/ligne de menu), molette et clavier (↑↓/Entrée/Échap)
+  supprimées ; `menu.rs` passe de 410 à 288 lignes (`Hit` et `draw()` retirés,
+  il ne produit plus que `flat_commands()` pour la palette).
+- **Correctif au passage** : l'onde néon partait du **coin haut-gauche** (sa
+  source, `arrow_rect`, était vide depuis la suppression du menu). Elle part
+  désormais du **bord du panneau latéral**, en haut et en bas.
+
+Vérifié à la main : `F2` ouvre la palette (103 items), `Échap` la referme.
+
 ## v0.7.47 — Le diff des écritures, enfin visible (2026-11-13)
 
 `text_editor` annonçait « Remplacement effectué dans `src/x.rs` (36.2 Ko,
