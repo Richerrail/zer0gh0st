@@ -1,3 +1,15 @@
+## v0.7.49 — Zero-chan visible même avec un mod ouvert (2026-11-14)
+
+- **fix(0chan)** : le bloc d'état de Zero-chan disparaissait dès qu'un mod
+  (panneau latéral : `/t0p`, `/0file`, `/0cl`, `/radio`…) était ouvert.
+  `block_layout` exigeait 96 colonnes alors qu'un mod laisse 56 % de la largeur
+  au chat (66 colonnes sur un terminal de 120).
+  Trois paliers désormais : **≥ 92** → bloc encadré ; **34–91** → le banner
+  garde toute la largeur et l'état s'écrit sur la ligne de la tagline, aligné à
+  droite (`(◕‿◕) en veille`) ; **< 34** → rien. La ligne compacte réutilise le
+  visage animé (clins d'œil, bouche selon l'état), et la troncature passe par
+  `util::truncate_utf8` (jamais au milieu d'un caractère).
+
 ## v0.7.48 — Le menu fantôme disparaît (README + code mort) (2026-11-14)
 
 Le panneau « Commandes » déroulant avait été retiré en v0.7.32, mais **le README
