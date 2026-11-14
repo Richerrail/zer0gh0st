@@ -4593,7 +4593,7 @@ fn draw_agent(f: &mut Frame, area: Rect, app: &mut App) {
     draw_status(f, chunks[0], app);
 
     // Banner + petit bloc Zero-chan à droite.
-    let (banner_area, zc_area) = crate::zerochan::block_layout(chunks[1], app.zc.on);
+    let (banner_area, zc_placement) = crate::zerochan::block_layout(chunks[1], app.zc.on);
     let banner = if app.streaming {
         banner::lines_animated(app.anim_phase)
     } else {
@@ -4603,8 +4603,12 @@ fn draw_agent(f: &mut Frame, area: Rect, app: &mut App) {
         Paragraph::new(banner).alignment(Alignment::Left),
         banner_area,
     );
-    if app.zc.on {
-        app.zc.draw(f, zc_area);
+    // Large → bloc encadré ; étroit (mod ouvert) → état sur la ligne de la
+    // tagline ; très étroit → rien.
+    match zc_placement {
+        crate::zerochan::Placement::Boxed(r) => app.zc.draw(f, r),
+        crate::zerochan::Placement::Inline(r) => crate::zerochan::draw_inline(f, r, &app.zc),
+        crate::zerochan::Placement::None => {}
     }
 
     draw_location(f, chunks[2]);
