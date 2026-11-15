@@ -1,0 +1,449 @@
+#!/usr/bin/env bash
+# zer0do — mod « appareils du réseau » pour ZER0|GH0ST (commande `/0do`).
+#
+# PÉRIMÈTRE ASSUMÉ (v1) — lire avant d'utiliser :
+#   • découverte  : sondage du port 8060 (Roku ECP) sur VOTRE sous-réseau.
+#                   Aucun autre protocole n'est parlé : un téléviseur Samsung,
+#                   LG, Sony ou un Chromecast ne sera PAS piloté ici.
+#   • lecture     : modèle, nom, état d'alimentation (Roku).
+#   • actions     : touches Roku (Power, Home, VolumeUp…) — UNIQUEMENT sur les
+#                   adresses listées dans `.zer0/zer0do.allow`.
+#   • jamais      : appairage (Tizen/webOS), identifiants, scan hors du
+#                   sous-réseau local, écriture sur un appareil non listé.
+#
+# Ce que ce mod ne fait pas — et ne prétendra jamais faire :
+#   « réparer » un appareil. Il envoie des touches. Redémarrer un service d'un
+#   appareil exigerait SSH/telnet et des identifiants : hors périmètre.
+#
+# Dépendances : bash, curl. `avahi-browse` (optionnel) pour lister les
+# Chromecast, qui ne sont pas pilotés ici.
+
+set -u
+
+readonly PROG="zer0do"
+readonly ECP_PORT=8060
+readonly TIMEOUT_CONNECT=1
+readonly ALLOW_FILE=".zer0/zer0do.allow"
+
+die() { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
+
+usage() {
+    cat <<'EOF'
+zer0do — appareils du réseau (Roku ECP), pour ZER0|GH0ST
+
+  zer0do scan [--subnet 192.168.1.0/24]   découvre les appareils Roku du LAN
+  zer0do status <ip>                        modèle, nom, série, alimentation
+  zer0do active <ip>                        application au premier plan
+  zer0do apps <ip>                          applications installées (id + nom)
+  zer0do launch <ip> <id|nom>               ouvre une application
+  zer0do search <ip> <texte>                recherche globale du Roku
+  zer0do key <ip> <TOUCHE>                  envoie une touche
+  zer0do power <ip> on|off|toggle           allume (Wake-on-LAN) / éteint / bascule
+  zer0do wake <ip> [--dry-run]              Wake-on-LAN seul, sans passer par power
+  zer0do list-allow                         affiche la liste blanche d'actions
+  zer0do --help
+
+Actions (key/power/launch/search/wake) : uniquement vers les adresses de
+`.zer0/zer0do.allow` (une IP par ligne, `#` pour commenter). Une seconde colonne
+facultative donne la MAC, nécessaire à `power on` :
+  192.168.1.42  A4:2B:8C:11:22:33
+Sans ce fichier, toute action est refusée.
+
+Limites (v1) : seuls les appareils qui parlent Roku ECP (port 8060) sont
+pilotés. Chromecast/Android TV/Tizen/webOS ne le sont pas.
+EOF
+}
+
+need_curl() { command -v curl >/dev/null 2>&1 || die "curl est requis"; }
+
+# Sous-réseau local (/24 au plus), déduit de la première interface globale.
+detect_subnet() {
+    local cidr
+    cidr=$(ip -o -4 addr show scope global 2>/dev/null \
+        | awk 'NR==1 {print $4}') || true
+    if [ -z "${cidr:-}" ]; then
+        cidr=$(ifconfig 2>/dev/null \
+            | awk '/inet / && $2 != "127.0.0.1" {print $2; exit}')
+        [ -n "${cidr:-}" ] || return 1
+        # ifconfig ne donne pas le préfixe : on suppose /24.
+        cidr="${cidr}/24"
+    fi
+    local ip="${cidr%/*}" prefix="${cidr#*/}"
+    [ "$prefix" = "24" ] || die "sous-réseau /$prefix non pris en charge (v1 : /24 seulement) — passe --subnet"
+    printf '%s\n' "${ip%.*}"
+}
+
+# Lit une valeur XML d'une réponse Roku (échappe les caractères problématiques).
+xml_field() {
+    printf '%s' "$1" \
+        | tr -d '\r\n' \
+        | sed -n "s:.*<$2>\(.*\)</$2>.*:\1:p" \
+        | head -n 1
+}
+
+roku_info() {
+    local ip="$1"
+    curl -s -m "$TIMEOUT_CONNECT" "http://$ip:$ECP_PORT/query/device-info" 2>/dev/null
+}
+
+is_roku() {
+    local ip="$1"
+    [ -n "$(roku_info "$ip")" ]
+}
+
+cmd_scan() {
+    need_curl
+    local subnet=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --subnet) subnet="${2:-}"; shift 2 ;;
+            *) die "option inconnue pour scan : $1" ;;
+        esac
+    done
+    if [ -n "$subnet" ]; then
+        # `192.168.40.0/24` ou `192.168.40.23` → préfixe `192.168.40`.
+        subnet="${subnet%%/*}"
+        subnet="${subnet%.*}"
+    else
+        subnet=$(detect_subnet) || die "sous-réseau introuvable — utilise --subnet 192.168.1.0/24"
+    fi
+    case "$subnet" in
+        *[!0-9.]*|"") die "sous-réseau invalide : $subnet" ;;
+    esac
+
+    printf 'Sondage de %s.0/24 sur le port %s (Roku ECP)…\n' "$subnet" "$ECP_PORT"
+    local found=0
+    # Sondage en parallèle, borné : 24 connexions simultanées, 1 s chacune.
+    local ips=""
+    local i
+    for i in $(seq 1 254); do ips="$ips $subnet.$i"; done
+    # shellcheck disable=SC2086
+    local alive
+    # On exige une vraie réponse ECP (`<device-info>`) : un port 8060 ouvert par
+    # autre chose ne doit pas être annoncé comme un Roku.
+    alive=$(printf '%s\n' $ips | xargs -P 24 -I{} sh -c \
+        'curl -s -m 1 "http://{}:8060/query/device-info" 2>/dev/null \
+            | grep -q "<device-info>" && echo {}' 2>/dev/null)
+
+    if [ -z "$alive" ]; then
+        printf 'Aucun appareil Roku trouvé sur ce sous-réseau.\n'
+        printf 'Ce mod ne pilote QUE Roku ECP : un téléviseur Samsung/LG/Sony ou un\n'
+        printf 'Chromecast ne répondra pas ici (voir `%s --help`).\n' "$PROG"
+        return 0
+    fi
+
+    printf '\n%-16s %-22s %-5s %s\n' "IP" "MODÈLE" "ÉTAT" "NOM"
+    printf '%-16s %-22s %-5s %s\n' "----------------" "----------------------" "-----" "---"
+    for ip in $(printf '%s\n' "$alive" | sort -t. -k4 -n); do
+        local info model power name
+        info=$(roku_info "$ip")
+        model=$(xml_field "$info" model-name)
+        power=$(xml_field "$info" power-mode)
+        name=$(xml_field "$info" friendly-device-name)
+        [ -n "$model" ] || model="(inconnu)"
+        [ -n "$power" ] || power="?"
+        printf '%-16s %-22s %-5s %s\n' "$ip" "$model" "$power" "${name:-—}"
+        found=$((found + 1))
+    done
+    printf '\n%d appareil(s) Roku. Actions : `%s key <ip> <TOUCHE>` (allowlist requise).\n' \
+        "$found" "$PROG"
+
+    # Bonus lecture seule : Chromecast visibles en mDNS (non pilotés).
+    if command -v avahi-browse >/dev/null 2>&1; then
+        local cast
+        cast=$(timeout 3 avahi-browse -rtp _googlecast._tcp 2>/dev/null \
+            | awk -F';' '$1=="=" {print $8}' | sort -u | head -n 5)
+        if [ -n "$cast" ]; then
+            printf '\nChromecast/Google TV vus en mDNS (NON pilotés par ce mod) :\n'
+            printf '  %s\n' $cast
+        fi
+    fi
+}
+
+cmd_status() {
+    [ $# -eq 1 ] || die "usage : $PROG status <ip>"
+    need_curl
+    local ip="$1" info
+    info=$(roku_info "$ip")
+    if [ -z "$info" ]; then
+        printf '%s : aucune réponse sur le port %s.\n' "$ip" "$ECP_PORT"
+        printf 'Soit ce n'"'"'est pas un appareil Roku, soit il est hors ligne.\n'
+        printf 'Ce mod ne parle pas Tizen (Samsung), webOS (LG), Bravia (Sony) ni Chromecast.\n'
+        return 1
+    fi
+    printf 'Appareil : %s\n' "$ip"
+    printf '  nom        : %s\n' "$(xml_field "$info" friendly-device-name)"
+    printf '  modèle     : %s\n' "$(xml_field "$info" model-name)"
+    printf '  série      : %s\n' "$(xml_field "$info" serial-number)"
+    printf '  logiciel   : %s\n' "$(xml_field "$info" software-version)"
+    printf '  alimentation: %s\n' "$(xml_field "$info" power-mode)"
+}
+
+# L'adresse est-elle autorisée pour une action ?
+allowed() {
+    local ip="$1"
+    if [ -n "${ZER0DO_ALLOW:-}" ]; then
+        case " $ZER0DO_ALLOW " in
+            *" $ip "*) return 0 ;;
+        esac
+    fi
+    [ -f "$ALLOW_FILE" ] || return 1
+    [ "$(allow_field "$ip" 1)" = "$ip" ]
+}
+
+# Champ `n` de la ligne d'allowlist qui commence par `ip` (1 = IP, 2 = MAC).
+allow_field() {
+    local ip="$1" field="$2"
+    [ -f "$ALLOW_FILE" ] || return 1
+    while IFS= read -r line; do
+        line="${line%%#*}"
+        set -- $line
+        [ $# -ge 1 ] || continue
+        if [ "$1" = "$ip" ]; then
+            shift $((field - 1)) 2>/dev/null || return 1
+            printf '%s\n' "${1:-}"
+            return 0
+        fi
+    done < "$ALLOW_FILE"
+    return 1
+}
+
+mac_for() { allow_field "$1" 2; }
+
+require_allowed() {
+    local ip="$1"
+    if allowed "$ip"; then
+        return 0
+    fi
+    die "action refusée : $ip n'est pas dans $ALLOW_FILE
+Crée ce fichier et ajoutes-y l'adresse (une IP par ligne), par exemple :
+  mkdir -p .zer0 && echo '$ip' >> $ALLOW_FILE
+L'allowlist existe pour qu'un agent ne puisse pas toucher n'importe quel
+appareil du réseau sans que tu l'aies écrit toi-même."
+}
+
+cmd_key() {
+    [ $# -eq 2 ] || die "usage : $PROG key <ip> <TOUCHE>  (ex. Home, Select, VolumeUp)"
+    need_curl
+    local ip="$1" key="$2"
+    case "$key" in
+        *[!A-Za-z]*|"") die "touche invalide : $key (lettres seulement, ex. Home)" ;;
+    esac
+    require_allowed "$ip"
+    local code
+    code=$(curl -s -o /dev/null -m 3 -w '%{http_code}' -X POST \
+        "http://$ip:$ECP_PORT/keypress/$key" 2>/dev/null)
+    if [ "$code" = "200" ] || [ "$code" = "204" ]; then
+        printf 'Touche %s envoyée à %s (HTTP %s).\n' "$key" "$ip" "$code"
+    else
+        printf '%s : la touche n'"'"'a pas été acceptée (HTTP %s).\n' "$ip" "${code:-aucune réponse}"
+        return 1
+    fi
+}
+
+# Wake-on-LAN : 6 octets 0xFF + 16 fois la MAC, en UDP broadcast (port 9).
+# Fonctionne si l'appareil garde sa carte réseau alimentée en veille — sur un
+# Roku TV, cela correspond à « Fast TV start » activé.
+cmd_wake() {
+    local ip="" dry=0
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --dry-run) dry=1; shift ;;
+            *) ip="$1"; shift ;;
+        esac
+    done
+    [ -n "$ip" ] || die "usage : $PROG wake <ip> [--dry-run]"
+    require_allowed "$ip"
+    local mac
+    mac=$(mac_for "$ip")
+    if [ -z "$mac" ]; then
+        die "aucune MAC connue pour $ip : ajoute-la dans $ALLOW_FILE
+  echo '$ip  AA:BB:CC:DD:EE:FF' >> $ALLOW_FILE
+La MAC se trouve dans l'interface du téléviseur (Réglages → À propos du réseau)."
+    fi
+    case "$mac" in
+        [0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]:[0-9A-Fa-f][0-9A-Fa-f]) ;;
+        *) die "MAC invalide pour $ip : $mac (format AA:BB:CC:DD:EE:FF)" ;;
+    esac
+
+    # Paquet magique en hexadécimal : 6 × ff puis 16 × mac.
+    local machex="${mac//:/}"
+    local packet="ffffffffffff"
+    local i
+    for i in $(seq 1 16); do packet="$packet$machex"; done
+
+    local hex=""
+    while [ -n "$packet" ]; do
+        hex="$hex\\x${packet:0:2}"
+        packet="${packet:2}"
+    done
+
+    if [ "$dry" = "1" ]; then
+        printf 'Wake-on-LAN (simulation) → %s, MAC %s, paquet de %d octets\n' \
+            "$ip" "$mac" $((6 + 16 * 6))
+        printf 'Destinations : 255.255.255.255:9 et %s:9\n' "$ip"
+        return 0
+    fi
+
+    # Broadcast + unicast : certains commutateurs ne relayent pas le broadcast.
+    local dest out=0
+    for dest in "255.255.255.255" "$ip"; do
+        if command -v bash >/dev/null 2>&1; then
+            # shellcheck disable=SC2059
+            printf "$hex" > "/dev/udp/$dest/9" 2>/dev/null && out=1
+        fi
+    done
+    if [ "$out" = "1" ]; then
+        printf 'Paquet Wake-on-LAN envoyé à %s (MAC %s).\n' "$ip" "$mac"
+        printf 'Si rien ne se passe : la TV doit garder le réseau en veille\n'
+        printf '(« Fast TV start » sur Roku) et le port 9 ne doit pas être filtré.\n'
+    else
+        printf 'Wake-on-LAN impossible : /dev/udp indisponible dans ce bash.\n'
+        return 1
+    fi
+}
+
+cmd_power() {
+    [ $# -ge 2 ] || die "usage : $PROG power <ip> on|off|toggle"
+    local ip="$1" mode="$2"
+    shift 2
+    case "$mode" in
+        off) cmd_key "$ip" PowerOff ;;
+        toggle) cmd_key "$ip" Power ;;
+        on) cmd_wake "$ip" "$@" ;;
+        *) die "usage : $PROG power <ip> on|off|toggle" ;;
+    esac
+}
+
+# Encode une chaîne pour une query string (curl --data-urlencode n'est pas
+# disponible en GET + POST simultanément ; on encode ici, simplement).
+urlencode() {
+    printf '%s' "$1" | od -An -tu1 | tr -s ' ' '\n' \
+        | awk 'BEGIN{ORS=""} {
+            c=$1;
+            if ((c>=48&&c<=57)||(c>=65&&c<=90)||(c>=97&&c<=122)||c==45||c==46||c==95||c==126) {
+                printf "%c", c
+            } else { printf "%%%02X", c }
+        }'
+}
+
+# Champs du XML des applications : `id<TAB>nom`.
+roku_apps() {
+    local ip="$1" xml
+    xml=$(curl -s -m 3 "http://$ip:$ECP_PORT/query/apps" 2>/dev/null) || return 1
+    [ -n "$xml" ] || return 1
+    printf '%s' "$xml" | tr -d '\r\n' \
+        | sed 's:<app :\n<app :g' \
+        | sed -n 's:.*<app id="\([^"]*\)"[^>]*>\([^<]*\)</app>.*:\1\t\2:p'
+}
+
+cmd_active() {
+    [ $# -eq 1 ] || die "usage : $PROG active <ip>"
+    local ip="$1" xml
+    xml=$(curl -s -m 3 "http://$ip:$ECP_PORT/query/active-app" 2>/dev/null) || true
+    if [ -z "$xml" ]; then
+        printf '%s : aucune réponse (pas un Roku, ou hors ligne).\n' "$ip"
+        return 1
+    fi
+    local name
+    name=$(printf '%s' "$xml" | tr -d '\r\n' \
+        | sed -n 's:.*<app[^>]*>\([^<]*\)</app>.*:\1:p' | head -n 1)
+    if [ -n "$name" ]; then
+        printf '%s : %s\n' "$ip" "$name"
+    else
+        printf '%s : écran d'\''accueil (aucune application au premier plan).\n' "$ip"
+    fi
+}
+
+cmd_apps() {
+    [ $# -eq 1 ] || die "usage : $PROG apps <ip>"
+    local ip="$1" list
+    list=$(roku_apps "$ip") || {
+        printf '%s : aucune réponse (pas un Roku, ou hors ligne).\n' "$ip"
+        return 1
+    }
+    if [ -z "$list" ]; then
+        printf '%s : aucune application installée listée.\n' "$ip"
+        return 0
+    fi
+    printf '%-10s %s\n' "ID" "APPLICATION"
+    printf '%s\n' "$list" | while IFS=$'\t' read -r id name; do
+        printf '%-10s %s\n' "$id" "$name"
+    done
+}
+
+cmd_launch() {
+    [ $# -eq 2 ] || die "usage : $PROG launch <ip> <id|nom>"
+    need_curl
+    local ip="$1" want="$2" id=""
+    require_allowed "$ip"
+    case "$want" in
+        *[!0-9]*)  # un nom : on le résout dans la liste des applications
+            local list
+            list=$(roku_apps "$ip") || die "$ip ne répond pas (pas un Roku, ou hors ligne)"
+            id=$(printf '%s\n' "$list" | awk -F'\t' -v want="$want" \
+                'tolower($2) ~ tolower(want) {print $1; exit}')
+            # Pas de backticks ici : dans une chaîne double, bash les exécuterait.
+            [ -n "$id" ] || die "application introuvable sur $ip : $want (voir : $PROG apps $ip)"
+            ;;
+        *) id="$want" ;;
+    esac
+    local code
+    code=$(curl -s -o /dev/null -m 4 -w '%{http_code}' -X POST "http://$ip:$ECP_PORT/launch/$id" 2>/dev/null)
+    if [ "$code" = "200" ] || [ "$code" = "204" ]; then
+        printf 'Application %s lancée sur %s.\n' "$id" "$ip"
+    else
+        printf '%s : lancement refusé (HTTP %s).\n' "$ip" "${code:-aucune réponse}"
+        return 1
+    fi
+}
+
+cmd_search() {
+    [ $# -ge 2 ] || die "usage : $PROG search <ip> <texte>"
+    need_curl
+    local ip="$1"
+    shift
+    local q="$*"
+    require_allowed "$ip"
+    local enc code
+    enc=$(urlencode "$q")
+    code=$(curl -s -o /dev/null -m 4 -w '%{http_code}' -X POST \
+        "http://$ip:$ECP_PORT/search/browse?keyword=$enc&title=$enc&launch=true" 2>/dev/null)
+    if [ "$code" = "200" ] || [ "$code" = "204" ]; then
+        printf 'Recherche « %s » lancée sur %s.\n' "$q" "$ip"
+    else
+        printf '%s : recherche refusée (HTTP %s).\n' "$ip" "${code:-aucune réponse}"
+        return 1
+    fi
+}
+
+cmd_list_allow() {
+    if [ ! -f "$ALLOW_FILE" ]; then
+        printf 'Aucune allowlist (%s absent) : toute action est refusée.\n' "$ALLOW_FILE"
+        return 0
+    fi
+    printf 'Allowlist (%s) :\n' "$ALLOW_FILE"
+    grep -v '^[[:space:]]*#' "$ALLOW_FILE" | grep -v '^[[:space:]]*$' | sed 's/^/  /' \
+        || printf '  (vide)\n'
+}
+
+main() {
+    local cmd="${1:-scan}"
+    [ $# -gt 0 ] && shift
+    case "$cmd" in
+        scan) cmd_scan "$@" ;;
+        status) cmd_status "$@" ;;
+        active) cmd_active "$@" ;;
+        apps) cmd_apps "$@" ;;
+        launch) cmd_launch "$@" ;;
+        search) cmd_search "$@" ;;
+        key) cmd_key "$@" ;;
+        power) cmd_power "$@" ;;
+        wake) cmd_wake "$@" ;;
+        list-allow) cmd_list_allow ;;
+        -h|--help|help) usage ;;
+        *) die "commande inconnue : $cmd (essaie --help)" ;;
+    esac
+}
+
+main "$@"

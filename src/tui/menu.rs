@@ -171,6 +171,15 @@ pub const TREE: &[Node] = &[
             n("zer0push dry-run", "/zer0push --dry-run"),
         ],
     ),
+    g(
+        "0do",
+        &[
+            n("scan", "/0do scan"),
+            n("status", "/0do status "),
+            n("key", "/0do key "),
+            n("power", "/0do power "),
+        ],
+    ),
     g("whoami", &[n("status", "/whoami"), n("off", "/whoami off")]),
     g(
         "vault",

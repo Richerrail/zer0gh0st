@@ -898,6 +898,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
         "/img" => handle_img(app, &args),
         "/update" => cmd_update(app, &args, ui_tx),
         "/zer0push" => cmd_zer0push(app, &args, ui_tx),
+        "/0do" => cmd_0do(app, &args, ui_tx),
         "/remember" => cmd_remember(&args, ui_tx),
         "/recall" => cmd_recall(&args, ui_tx),
         "/forget" => handle_forget(app, &args),
@@ -1337,6 +1338,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
              /img <chemin>              joint une image au prochain message (vision)\n\
              /update [check]            met à jour le binaire (Releases GitHub)\n\
              /zer0push [titre] [--base <b>] [--draft] [--commit] [--dry-run]  tests + push + PR (gh)\n\
+             /0do [scan|status|key|power] [args]  mod appareils du réseau (Roku ECP)\n\
              /theme [nom]              menu des thèmes (castle, noir, noir-rouge)\n\
              /sound [on|off]           sons d'interface (défaut : off)\n\
              /0cl                      shell dans le panneau (zer0CL)\n\
@@ -1667,6 +1669,75 @@ fn cmd_update(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
             Err(e) => format!("échec : {e}"),
         };
         let _ = ui.send(UiEvent::Info(format!("⬆ {msg}")));
+    });
+}
+
+/// `/0do [args]` — lance le mod `mods/zer0do/zer0do` (appareils du réseau).
+///
+/// Le mod est un script **externe** : le noyau ne parle aucun protocole de
+/// téléviseur. Il est exécuté via le shell de la plateforme (comme `code_exec`),
+/// avec l'environnement nettoyé des secrets, et son action est journalisée dans
+/// l'audit — c'est le seul endroit où l'agent peut agir hors du dépôt.
+fn cmd_0do(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
+    let script = crate::mods::project_root().join("mods/zer0do/zer0do");
+    if !script.is_file() {
+        app.messages.push(ChatMessage::notice(format!(
+            "❌ mod zer0do absent : {} — voir mods/README.md",
+            script.display()
+        )));
+        return;
+    }
+    let shown = if args.is_empty() {
+        "scan".to_string()
+    } else {
+        args.join(" ")
+    };
+    app.messages
+        .push(ChatMessage::notice(format!("⏳ 0do {shown} …")));
+
+    // Le script est appelé via le shell de la plateforme (`bash` sous Unix), et
+    // ses arguments lui sont passés tels quels, sans passer par une chaîne
+    // interprétée : pas d'injection possible depuis un identifiant d'appareil.
+    let mut line = String::from("'");
+    line.push_str(&script.to_string_lossy().replace('\'', "'\\''"));
+    line.push('\'');
+    for a in args {
+        line.push(' ');
+        line.push('\'');
+        line.push_str(&a.replace('\'', "'\\''"));
+        line.push('\'');
+    }
+    let audit_args = shown.clone();
+    let ui = ui_tx.clone();
+    tokio::spawn(async move {
+        let mut cmd = tokio::process::Command::from(crate::platform::shell_command(&line));
+        match tokio::time::timeout(std::time::Duration::from_secs(120), cmd.output()).await {
+            Ok(Ok(out)) => {
+                let mut text = String::from_utf8_lossy(&out.stdout).trim_end().to_string();
+                let err = String::from_utf8_lossy(&out.stderr).trim_end().to_string();
+                if !err.is_empty() {
+                    if !text.is_empty() {
+                        text.push('\n');
+                    }
+                    text.push_str(&err);
+                }
+                if text.is_empty() {
+                    text = format!("(aucune sortie, code {:?})", out.status.code());
+                }
+                // Trace : l'action est relisible après coup (`zer0 audit`).
+                let first = text.lines().next().unwrap_or("").to_string();
+                crate::audit::record("0do", &audit_args, &first);
+                let _ = ui.send(UiEvent::Info(text));
+            }
+            Ok(Err(e)) => {
+                let _ = ui.send(UiEvent::Info(format!("❌ 0do : {e}")));
+            }
+            Err(_) => {
+                let _ = ui.send(UiEvent::Info(
+                    "⏱ 0do interrompu après 120 s (scan trop lent ?)".to_string(),
+                ));
+            }
+        }
     });
 }
 
