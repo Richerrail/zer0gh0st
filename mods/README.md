@@ -12,9 +12,9 @@ protocole exotique ; il délègue.
 
 ```bash
 /0do scan                        # découvre les appareils Roku du sous-réseau
-/0do status 192.168.1.42         # modèle, nom, série, logiciel, alimentation
+/0do status 192.168.1.42         # modèle, nom, série, alimentation, app active (id)
 /0do apps 192.168.1.42           # applications installées (id + nom)
-/0do active 192.168.1.42         # application au premier plan
+/0do active 192.168.1.42         # application au premier plan (+ id)
 /0do launch 192.168.1.42 Netflix # ouvre une application (allowlist requise)
 /0do search 192.168.1.42 météo   # recherche globale du Roku (allowlist requise)
 /0do key 192.168.1.42 Home       # envoie une touche (allowlist requise)
@@ -24,11 +24,16 @@ protocole exotique ; il délègue.
 /0do list-allow                  # état de la liste blanche
 ```
 
-L'allowlist accepte une **MAC** en seconde colonne, indispensable à l'allumage :
+L'allowlist accepte une **MAC** en seconde colonne, indispensable à l'allumage.
+`scan` affiche cette MAC (celle de l'interface active) et donne la ligne prête
+à coller :
 
 ```
-# .zer0/zer0do.allow
-192.168.1.42  A4:2B:8C:11:22:33   # TV du salon
+IP               MODÈLE              ÉTAT       MAC                NOM
+192.168.1.42     RTRU5528-CA         PowerOn    ac:ac:e2:2a:fe:4c  55" RCA Roku TV
+
+Pour autoriser le réveil (Wake-on-LAN), ajoute dans .zer0/zer0do.allow :
+  192.168.1.42  ac:ac:e2:2a:fe:4c
 ```
 
 ### Touches (`/0do key <ip> <TOUCHE>`)
@@ -72,11 +77,24 @@ En CLI, sans passer par la TUI :
 - **Pas de « réparation »** : ce mod envoie des touches et ouvre des
   applications. Redémarrer un service d'un appareil demanderait SSH et des
   identifiants — hors périmètre.
-- **Allumer** passe par **Wake-on-LAN** (paquet magique UDP, port 9). Il faut
-  (a) la MAC dans l'allowlist, (b) que l'appareil garde sa carte réseau
-  alimentée en veille — « Fast TV start » sur Roku. Si ça ne se réveille pas,
-  c'est que l'un des deux manque : le mod le dit, il ne prétend pas avoir
-  réussi (`--dry-run` montre le paquet).
+- **Allumer** se fait en **deux temps**, selon ce que l'appareil répond :
+  1. s'il répond en ECP (il garde son réseau en veille : `DisplayOff`), la touche
+     **`Power`** le réveille — vérifié sur un Roku TV (`DisplayOff` → `PowerOn`) ;
+  2. s'il ne répond pas (vraiment éteint), **Wake-on-LAN** (paquet magique UDP,
+     port 9, broadcast **et** unicast) avec la MAC de l'interface **active**.
+
+  `power on` lit d'abord l'état : sur un appareil déjà `PowerOn` il n'envoie
+  **rien** (la touche `Power` est une bascule — l'envoyer éteindrait la TV).
+  Si l'allowlist contient la MAC de la mauvaise interface (Wi-Fi d'un appareil
+  filaire), le mod le signale et utilise celle annoncée par l'appareil.
+  Pour le réveil par WoL, il faut (a) la MAC — `scan` l'affiche, (b) que
+  l'appareil garde sa carte réseau alimentée en veille (« Fast TV start » sur
+  Roku).
+  **Le broadcast dépend du shell** : `bash` ne pose pas `SO_BROADCAST`, donc
+  l'envoi en `255.255.255.255` peut échouer en `Permission denied` — le mod le
+  dit ligne par ligne (✅/❌ par destination) au lieu d'annoncer un succès. S'il
+  échoue, l'unicast suffit souvent ; sinon `socat` est utilisé automatiquement
+  s'il est installé. `--dry-run` montre le paquet sans l'envoyer.
 
 ### Dépendances
 
