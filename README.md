@@ -443,11 +443,18 @@ zer0 kb embed status         # serveur, modèle, empreinte
 ### Thèmes et sons
 
 ```bash
-/theme              # menu avec aperçus (ghost, noir, noir-rouge, castle)
+/theme              # menu avec aperçus (ghost, noir, noir-rouge, castle, paper)
 /theme castle       # applique directement (alias : wolf, wolf3d, acier)
+/theme paper default   # mémorise `paper` comme thème PAR DÉFAUT (et l'applique)
+/theme default      # revient au thème par défaut (sinon : le premier, `ghost`)
 /sound on           # active les sons d'interface (désactivés par défaut)
 /sound off
 ```
+
+Le thème **actif** et le thème **par défaut** sont deux réglages distincts
+(`theme` et `theme_default` dans `config.toml`) : on peut essayer `paper`,
+revenir à `ghost`, puis `/theme default` pour retrouver sa préférence sans se
+souvenir du nom. Le menu des thèmes marque les deux (`· actif`, `· défaut`).
 
 Le pack `castle` (WAV 16 bits, originaux CC0) est embarqué dans le binaire :
 aucun fichier à télécharger, aucun son si aucun lecteur audio n'est présent.

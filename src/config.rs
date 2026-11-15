@@ -57,6 +57,10 @@ pub struct GlobalConfig {
     /// `None` = thème par défaut.
     #[serde(default)]
     pub theme: Option<String>,
+    /// Thème « par défaut » : celui que `/theme default` restaure. Distinct du
+    /// thème actif, pour revenir à sa préférence après avoir essayé les autres.
+    #[serde(default)]
+    pub theme_default: Option<String>,
     /// Sons d'interface (défaut : `false`, silencieux).
     #[serde(default)]
     pub sound: Option<bool>,
@@ -133,6 +137,7 @@ impl Default for GlobalConfig {
             telegram_allow: Vec::new(),
             zero_box_fallbacks: None,
             theme: None,
+            theme_default: None,
             sound: None,
             system_prompt: None,
             system_prompt_local: None,
