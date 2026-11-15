@@ -217,6 +217,7 @@ par `ZER0_EXEC_TIMEOUT` ou par appel (`timeout_secs`).
 | **zer0CL** | shell dans le panneau latéral (`/0cl`) : exécute des commandes **tapées par toi**, sortie en direct, historique ↑↓, `cd`, `clear`. Aucune dépendance, aucun accès du modèle |
 | **Moniteur** | mod `t0p` dans le panneau latéral (comme radio/bintime) : CPU (global + cœurs), RAM/swap, charge, températures, top 8 processus. Aussi `zer0 t0p [--watch]` en CLI |
 | **Vote** | **👍 / 👎 en bas à droite de l'écran principal** (cliquables) : le pouce haut = **une star GitHub** sur [Richerrail/zer0gh0st](https://github.com/Richerrail/zer0gh0st), le bas retire la star. `/vote` ou `zer0 vote up\|down\|status\|login\|logout`. Compteur réel lu sur l'API GitHub. Connexion GitHub par device flow OAuth (`vote login`) → votes ensuite automatiques. |
+| **Mods** | `mods/` : programmes externes. Fourni : `zer0do` (`/0do`) — appareils du réseau (Roku ECP), actions sous **allowlist** |
 | **Divers** | `/vault`, `/pdf`, personas `/whoami`, recherche `/search` |
 
 ---
@@ -598,7 +599,7 @@ contraintes : [docs/IMPROVEMENTS.md](docs/IMPROVEMENTS.md).
 
 **TUI** (extrait) : `/help` `/think` `/provider` `/model` `/models` `/quota` `/vote` `/ctx` `/free` `/select` `/route` `/telegram` `/tg`
 `/role` `/project` `/memory` `/recall` `/compact` `/task` `/work` `/ask` `/review` `/search`
-`/stop` `/context` `/whoami` `/vault` `/pdf` `/jev` `/kb` `/new` `/history` `/radio` `/bintime`
+`/stop` `/context` `/whoami` `/vault` `/pdf` `/jev` `/kb` `/new` `/history` `/radio` `/bintime` `/0do`
 `/pong` `/panel` `/clear` `/quit` `/img` `/theme` `/update` `/embeddings`.
 
 **CLI** : `zer0 provider|models|model|select|route|role|project|memory|embeddings|task|search|whoami|vault|pdf|jev|bintime|pong|kb|update|quota|vote|0box` — alias débat : `zer0box "<sujet>"` (binaire-lien ou `scripts/zer0box.cmd` depuis les sources).
@@ -709,8 +710,11 @@ Le jeton est aussi cherché dans l'environnement
 | `/bintime` | panneau horloge binaire CRT | natif Rust |
 | `/pong` | Pong **contre l'agent** (plein écran) | natif Rust |
 
-Les modules `mods/` ne sont **pas fournis** (voir [`mods/README.md`](./mods/README.md)).
-Détails : [`ECOSYSTEM.md`](./ECOSYSTEM.md).
+Un mod est **fourni** : [`zer0do`](./mods/README.md) (`/0do`) — appareils du
+réseau local en Roku ECP : `scan`, `status`, `key`, `power`. Les actions exigent
+une **allowlist** (`.zer0/zer0do.allow`) écrite à la main ; les autres marques
+(Tizen, webOS, Bravia, Chromecast) ne sont **pas** pilotées et le mod le dit.
+Détails : [`mods/README.md`](./mods/README.md) · [`ECOSYSTEM.md`](./ECOSYSTEM.md).
 
 ---
 

@@ -29,7 +29,14 @@ dépendance Python pour le noyau.
 | `/pong` | Rust (`src/fun/pong.rs`) | — | plein écran |
 
 `src/mods.rs` ne sert plus qu'à résoudre la racine du projet (surchargeable par
-`ZERO_ROOT`) pour localiser `base_connaissance/` et migrer les anciennes données.
+`ZERO_ROOT`) pour localiser `base_connaissance/`, `mods/` et migrer les
+anciennes données.
+
+Un mod est **fourni** : `mods/zer0do/zer0do` (`/0do`), en **bash + curl**.
+Il ne pilote que les appareils qui parlent **Roku ECP** (port 8060) ; les
+actions (`key`, `power`) exigent une allowlist `.zer0/zer0do.allow` écrite à la
+main, et tout appel passe par le shell nettoyé des secrets + le journal
+d'audit. Détails et limites : `mods/README.md`.
 
 ---
 
@@ -92,7 +99,8 @@ passphrase exigée à chaque lancement). Il n'est **pas** prévu pour être lanc
   d'ouvrir le périphérique d'enregistrement Windows ; l'arrêt brutal du
   processus est compensé par une réparation de l'en-tête WAV.
 - **Pas de `taskset`** → lance `llama-server` sans limite de cœurs.
-- Les modules `mods/` (Qt6, torrent) ne sont **pas prévus** pour Windows.
+- Les modules `mods/` en Qt6/torrent ne sont **pas prévus** pour Windows ;
+  `zer0do` y fonctionne via Git Bash (`bash` + `curl`), comme `code_exec`.
 
 ### Installation automatique
 
