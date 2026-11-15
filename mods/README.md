@@ -31,6 +31,22 @@ L'allowlist accepte une **MAC** en seconde colonne, indispensable à l'allumage 
 192.168.1.42  A4:2B:8C:11:22:33   # TV du salon
 ```
 
+### Touches (`/0do key <ip> <TOUCHE>`)
+
+| Famille | Touches |
+|---|---|
+| Navigation | `Up` `Down` `Left` `Right` `Select` `Back` `Home` `Info` |
+| Lecture | `Play` `Rev` `Fwd` `InstantReplay` |
+| Claviers | `Enter` `Backspace` `Search` |
+| Son | `VolumeUp` `VolumeDown` `VolumeMute` |
+| Entrées | `InputHDMI1` … `InputHDMI4`, `InputTuner`, `InputAV1` |
+| Alimentation | `Power` (bascule), `PowerOff` |
+
+Le Roku répond `200`/`204` s'il accepte, `404`/`503` si la touche n'existe pas
+sur ce modèle — le mod rapporte le code au lieu de prétendre avoir réussi.
+La saisie caractère par caractère (`Lit_*`) **n'est pas gérée** : utilise
+`/0do search <ip> <texte>`.
+
 En CLI, sans passer par la TUI :
 
 ```bash
