@@ -217,7 +217,7 @@ par `ZER0_EXEC_TIMEOUT` ou par appel (`timeout_secs`).
 | **zer0CL** | shell dans le panneau latéral (`/0cl`) : exécute des commandes **tapées par toi**, sortie en direct, historique ↑↓, `cd`, `clear`. Aucune dépendance, aucun accès du modèle |
 | **Moniteur** | mod `t0p` dans le panneau latéral (comme radio/bintime) : CPU (global + cœurs), RAM/swap, charge, températures, top 8 processus. Aussi `zer0 t0p [--watch]` en CLI |
 | **Vote** | **👍 / 👎 en bas à droite de l'écran principal** (cliquables) : le pouce haut = **une star GitHub** sur [Richerrail/zer0gh0st](https://github.com/Richerrail/zer0gh0st), le bas retire la star. `/vote` ou `zer0 vote up\|down\|status\|login\|logout`. Compteur réel lu sur l'API GitHub. Connexion GitHub par device flow OAuth (`vote login`) → votes ensuite automatiques. |
-| **Mods** | `mods/` : programmes externes. Fourni : `zer0do` (`/0do`) — appareils du réseau (Roku ECP), actions sous **allowlist** |
+| **Mods** | `mods/` : programmes externes. Fourni : `zer0do` (`/0do`) — appareils du réseau (Roku ECP) : `scan`, `status`, `apps`, `launch`, `search`, `key`, `power on` (Wake-on-LAN) ; actions sous **allowlist** |
 | **Divers** | `/vault`, `/pdf`, personas `/whoami`, recherche `/search` |
 
 ---

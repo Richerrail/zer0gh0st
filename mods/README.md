@@ -11,11 +11,24 @@ protocole exotique ; il délègue.
 ## `zer0do` — appareils du réseau
 
 ```bash
-/0do scan                     # découvre les appareils Roku du sous-réseau
-/0do status 192.168.1.42      # modèle, nom, série, logiciel, alimentation
-/0do key 192.168.1.42 Home    # envoie une touche (allowlist requise)
-/0do power 192.168.1.42 off   # éteint (allowlist requise)
-/0do list-allow               # état de la liste blanche
+/0do scan                        # découvre les appareils Roku du sous-réseau
+/0do status 192.168.1.42         # modèle, nom, série, logiciel, alimentation
+/0do apps 192.168.1.42           # applications installées (id + nom)
+/0do active 192.168.1.42         # application au premier plan
+/0do launch 192.168.1.42 Netflix # ouvre une application (allowlist requise)
+/0do search 192.168.1.42 météo   # recherche globale du Roku (allowlist requise)
+/0do key 192.168.1.42 Home       # envoie une touche (allowlist requise)
+/0do power 192.168.1.42 off      # éteint (allowlist requise)
+/0do power 192.168.1.42 on       # allume par Wake-on-LAN (allowlist + MAC)
+/0do wake 192.168.1.42 --dry-run # montre le paquet sans l'envoyer
+/0do list-allow                  # état de la liste blanche
+```
+
+L'allowlist accepte une **MAC** en seconde colonne, indispensable à l'allumage :
+
+```
+# .zer0/zer0do.allow
+192.168.1.42  A4:2B:8C:11:22:33   # TV du salon
 ```
 
 En CLI, sans passer par la TUI :
@@ -31,12 +44,16 @@ En CLI, sans passer par la TUI :
   marque est un protocole différent, avec appairage et identifiants. Le mod le
   dit au lieu de faire semblant.
 - **Aucune action sans allowlist** : les adresses autorisées vivent dans
-  `.zer0/zer0do.allow` (une IP par ligne, `#` pour commenter). Le fichier est
-  dans **ton** dépôt, pas dans celui du projet.
-- **Pas de « réparation »** : ce mod envoie des touches. Redémarrer un service
-  d'un appareil demanderait SSH et des identifiants — hors périmètre.
-- **Allumer** une TV n'est pas possible via ECP (il faudrait Wake-on-LAN) :
-  `power on` est refusé avec cette explication, plutôt qu'un faux succès.
+  `.zer0/zer0do.allow` (une IP par ligne, `#` pour commenter, MAC facultative).
+  Le fichier est dans **ton** dépôt, pas dans celui du projet.
+- **Pas de « réparation »** : ce mod envoie des touches et ouvre des
+  applications. Redémarrer un service d'un appareil demanderait SSH et des
+  identifiants — hors périmètre.
+- **Allumer** passe par **Wake-on-LAN** (paquet magique UDP, port 9). Il faut
+  (a) la MAC dans l'allowlist, (b) que l'appareil garde sa carte réseau
+  alimentée en veille — « Fast TV start » sur Roku. Si ça ne se réveille pas,
+  c'est que l'un des deux manque : le mod le dit, il ne prétend pas avoir
+  réussi (`--dry-run` montre le paquet).
 
 ### Dépendances
 

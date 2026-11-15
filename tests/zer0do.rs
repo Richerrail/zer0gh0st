@@ -121,6 +121,78 @@ fn an_allowed_address_passes_the_allowlist_check() {
 }
 
 #[test]
+fn wake_needs_a_mac_for_the_address() {
+    if !bash_available() {
+        return;
+    }
+    let d = tempdir("wol-nomac");
+    std::fs::create_dir_all(d.join(".zer0")).unwrap();
+    std::fs::write(d.join(".zer0/zer0do.allow"), "192.0.2.10\n").unwrap();
+    let (ok, text) = run(&["wake", "192.0.2.10"], &d);
+    assert!(!ok, "sans MAC, wake doit échouer : {text}");
+    assert!(text.contains("aucune MAC"), "{text}");
+    assert!(
+        text.contains("zer0do.allow"),
+        "il faut indiquer où l'ajouter : {text}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn wake_dry_run_builds_the_magic_packet_without_network() {
+    if !bash_available() {
+        return;
+    }
+    let d = tempdir("wol-dry");
+    std::fs::create_dir_all(d.join(".zer0")).unwrap();
+    std::fs::write(
+        d.join(".zer0/zer0do.allow"),
+        "# TV du salon\n192.0.2.10  A4:2B:8C:11:22:33\n",
+    )
+    .unwrap();
+    let (ok, text) = run(&["wake", "192.0.2.10", "--dry-run"], &d);
+    assert!(ok, "{text}");
+    assert!(text.contains("A4:2B:8C:11:22:33"), "{text}");
+    // 6 octets de 0xFF + 16 × 6 octets de MAC = 102.
+    assert!(text.contains("102 octets"), "taille du paquet : {text}");
+    assert!(text.contains("255.255.255.255"), "{text}");
+    // Et via `power on`, qui doit router vers Wake-on-LAN.
+    let (ok2, text2) = run(&["power", "192.0.2.10", "on", "--dry-run"], &d);
+    assert!(ok2, "{text2}");
+    assert!(text2.contains("Wake-on-LAN"), "{text2}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn an_invalid_mac_is_refused() {
+    if !bash_available() {
+        return;
+    }
+    let d = tempdir("wol-badmac");
+    std::fs::create_dir_all(d.join(".zer0")).unwrap();
+    std::fs::write(d.join(".zer0/zer0do.allow"), "192.0.2.10  pas-une-mac\n").unwrap();
+    let (ok, text) = run(&["wake", "192.0.2.10", "--dry-run"], &d);
+    assert!(!ok, "{text}");
+    assert!(text.contains("MAC invalide"), "{text}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn launch_and_search_are_gated_by_the_allowlist() {
+    if !bash_available() {
+        return;
+    }
+    let d = tempdir("actions-gated");
+    let (ok, text) = run(&["launch", "192.0.2.10", "Netflix"], &d);
+    assert!(!ok, "{text}");
+    assert!(text.contains("action refusée"), "{text}");
+    let (ok2, text2) = run(&["search", "192.0.2.10", "météo"], &d);
+    assert!(!ok2, "{text2}");
+    assert!(text2.contains("action refusée"), "{text2}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
 fn invalid_key_names_are_refused() {
     if !bash_available() {
         return;
