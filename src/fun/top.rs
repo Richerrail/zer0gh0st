@@ -6,7 +6,7 @@
 use std::time::{Duration, Instant};
 
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
@@ -47,10 +47,13 @@ impl Top {
         let block = Block::default()
             .borders(Borders::ALL)
             .title(" t0p ")
-            .border_style(Style::default().fg(Color::Cyan));
+            .border_style(Style::default().fg(crate::theme::border()));
         let text = render(&self.snap);
         f.render_widget(
-            Paragraph::new(text).block(block).wrap(Wrap { trim: false }),
+            Paragraph::new(text)
+                .style(Style::default().fg(crate::theme::text()))
+                .block(block)
+                .wrap(Wrap { trim: false }),
             area,
         );
     }

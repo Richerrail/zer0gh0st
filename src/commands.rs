@@ -26,6 +26,46 @@ pub fn set_theme(name: &str) -> Result<Vec<String>> {
     )])
 }
 
+/// `/theme <nom> default` : mémorise ce thème comme **défaut** (et l'applique).
+pub fn set_theme_default(name: &str) -> Result<Vec<String>> {
+    let selected = crate::theme::resolve(name)?;
+    let mut global = crate::config::load_global();
+    global.theme = Some(selected.id.to_string());
+    global.theme_default = Some(selected.id.to_string());
+    crate::config::save_global(&global)?;
+    crate::theme::activate(selected.id)?;
+    Ok(vec![format!(
+        "Thème par défaut : {} ({}) — appliqué",
+        selected.label, selected.id
+    )])
+}
+
+/// Thème par défaut configuré (`None` = aucun).
+pub fn theme_default() -> Option<String> {
+    crate::config::load_global()
+        .theme_default
+        .filter(|s| !s.trim().is_empty())
+}
+
+/// `/theme default` : revient au thème par défaut (à défaut, le premier de la
+/// liste : `ghost`).
+pub fn reset_theme() -> Result<Vec<String>> {
+    let target = theme_default().unwrap_or_else(|| {
+        crate::theme::ALL
+            .first()
+            .map(|t| t.id.to_string())
+            .unwrap_or_else(|| "ghost".to_string())
+    });
+    let mut lines = set_theme(&target)?;
+    let suffix = if theme_default().is_some() {
+        "défaut"
+    } else {
+        "premier thème de la liste (aucun défaut enregistré)"
+    };
+    lines.push(format!("({suffix})"));
+    Ok(lines)
+}
+
 // Tâches
 
 /// Commande `task`, indépendante de l'interface.

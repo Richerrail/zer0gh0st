@@ -1,4 +1,5 @@
 mod banner;
+mod blueprint;
 mod menu;
 mod neon;
 mod picker;
@@ -1303,10 +1304,23 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
         }
         "/theme" => {
             let requested = text.strip_prefix("/theme").unwrap_or("").trim();
-            if requested.is_empty() || requested.eq_ignore_ascii_case("list") {
-                open_theme_menu(app);
-            } else {
-                apply_theme(app, requested);
+            match parse_theme_cmd(requested) {
+                ThemeCmd::Menu => open_theme_menu(app),
+                ThemeCmd::Apply(name) => apply_theme(app, &name),
+                ThemeCmd::SetDefault(name) => {
+                    push_lines(
+                        app,
+                        crate::commands::set_theme_default(&name),
+                        "Thème non changé",
+                    );
+                    app.chat_cache.clear();
+                    app.chat_cache_len = 0;
+                }
+                ThemeCmd::Reset => {
+                    push_lines(app, crate::commands::reset_theme(), "Thème non changé");
+                    app.chat_cache.clear();
+                    app.chat_cache_len = 0;
+                }
             }
         }
         "/setup" => wizard::start(app, ui_tx, wizard::Step::Inference),
@@ -1331,6 +1345,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
              /provoke <rôle> <tâche>    Jimmy d'abord, puis provoque le vrai agent\n\
              /think                     active/desactive le raisonnement\n\
              /provider [list|keys|add|use|remove]  (sans arg : sélection)\n\
+             /theme [nom [default] | default | list]  thème actif / défaut\n\
              /provider add <id> <clé>   dépose la clé sur zer0-gw (sinon local)\n\
              /provider keys             clés détenues par zer0-gw\n\
              /provider use <id>         change de provider\n\
@@ -1860,14 +1875,18 @@ fn open_command_palette(app: &mut App) {
 
 /// Construit les entrées du menu de thèmes (avec aperçus de couleurs).
 fn theme_items(active: theme::Theme) -> Vec<picker::Item> {
+    let defaut = crate::commands::theme_default();
     theme::ALL
         .iter()
         .map(|item| {
-            let current = if item.id == active.id {
-                " · actif"
-            } else {
-                ""
-            };
+            let mut marks = String::new();
+            if item.id == active.id {
+                marks.push_str(" · actif");
+            }
+            if defaut.as_deref() == Some(item.id) {
+                marks.push_str(" · défaut");
+            }
+            let current = marks;
             picker::Item {
                 id: item.id.to_string(),
                 label: item.label.to_string(),
@@ -1914,22 +1933,52 @@ fn open_theme_menu(app: &mut App) {
 }
 
 /// Applique un thème immédiatement et le persiste dans la configuration.
-fn apply_theme(app: &mut App, name: &str) {
-    match crate::commands::set_theme(name) {
+/// Ce que `/theme <args>` doit faire (pur : testable sans config).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ThemeCmd {
+    /// Ouvrir le menu des thèmes.
+    Menu,
+    /// Appliquer (et persister comme thème actif).
+    Apply(String),
+    /// Appliquer **et** mémoriser comme défaut.
+    SetDefault(String),
+    /// Revenir au thème par défaut.
+    Reset,
+}
+
+/// `/theme` → menu · `/theme ghost` → appliquer · `/theme ghost default` →
+/// défaut · `/theme default` (ou `reset`) → revenir au défaut.
+pub fn parse_theme_cmd(args: &str) -> ThemeCmd {
+    let mut it = args.split_whitespace();
+    match (it.next(), it.next()) {
+        (None, _) | (Some("list"), _) => ThemeCmd::Menu,
+        (Some("default" | "reset"), None) => ThemeCmd::Reset,
+        (Some(name), Some("default" | "set" | "defaut")) => ThemeCmd::SetDefault(name.to_string()),
+        (Some(name), _) => ThemeCmd::Apply(name.to_string()),
+    }
+}
+
+/// Pousse les lignes d'un changement de thème (ou l'erreur, préfixée).
+fn push_lines(app: &mut App, res: anyhow::Result<Vec<String>>, prefix: &str) {
+    match res {
         Ok(lines) => {
             // Signature sonore du thème (si les sons sont activés).
             crate::sound::event(crate::sound::Event::Theme(theme::active().id.to_string()));
-            // Les lignes de conversation sont mises en cache avec leurs styles.
-            app.chat_cache.clear();
-            app.chat_cache_len = 0;
             for line in lines {
                 app.messages.push(ChatMessage::notice(line));
             }
         }
         Err(e) => app
             .messages
-            .push(ChatMessage::notice(format!("Thème non changé : {e}"))),
+            .push(ChatMessage::notice(format!("{prefix} : {e}"))),
     }
+}
+
+fn apply_theme(app: &mut App, name: &str) {
+    push_lines(app, crate::commands::set_theme(name), "Thème non changé");
+    // Les lignes de conversation sont en cache avec leurs styles.
+    app.chat_cache.clear();
+    app.chat_cache_len = 0;
 }
 
 /// Récupère la liste des modèles du provider actif puis ouvre le sélecteur.
@@ -4683,7 +4732,15 @@ fn draw_agent(f: &mut Frame, area: Rect, app: &mut App) {
     }
 
     draw_location(f, chunks[2]);
-    draw_chat(f, chunks[3], app);
+    // Thème `paper` : le chat vit dans un champ de plan (cadre gradué + trame),
+    // donc inséré d'une cellule. Les autres thèmes n'y touchent pas.
+    if blueprint::active() {
+        blueprint::draw(f, chunks[3], " № 0042 · PLAN DE COUPE ");
+        let inner = blueprint::inner(chunks[3]);
+        draw_chat(f, inner, app);
+    } else {
+        draw_chat(f, chunks[3], app);
+    }
 
     // Barre de saisie + boutons 0chan / micro à droite (visibles dès 60 colonnes).
     if chunks[4].width >= 60 {
@@ -4834,15 +4891,15 @@ fn draw_chat(f: &mut Frame, area: Rect, app: &mut App) {
                         let preview: String = text.lines().take(3).collect::<Vec<_>>().join("\n");
                         push_message(&mut lines, &m.role, &preview, w);
                         if total > 3 {
-                            push_message(
-                                &mut lines,
-                                "notice",
-                                &format!(
-                                    "   … {} ligne(s) de plus — clic droit ou Ctrl+O",
-                                    total - 3
-                                ),
-                                w,
-                            );
+                            // Sur le thème paper, des hachures de dessin
+                            // technique au lieu de points de suspension.
+                            let more = total - 3;
+                            let text = if theme::active().id == "paper" {
+                                format!("   ▚▚▚ {more} ligne(s) — clic droit ou Ctrl+O")
+                            } else {
+                                format!("   … {more} ligne(s) de plus — clic droit ou Ctrl+O")
+                            };
+                            push_message(&mut lines, "notice", &text, w);
                         }
                     }
                     let rendered: Vec<Line<'static>> = lines[before..].to_vec();
@@ -5653,12 +5710,14 @@ fn history_down(app: &mut App) {
 }
 
 fn draw_footer(f: &mut Frame, area: Rect, app: &mut App) {
-    let key = Style::default().fg(Color::Black).bg(theme::highlight());
+    // `chip_fg` : le texte des pastilles suit le thème (noir sur pastille
+    // claire, papier sur pastille encre).
+    let key = Style::default().fg(theme::chip_fg()).bg(theme::highlight());
     let txt = Style::default().fg(theme::dim());
     // État visible : `code_exec` lance de vraies commandes, l'écran doit dire
     // s'il est armé (c'était le trou de sécurité de l'audit).
     let rw = if app.read_write {
-        Style::default().fg(Color::Black).bg(theme::warning())
+        Style::default().fg(theme::chip_fg()).bg(theme::warning())
     } else {
         txt
     };
@@ -5667,13 +5726,24 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &mut App) {
     } else {
         // Désarmé : clignote jaune/rouge (~2 Hz) pour que ça se voie.
         let warn = (app.anim_phase / 30).is_multiple_of(2);
-        Style::default().fg(Color::Black).bg(if warn {
+        Style::default().fg(theme::chip_fg()).bg(if warn {
             theme::warning()
         } else {
             theme::danger()
         })
     };
-    let spans = vec![
+    let mut spans: Vec<Span> = Vec::new();
+    // Cartouche de plan (thème paper) : la signature visuelle du thème, en tête
+    // du pied de page. Les autres thèmes gardent le pied de page inchangé.
+    if theme::active().id == "paper" {
+        spans.push(Span::styled(
+            " ⟐ PLAN ",
+            Style::default().fg(theme::accent()),
+        ));
+        spans.push(Span::styled("ÉCH. 1:1 ", txt));
+        spans.push(Span::styled("│ ", Style::default().fg(theme::border())));
+    }
+    spans.extend(vec![
         Span::styled(" F6 ", key),
         Span::styled(" Chats  ", txt),
         Span::styled(" F7 ", key),
@@ -5692,7 +5762,7 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &mut App) {
         Span::styled(" Mic  ", txt),
         Span::styled(" Ctrl+O ", key),
         Span::styled(" détail ", txt),
-    ];
+    ]);
     // Le vote (👍/👎) occupe la droite du pied de page : c'est le bas-droite
     // de l'écran principal. Les raccourcis gardent la place restante.
     let cols = Layout::default()
@@ -6091,6 +6161,24 @@ mod tests {
             }
         }
         (0, y)
+    }
+
+    #[test]
+    fn theme_arguments_are_parsed_without_touching_the_config() {
+        assert_eq!(parse_theme_cmd(""), ThemeCmd::Menu);
+        assert_eq!(parse_theme_cmd("list"), ThemeCmd::Menu);
+        assert_eq!(parse_theme_cmd("ghost"), ThemeCmd::Apply("ghost".into()));
+        assert_eq!(
+            parse_theme_cmd("paper default"),
+            ThemeCmd::SetDefault("paper".into())
+        );
+        assert_eq!(
+            parse_theme_cmd("castle set"),
+            ThemeCmd::SetDefault("castle".into())
+        );
+        // `/theme default` (sans nom) = revenir au défaut, pas l'appliquer.
+        assert_eq!(parse_theme_cmd("default"), ThemeCmd::Reset);
+        assert_eq!(parse_theme_cmd("reset"), ThemeCmd::Reset);
     }
 
     #[test]

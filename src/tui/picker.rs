@@ -155,7 +155,13 @@ pub fn draw(f: &mut Frame, area: Rect, p: &Picker) {
         .iter()
         .map(|&i| {
             let it = &p.items[i];
-            let mut spans = vec![Span::raw(format!(" {:<28}", truncate(&it.label, 28)))];
+            // Couleur explicite : sans elle, le texte prend le fg par défaut du
+            // terminal — clair sur un terminal sombre, donc illisible sur le
+            // fond papier du thème `paper`.
+            let mut spans = vec![Span::styled(
+                format!(" {:<28}", truncate(&it.label, 28)),
+                Style::default().fg(theme::text()),
+            )];
             if !it.swatches.is_empty() {
                 spans.push(Span::raw(" "));
                 for color in &it.swatches {
@@ -163,7 +169,10 @@ pub fn draw(f: &mut Frame, area: Rect, p: &Picker) {
                 }
                 spans.push(Span::raw(" "));
             }
-            spans.push(Span::raw(truncate(&it.note, 54)));
+            spans.push(Span::styled(
+                truncate(&it.note, 54),
+                Style::default().fg(theme::dim()),
+            ));
             ListItem::new(Line::from(spans))
         })
         .collect();

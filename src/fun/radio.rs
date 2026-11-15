@@ -226,9 +226,14 @@ impl Radio {
     }
 
     pub fn draw(&self, f: &mut Frame, area: Rect) {
+        // Même raison que `bintime` : le spectre est vert/cyan sur noir.
+        f.render_widget(
+            Block::default().style(Style::default().bg(Color::Rgb(6, 10, 16))),
+            area,
+        );
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Magenta))
+            .border_style(Style::default().fg(crate::theme::border()))
             .title(
                 " ZER0 RADIO — ↑↓ choisir · Entrée jouer · n/p suiv./préc. · s stop · q quitter ",
             );

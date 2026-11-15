@@ -71,6 +71,13 @@ impl BinTime {
     }
 
     pub fn draw(&self, f: &mut Frame, area: Rect) {
+        // Fond du tube : les couleurs phosphore sont pensées pour du noir. Sur
+        // un thème clair (`paper`), du vert sur blanc serait illisible — on
+        // peint donc le tube, quel que soit le thème.
+        f.render_widget(
+            Block::default().style(Style::default().bg(Color::Rgb(6, 18, 10))),
+            area,
+        );
         let gs = [
             Self::group("HEURE", self.hms.0),
             Self::group("MIN", self.hms.1),

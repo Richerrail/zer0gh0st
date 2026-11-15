@@ -212,7 +212,7 @@ par `ZER0_EXEC_TIMEOUT` ou par appel (`timeout_secs`).
 | **GPU** | `-ngl` automatique : CUDA/Vulkan/ROCm via `llama-server --list-devices`, **Metal** sur macOS ; `ZER0_GPU_LAYERS=auto\|0\|N` |
 | **Thermique** | Linux : alerte 80 °C, génération coupée à 88 °C, serveur arrêté à 92 °C (`ZER0_TEMP_*`) |
 | **Explorateur** | mod `0file` dans le panneau latéral : dossiers/fichiers, navigation, tailles, `c` copie le chemin absolu, `.` cachés. Lecture seule |
-| **Thèmes** | `/theme` : `ghost` (historique), `noir`, `noir-rouge`, **`castle`** (Wolfenstein 3D : acier bleu, rouge sang, banner acier) ; persistant |
+| **Thèmes** | `/theme` : `ghost` (historique), `noir`, `noir-rouge`, **`castle`** (Wolfenstein 3D), **`paper`** (feuille blanche, encres bleue/rouge/verte, cartouche « plan ») ; persistant |
 | **Sons** | packs WAV **embarqués** (CC0, synthétisés) : tick, switch, porte, erreur, fin de tour ; **désactivés par défaut**, `/sound on` |
 | **zer0CL** | shell dans le panneau latéral (`/0cl`) : exécute des commandes **tapées par toi**, sortie en direct, historique ↑↓, `cd`, `clear`. Aucune dépendance, aucun accès du modèle |
 | **Moniteur** | mod `t0p` dans le panneau latéral (comme radio/bintime) : CPU (global + cœurs), RAM/swap, charge, températures, top 8 processus. Aussi `zer0 t0p [--watch]` en CLI |
@@ -443,11 +443,18 @@ zer0 kb embed status         # serveur, modèle, empreinte
 ### Thèmes et sons
 
 ```bash
-/theme              # menu avec aperçus (ghost, noir, noir-rouge, castle)
+/theme              # menu avec aperçus (ghost, noir, noir-rouge, castle, paper)
 /theme castle       # applique directement (alias : wolf, wolf3d, acier)
+/theme paper default   # mémorise `paper` comme thème PAR DÉFAUT (et l'applique)
+/theme default      # revient au thème par défaut (sinon : le premier, `ghost`)
 /sound on           # active les sons d'interface (désactivés par défaut)
 /sound off
 ```
+
+Le thème **actif** et le thème **par défaut** sont deux réglages distincts
+(`theme` et `theme_default` dans `config.toml`) : on peut essayer `paper`,
+revenir à `ghost`, puis `/theme default` pour retrouver sa préférence sans se
+souvenir du nom. Le menu des thèmes marque les deux (`· actif`, `· défaut`).
 
 Le pack `castle` (WAV 16 bits, originaux CC0) est embarqué dans le binaire :
 aucun fichier à télécharger, aucun son si aucun lecteur audio n'est présent.
@@ -516,10 +523,31 @@ La TUI propose un menu de thèmes accessible de deux façons :
 | **Noir** | `noir` | noir, gris et blanc, minimaliste |
 | **Noir & Rouge** | `noir-rouge` | noir profond, rouge vif et rose pâle |
 | **Castle** | `castle` | acier bleu et rouge sang (Wolfenstein 3D) + sons rétro |
+| **Paper** | `paper` | feuille blanche, encres bleue (accent), rouge (danger), verte (succès), noire (texte) — style dessin industriel |
 
 Le choix est appliqué immédiatement à toute l'interface (chat, menus, picker,
 assistant et Zero-chan), puis persisté dans `~/.config/zer0/config.toml` avec
 `theme = "noir-rouge"`.
+
+#### `paper` — feuille blanche, dessin industriel
+
+Le seul thème **clair**, et le seul à changer la structure en plus des couleurs :
+
+- **fond blanc papier forcé** (`Rgb(250,249,245)`) — pas `Reset` : un thème clair
+  hérité sur un terminal sombre serait illisible ;
+- **banner en blocs 3D** : lettres pleines avec **arête éclairée** (haut/gauche)
+  et **ombre** (bas/droite), calculées sur le masque des glyphes — arc-en-ciel au
+  repos, **4 encres** (bleu, rouge, vert, ocre) qui défilent quand le modèle
+  travaille ;
+- **champ de plan** : cadre fin gradué, cartouche `№ 0042 · PLAN DE COUPE` dans
+  le bord supérieur, trame de points dans les zones vides (le chat est inséré
+  d'une cellule, uniquement sur ce thème) ;
+- **cartouche en pied de page** : `⟐ PLAN  ÉCH. 1:1 │ …` avant les raccourcis ;
+- **hachures** `▚▚▚` au lieu de `…` sur les sorties d'outils repliées.
+
+Un test vérifie le **contraste** de chaque thème (≥ 4,5:1 pour le texte, ≥ 3:1
+pour les traits) : `paper` a fait apparaître des traits et des rouges un peu
+trop sombres dans `noir`, `noir-rouge` et `castle`, corrigés au passage.
 
 ### Mise à jour
 
