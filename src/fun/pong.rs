@@ -133,14 +133,16 @@ impl Pong {
         for y in 0..H {
             let mut spans: Vec<Span> = Vec::with_capacity(W as usize);
             for x in 0..W {
+                // Couleurs du thème : `Color::White` pour la raquette du joueur
+                // était invisible sur le fond papier (blanc sur blanc).
                 let (ch, color) = if x == 1 && (y - self.player).abs() <= PADDLE {
-                    ("█", Color::White)
+                    ("█", crate::theme::accent())
                 } else if x == W - 2 && (y - self.agent).abs() <= PADDLE {
-                    ("█", Color::Red)
+                    ("█", crate::theme::danger())
                 } else if x == self.bx && y == self.by {
-                    ("O", Color::Yellow)
+                    ("O", crate::theme::warning())
                 } else if x == W / 2 && y % 2 == 0 {
-                    (".", Color::DarkGray)
+                    (".", crate::theme::border())
                 } else {
                     (" ", Color::Reset)
                 };
@@ -167,7 +169,7 @@ impl Pong {
         };
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Green))
+            .border_style(Style::default().fg(crate::theme::border()))
             .title(title);
         let p = Paragraph::new(lines)
             .block(block)
