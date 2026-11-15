@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 use ratatui::Frame;
 
 const PHOSPHOR: Color = Color::Rgb(0, 255, 154);
@@ -226,6 +226,61 @@ impl FileExplorer {
         self.status = Some((msg.into(), Instant::now(), ok));
     }
 
+    /// Une entrée = **une seule rangée**, quelle que soit la largeur.
+    ///
+    /// Bug corrigé : la ligne était composée puis rendue avec `Wrap`, si bien
+    /// qu'un nom long la faisait passer sur deux rangées. La fenêtre glissante
+    /// (`take(self.rows)`) affichait alors moins d'entrées que prévu et les
+    /// derniers dossiers restaient cachés alors que la sélection descendait.
+    /// On calcule désormais la largeur disponible **avant** de composer, et on
+    /// n'enveloppe plus rien.
+    fn build_line(e: &Entry, selected: bool, width: usize) -> Line<'static> {
+        let (mark, color) = if e.up {
+            ("↰", DIM)
+        } else if e.is_dir {
+            ("▸", PHOSPHOR)
+        } else {
+            ("·", DIM)
+        };
+        let size = if e.is_dir {
+            "<DIR>".to_string()
+        } else {
+            crate::monitor::bytes(e.size)
+        };
+        // 2 (curseur) + 2 (marque) + 1 (espace) + taille + 1 (espace final)
+        let fixed = 2 + 2 + 1 + unicode_width::UnicodeWidthStr::width(size.as_str()) + 1;
+        let name_w = width.saturating_sub(fixed);
+        let mut name = e.name.clone();
+        if unicode_width::UnicodeWidthStr::width(name.as_str()) > name_w {
+            name = truncate_width(&name, name_w);
+        }
+        let pad = name_w.saturating_sub(unicode_width::UnicodeWidthStr::width(name.as_str()));
+        Line::from(vec![
+            Span::styled(
+                if selected { "▶ " } else { "  " },
+                Style::default().fg(AMBER).bg(DARK),
+            ),
+            Span::styled(format!("{mark} "), Style::default().fg(color).bg(DARK)),
+            Span::styled(
+                name,
+                Style::default()
+                    .fg(if selected { Color::Black } else { PHOSPHOR })
+                    .bg(if selected { PHOSPHOR } else { DARK })
+                    .add_modifier(if e.is_dir {
+                        Modifier::BOLD
+                    } else {
+                        Modifier::empty()
+                    }),
+            ),
+            Span::styled(
+                format!("{}{size} ", " ".repeat(pad)),
+                Style::default()
+                    .fg(if selected { Color::Black } else { DIM })
+                    .bg(if selected { PHOSPHOR } else { DARK }),
+            ),
+        ])
+    }
+
     pub fn draw(&mut self, f: &mut Frame, area: Rect) {
         let block = Block::default()
             .borders(Borders::ALL)
@@ -263,7 +318,10 @@ impl FileExplorer {
             rows[0],
         );
 
-        // Liste : fenêtre glissante sur `self.scroll`.
+        // Liste : fenêtre glissante sur `self.scroll`. Une entrée = une rangée
+        // (garanti par `build_line`), donc `take(self.rows)` montre exactement
+        // `rows` entrées — avant, un nom long passait sur deux rangées et les
+        // derniers dossiers restaient cachés.
         let mut lines: Vec<Line> = Vec::new();
         for (i, e) in self
             .entries
@@ -272,55 +330,10 @@ impl FileExplorer {
             .skip(self.scroll)
             .take(self.rows)
         {
-            let selected = i == self.sel;
-            let (mark, color) = if e.up {
-                ("↰", DIM)
-            } else if e.is_dir {
-                ("▸", PHOSPHOR)
-            } else {
-                ("·", DIM)
-            };
-            let size = if e.is_dir {
-                "<DIR>".to_string()
-            } else {
-                crate::monitor::bytes(e.size)
-            };
-            let name_w = rows[1].width.saturating_sub(6) as usize;
-            let mut name = e.name.clone();
-            if unicode_width::UnicodeWidthStr::width(name.as_str()) > name_w {
-                name = truncate_width(&name, name_w);
-            }
-            let pad = name_w.saturating_sub(unicode_width::UnicodeWidthStr::width(name.as_str()));
-            let line = Line::from(vec![
-                Span::styled(
-                    if selected { "▶ " } else { "  " },
-                    Style::default().fg(AMBER).bg(DARK),
-                ),
-                Span::styled(format!("{mark} "), Style::default().fg(color).bg(DARK)),
-                Span::styled(
-                    name,
-                    Style::default()
-                        .fg(if selected { Color::Black } else { PHOSPHOR })
-                        .bg(if selected { PHOSPHOR } else { DARK })
-                        .add_modifier(if e.is_dir {
-                            Modifier::BOLD
-                        } else {
-                            Modifier::empty()
-                        }),
-                ),
-                Span::styled(
-                    format!("{}{size} ", " ".repeat(pad)),
-                    Style::default()
-                        .fg(if selected { Color::Black } else { DIM })
-                        .bg(if selected { PHOSPHOR } else { DARK }),
-                ),
-            ]);
-            lines.push(line);
+            lines.push(Self::build_line(e, i == self.sel, rows[1].width as usize));
         }
         f.render_widget(
-            Paragraph::new(lines)
-                .style(Style::default().bg(DARK))
-                .wrap(Wrap { trim: false }),
+            Paragraph::new(lines).style(Style::default().bg(DARK)),
             rows[1],
         );
 
@@ -467,5 +480,84 @@ mod tests {
         let s = truncate_width("un nom de fichier très long", 10);
         assert!(unicode_width::UnicodeWidthStr::width(s.as_str()) <= 10);
         assert!(s.ends_with('…'));
+    }
+}
+
+#[cfg(test)]
+mod width_tests {
+    use super::*;
+
+    fn entry(name: &str, is_dir: bool) -> Entry {
+        Entry {
+            name: name.to_string(),
+            path: PathBuf::from(name),
+            is_dir,
+            size: 12_345,
+            up: false,
+        }
+    }
+
+    #[test]
+    fn a_line_never_exceeds_the_available_width() {
+        // C'est la garantie qui empêche la sélection de sortir de la fenêtre :
+        // si une ligne passait sur deux rangées, `take(rows)` montrerait moins
+        // d'entrées que la hauteur disponible, et les derniers dossiers
+        // resteraient invisibles.
+        for width in [20usize, 30, 40, 60, 100] {
+            for (name, is_dir) in [
+                ("a", true),
+                ("dossier-de-nom-tres-long-qui-deborde", true),
+                (
+                    "fichier_avec_un_nom_encore_plus_long_que_la_largeur.md",
+                    false,
+                ),
+                ("accentué_é_è_à.txt", false),
+                ("日本語のファイル名.txt", false),
+            ] {
+                let line = FileExplorer::build_line(&entry(name, is_dir), true, width);
+                assert!(
+                    line.width() <= width,
+                    "largeur {width} dépassée ({}) par {name:?}",
+                    line.width()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn long_names_are_truncated_and_the_size_stays_visible() {
+        let e = entry("un-nom-vraiment-tres-long-pour-un-dossier", true);
+        let line = FileExplorer::build_line(&e, false, 30);
+        let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
+        assert!(text.contains("un-nom"), "{text}");
+        assert!(
+            text.contains("<DIR>"),
+            "la taille doit rester visible : {text}"
+        );
+    }
+
+    #[test]
+    fn a_visible_window_shows_one_entry_per_row() {
+        // 30 dossiers pour 5 rangées : en descendant jusqu'au dernier, il doit
+        // être dans la fenêtre (`scroll..scroll+rows`).
+        let mut fe = FileExplorer {
+            cwd: PathBuf::from("."),
+            entries: (0..30).map(|_| entry("d", true)).collect(),
+            sel: 0,
+            scroll: 0,
+            rows: 5,
+            show_hidden: false,
+            status: None,
+        };
+        for _ in 0..30 {
+            fe.move_down();
+            let last = fe.sel;
+            assert!(
+                last >= fe.scroll && last < fe.scroll + fe.rows,
+                "sélection {last} hors de la fenêtre {}..{}",
+                fe.scroll,
+                fe.scroll + fe.rows
+            );
+        }
     }
 }
