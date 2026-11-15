@@ -1,3 +1,52 @@
+## v0.7.51 — Thème `paper` (feuille de plan) et correctifs d'affichage (2026-11-15)
+
+### Thème `paper` — feuille blanche, dessin industriel
+
+Cinquième thème, et le premier **clair** : `/theme paper`.
+
+- **fond blanc papier forcé** (`Rgb(250,249,245)`), encres **bleue** (accent),
+  **rouge** (danger), **verte** (succès) et **noire** (texte) ; `warning` en ocre
+  — le jaune vif sur blanc est illisible.
+- **banner en blocs 3D** : l'arête claire (haut/gauche) et l'ombre (bas/droite)
+  sont calculées sur le **masque** des glyphes, donc valables pour toutes les
+  lettres. Coloration : **arc-en-ciel au repos** (assombri pour rester lisible
+  sur blanc), **4 encres qui défilent** quand le modèle travaille.
+- **champ de plan** : cadre fin gradué (`┬ ┴ ├ ┤ ┼`), cartouche
+  `№ 0042 · PLAN DE COUPE` dans le bord supérieur, trame de points dans les
+  cellules vides. Le chat est inséré d'une cellule — uniquement sur ce thème.
+- **cartouche** en pied de page (`⟐ PLAN  ÉCH. 1:1 │`) et **hachures** `▚▚▚` au
+  lieu de `…` sur les sorties d'outils repliées.
+
+### Thème par défaut distinct du thème actif
+
+- `/theme <nom> default` mémorise le thème comme **défaut** (et l'applique) ;
+- `/theme default` (ou `reset`) y revient — sans défaut enregistré, c'est le
+  premier de la liste (`ghost`), et le message le dit ;
+- le menu `/theme` marque `· actif` **et** `· défaut` (`theme` et `theme_default`
+  sont deux réglages distincts dans `config.toml`).
+
+### Lisibilité : plus rien de « pâle »
+
+- la palette `/` et `t0p` rendaient du texte **sans couleur explicite** : elle
+  venait du fg par défaut du terminal (clair sur un terminal sombre), donc
+  illisible sur le fond papier. Texte et notes ont désormais leur couleur.
+- `bintime` et `radio` peignent leur **fond de tube** (phosphore vert / spectre)
+  au lieu de flotter sur le papier ; `pong` n'utilise plus de blanc pour la
+  raquette du joueur (invisible sur fond blanc) mais les rôles du thème.
+- nouveau champ de thème `chip_fg` : le texte des pastilles du pied de page
+  était `Color::Black` en dur.
+- **test de contraste** (WCAG) sur chaque thème : il a révélé des traits et des
+  rouges trop sombres dans `noir` (bordure 2,37:1), `noir-rouge` (`tool`
+  3,68:1) et `castle` (accent 2,89:1, bordure 2,07:1), corrigés.
+
+### `/0file` : la sélection ne sort plus de la fenêtre
+
+Un nom long faisait passer une entrée sur **deux rangées** (`Wrap` + largeur
+dépassée), donc `take(rows)` n'affichait qu'une entrée sur deux : les derniers
+dossiers restaient cachés alors que la sélection descendait. La largeur est
+maintenant calculée avant composition, sans `Wrap`, et un test vérifie
+l'invariant `scroll <= sel < scroll + rows` à chaque pas.
+
 ## v0.7.50 — `zer0do` : les appareils du réseau, depuis la TUI (2026-11-15)
 
 Premier **mod fourni** : `mods/zer0do/`, exposé par `/0do`. Il ne pilote que les
