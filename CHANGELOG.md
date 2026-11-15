@@ -1,3 +1,47 @@
+## v0.7.50 — `zer0do` : les appareils du réseau, depuis la TUI (2026-11-15)
+
+Premier **mod fourni** : `mods/zer0do/`, exposé par `/0do`. Il ne pilote que les
+appareils qui parlent **Roku ECP** (port 8060) — et le dit au lieu de faire
+semblant pour les autres marques.
+
+```
+/0do scan                  # appareils Roku du /24 : IP, modèle, état, MAC, nom
+/0do status <ip>           # série, logiciel, alimentation, réseau, MAC, app active (id)
+/0do apps <ip>             # applications installées (id + nom)
+/0do active <ip>           # application au premier plan (+ id)
+/0do launch <ip> <id|nom>  # ouvre une application
+/0do search <ip> <texte>   # recherche globale du Roku
+/0do key <ip> <TOUCHE>     # touches (Home, Select, InputHDMI2, VolumeUp…)
+/0do power <ip> on|off|toggle
+/0do wake <ip> [--dry-run] # Wake-on-LAN seul
+/0do list-allow            # liste blanche d'actions
+```
+
+- **Allumage en deux temps** : si l'appareil garde son réseau en veille, la
+  touche **`Power`** le réveille par ECP (vérifié : `DisplayOff` → `PowerOn`) ;
+  sinon **Wake-on-LAN** (paquet magique UDP) avec la MAC de l'interface active.
+  `power on` lit d'abord l'état : sur un appareil déjà allumé il n'envoie **rien**
+  (la touche `Power` est une bascule — l'envoyer éteindrait la TV).
+- **Aucune action sans allowlist** : `.zer0/zer0do.allow` (IP, MAC facultative),
+  écrite par l'humain. Sans ce fichier, `key`/`power`/`launch`/`search`/`wake`
+  refusent, en donnant le chemin exact à créer.
+- **Pas de mensonge sur les échecs** : Wake-on-LAN affiche une ligne par
+  destination (`✅`/`❌` avec la raison — `bash` ne pose pas `SO_BROADCAST`, donc
+  le broadcast échoue en `EACCES` et `printf` peut malgré tout renvoyer 0) ; une
+  MAC d'allowlist qui ne correspond pas à l'interface active est signalée et la
+  MAC du réseau est utilisée.
+- **Journalisé** : chaque appel écrit dans `audit.jsonl` (`tool = 0do`,
+  arguments complets) ; le script tourne avec l'environnement **nettoyé des
+  secrets**, sous timeout, et ses arguments sont échappés (pas d'injection par
+  un identifiant d'appareil).
+- **`scan`** ne fait **qu'une** requête par appareil (la réponse est conservée) :
+  plus de « (inconnu) » quand une TV en veille réseau répond une fois sur deux.
+
+Côté CI : `bash -n` sur le script est désormais testé (une apostrophe dans une
+chaîne simple l'avait cassé deux fois), et le choix de la MAC selon
+`network-type` est vérifié par un **faux Roku** en boucle locale — sans réseau
+ni téléviseur.
+
 ## v0.7.49 — Zero-chan visible même avec un mod ouvert (2026-11-14)
 
 - **fix(0chan)** : le bloc d'état de Zero-chan disparaissait dès qu'un mod
