@@ -193,6 +193,45 @@ fn launch_and_search_are_gated_by_the_allowlist() {
 }
 
 #[test]
+fn digits_in_key_names_are_accepted() {
+    if !bash_available() {
+        return;
+    }
+    let d = tempdir("key-digits");
+    std::fs::create_dir_all(d.join(".zer0")).unwrap();
+    std::fs::write(d.join(".zer0/zer0do.allow"), "192.0.2.10\n").unwrap();
+    // `InputHDMI2` est une touche légitime : elle ne doit pas être refusée par
+    // la validation (l'échec doit venir du réseau, pas du format).
+    let (ok, text) = run(&["key", "192.0.2.10", "InputHDMI2"], &d);
+    assert!(!ok, "aucun appareil ne doit répondre : {text}");
+    assert!(!text.contains("touche invalide"), "{text}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn literal_key_typing_is_refused_with_an_alternative() {
+    if !bash_available() {
+        return;
+    }
+    let d = tempdir("key-lit");
+    std::fs::create_dir_all(d.join(".zer0")).unwrap();
+    std::fs::write(d.join(".zer0/zer0do.allow"), "192.0.2.10\n").unwrap();
+    let (ok, text) = run(&["key", "192.0.2.10", "Lit_a"], &d);
+    assert!(!ok, "{text}");
+    assert!(text.contains("n'est pas gérée"), "{text}");
+    assert!(
+        text.contains("search"),
+        "il faut proposer l'alternative : {text}"
+    );
+    // Régression : un message avec des backticks faisait exécuter du shell.
+    assert!(
+        !text.contains("command substitution") && !text.contains("syntax error"),
+        "le message d'erreur s'exécute au lieu de s'afficher : {text}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
 fn invalid_key_names_are_refused() {
     if !bash_available() {
         return;

@@ -31,6 +31,29 @@ L'allowlist accepte une **MAC** en seconde colonne, indispensable à l'allumage 
 192.168.1.42  A4:2B:8C:11:22:33   # TV du salon
 ```
 
+### Touches (`/0do key <ip> <TOUCHE>`)
+
+| Famille | Touches |
+|---|---|
+| Navigation | `Up` `Down` `Left` `Right` `Select` `Back` `Home` `Info` |
+| Lecture | `Play` `Rev` `Fwd` `InstantReplay` |
+| Claviers | `Enter` `Backspace` `Search` |
+| Son | `VolumeUp` `VolumeDown` `VolumeMute` |
+| Entrées | `InputHDMI1` … `InputHDMI4`, `InputTuner`, `InputAV1` |
+| Alimentation | `Power` (bascule), `PowerOff` |
+
+Codes observés sur un appareil réel :
+
+| Code | Signification |
+|---|---|
+| `200` / `204` | touche acceptée |
+| `400` | touche inconnue de ce modèle |
+| `000` | aucune réponse : touche non gérée en ECP sur ce modèle (le volume passe souvent **en infrarouge**), ou appareil hors ligne |
+
+Le mod **rapporte le code** au lieu de prétendre avoir réussi. La saisie
+caractère par caractère (`Lit_*`) **n'est pas gérée** : utilise
+`/0do search <ip> <texte>`.
+
 En CLI, sans passer par la TUI :
 
 ```bash

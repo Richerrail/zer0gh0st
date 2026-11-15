@@ -49,8 +49,22 @@ facultative donne la MAC, nécessaire à `power on` :
   192.168.1.42  A4:2B:8C:11:22:33
 Sans ce fichier, toute action est refusée.
 
-Limites (v1) : seuls les appareils qui parlent Roku ECP (port 8060) sont
-pilotés. Chromecast/Android TV/Tizen/webOS ne le sont pas.
+Touches utiles (`key <ip> <TOUCHE>`) — codes observés sur un Roku réel :
+  200/204 touche acceptée · 400 touche inconnue du modèle
+  000     aucune réponse : touche non gérée en ECP (souvent le volume, qui
+          passe en infrarouge sur certains modèles) ou appareil hors ligne
+
+  navigation : Up Down Left Right Select Back Home Info
+  lecture    : Play Rev Fwd InstantReplay
+  claviers   : Enter Backspace Search
+  son        : VolumeUp VolumeDown VolumeMute
+  entrées    : InputHDMI1 InputHDMI2 InputHDMI3 InputHDMI4 InputTuner InputAV1
+  alimentation : Power (bascule) PowerOff
+
+Non géré : la saisie caractère par caractère (`Lit_*`) — utilise `search`.
+
+Limites : seuls les appareils qui parlent Roku ECP (port 8060) sont pilotés.
+Chromecast/Android TV/Tizen/webOS ne le sont pas.
 EOF
 }
 
@@ -227,7 +241,11 @@ cmd_key() {
     need_curl
     local ip="$1" key="$2"
     case "$key" in
-        *[!A-Za-z]*|"") die "touche invalide : $key (lettres seulement, ex. Home)" ;;
+        Lit_*)
+            die "la saisie caractère par caractère (Lit_*) n'est pas gérée :
+utilise « $PROG search <ip> <texte> », qui passe par la recherche du Roku." ;;
+        ''|*[!A-Za-z0-9]*)
+            die "touche invalide : $key (lettres et chiffres seulement, ex. Home, InputHDMI2)" ;;
     esac
     require_allowed "$ip"
     local code
@@ -236,7 +254,12 @@ cmd_key() {
     if [ "$code" = "200" ] || [ "$code" = "204" ]; then
         printf 'Touche %s envoyée à %s (HTTP %s).\n' "$key" "$ip" "$code"
     else
-        printf '%s : la touche n'"'"'a pas été acceptée (HTTP %s).\n' "$ip" "${code:-aucune réponse}"
+        case "$code" in
+            400) printf '%s : touche inconnue de ce modèle (%s).\n' "$ip" "$key" ;;
+            000|"") printf '%s : aucune réponse — touche non gérée en ECP sur ce modèle\n' "$ip"
+                    printf '(le volume passe souvent en infrarouge), ou appareil hors ligne.\n' ;;
+            *) printf '%s : la touche %s n'"'"'a pas été acceptée (HTTP %s).\n' "$ip" "$key" "$code" ;;
+        esac
         return 1
     fi
 }
