@@ -77,10 +77,19 @@ En CLI, sans passer par la TUI :
 - **Pas de « réparation »** : ce mod envoie des touches et ouvre des
   applications. Redémarrer un service d'un appareil demanderait SSH et des
   identifiants — hors périmètre.
-- **Allumer** passe par **Wake-on-LAN** (paquet magique UDP, port 9), envoyé en
-  broadcast **et** en unicast. Il faut (a) la MAC dans l'allowlist — `scan`
-  l'affiche, (b) que l'appareil garde sa carte réseau alimentée en veille
-  (« Fast TV start » sur Roku).
+- **Allumer** se fait en **deux temps**, selon ce que l'appareil répond :
+  1. s'il répond en ECP (il garde son réseau en veille : `DisplayOff`), la touche
+     **`Power`** le réveille — vérifié sur un Roku TV (`DisplayOff` → `PowerOn`) ;
+  2. s'il ne répond pas (vraiment éteint), **Wake-on-LAN** (paquet magique UDP,
+     port 9, broadcast **et** unicast) avec la MAC de l'interface **active**.
+
+  `power on` lit d'abord l'état : sur un appareil déjà `PowerOn` il n'envoie
+  **rien** (la touche `Power` est une bascule — l'envoyer éteindrait la TV).
+  Si l'allowlist contient la MAC de la mauvaise interface (Wi-Fi d'un appareil
+  filaire), le mod le signale et utilise celle annoncée par l'appareil.
+  Pour le réveil par WoL, il faut (a) la MAC — `scan` l'affiche, (b) que
+  l'appareil garde sa carte réseau alimentée en veille (« Fast TV start » sur
+  Roku).
   **Le broadcast dépend du shell** : `bash` ne pose pas `SO_BROADCAST`, donc
   l'envoi en `255.255.255.255` peut échouer en `Permission denied` — le mod le
   dit ligne par ligne (✅/❌ par destination) au lieu d'annoncer un succès. S'il

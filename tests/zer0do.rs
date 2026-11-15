@@ -315,6 +315,60 @@ fn status_uses_the_wifi_mac_on_a_wifi_device() {
 }
 
 #[test]
+fn power_on_does_not_toggle_a_device_that_is_already_on() {
+    if !bash_available() {
+        return;
+    }
+    // Le faux Roku répond `PowerOn` : `power on` ne doit envoyer **aucune**
+    // touche (la touche Power est une bascule — l'envoyer éteindrait la TV).
+    let port = fake_roku("ethernet");
+    let d = tempdir("power-on-idempotent");
+    std::fs::create_dir_all(d.join(".zer0")).unwrap();
+    std::fs::write(d.join(".zer0/zer0do.allow"), "127.0.0.1\n").unwrap();
+    let (ok, text) = run_env(
+        &["power", "127.0.0.1", "on"],
+        &d,
+        &[("ZER0DO_ECP_PORT", &port.to_string())],
+    );
+    assert!(ok, "{text}");
+    assert!(text.contains("déjà allumée"), "{text}");
+    assert!(
+        !text.contains("Touche"),
+        "aucune touche ne devait partir : {text}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn wake_warns_when_the_allowlist_mac_is_the_wrong_interface() {
+    if !bash_available() {
+        return;
+    }
+    // Allowlist = MAC Wi-Fi, appareil en Ethernet : le mod doit le dire et
+    // utiliser la MAC du réseau (sinon le réveil ne peut pas marcher).
+    let port = fake_roku("ethernet");
+    let d = tempdir("mac-mismatch");
+    std::fs::create_dir_all(d.join(".zer0")).unwrap();
+    std::fs::write(
+        d.join(".zer0/zer0do.allow"),
+        "127.0.0.1  18:ef:3a:21:a7:74\n",
+    )
+    .unwrap();
+    let (ok, text) = run_env(
+        &["wake", "127.0.0.1", "--dry-run"],
+        &d,
+        &[("ZER0DO_ECP_PORT", &port.to_string())],
+    );
+    assert!(ok, "{text}");
+    assert!(text.contains("ne correspond pas"), "{text}");
+    assert!(
+        text.contains("ac:ac:e2:2a:fe:4c"),
+        "la MAC du réseau doit être retenue : {text}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
 fn invalid_key_names_are_refused() {
     if !bash_available() {
         return;

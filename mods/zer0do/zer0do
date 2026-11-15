@@ -40,7 +40,9 @@ zer0do — appareils du réseau (Roku ECP), pour ZER0|GH0ST
   zer0do launch <ip> <id|nom>               ouvre une application
   zer0do search <ip> <texte>                recherche globale du Roku
   zer0do key <ip> <TOUCHE>                  envoie une touche
-  zer0do power <ip> on|off|toggle           allume (Wake-on-LAN) / éteint / bascule
+  zer0do power <ip> on|off|toggle           allume / éteint / bascule
+                                            (ECP si l'appareil répond, sinon
+                                             Wake-on-LAN pour `on`)
   zer0do wake <ip> [--dry-run]              Wake-on-LAN seul, sans passer par power
   zer0do list-allow                         affiche la liste blanche d'actions
   zer0do --help
@@ -317,6 +319,21 @@ cmd_wake() {
     require_allowed "$ip"
     local mac
     mac=$(mac_for "$ip")
+    # Si l'appareil répond, sa propre MAC fait foi : une allowlist qui contient
+    # la MAC Wi-Fi d'un appareil branché en Ethernet ne le réveillera jamais.
+    local info reported
+    info=$(roku_info "$ip")
+    reported=$(pick_mac "$info")
+    if [ -n "$reported" ]; then
+        if [ -n "$mac" ] && [ "$(printf '%s' "$mac" | tr '[:upper:]' '[:lower:]')" \
+            != "$(printf '%s' "$reported" | tr '[:upper:]' '[:lower:]')" ]; then
+            printf '⚠ la MAC de %s (%s) ne correspond pas à celle annoncée par\n' \
+                "$ALLOW_FILE" "$mac"
+            printf "  l'appareil (%s, interface %s) : j'utilise celle du réseau.\n" \
+                "$reported" "$(xml_field "$info" network-type)"
+        fi
+        mac="$reported"
+    fi
     if [ -z "$mac" ]; then
         die "aucune MAC connue pour $ip : ajoute-la dans $ALLOW_FILE
   echo '$ip  AA:BB:CC:DD:EE:FF' >> $ALLOW_FILE
@@ -384,10 +401,40 @@ cmd_power() {
     [ $# -ge 2 ] || die "usage : $PROG power <ip> on|off|toggle"
     local ip="$1" mode="$2"
     shift 2
+    need_curl
+    # L'état réel d'abord : sans ça, « power on » sur une TV déjà allumée
+    # l'éteindrait (la touche Power est une bascule), et « power off » sur une TV
+    # éteinte ne ferait rien en prétendant le contraire.
+    local info pm
+    info=$(roku_info "$ip")
+    pm=$(xml_field "$info" power-mode)
     case "$mode" in
-        off) cmd_key "$ip" PowerOff ;;
+        on)
+            if [ -n "$info" ]; then
+                if [ "$pm" = "PowerOn" ]; then
+                    printf '%s : déjà allumée (%s). Rien envoyé.\n' "$ip" "$pm"
+                    return 0
+                fi
+                # L'appareil garde son réseau en veille : la touche Power le
+                # réveille (constaté sur Roku TV, DisplayOff → PowerOn).
+                require_allowed "$ip"
+                printf '%s : état %s → réveil par ECP (touche Power).\n' \
+                    "$ip" "${pm:-inconnu}"
+                cmd_key "$ip" Power
+                return $?
+            fi
+            # Aucune réponse : il est vraiment éteint, seul Wake-on-LAN peut agir.
+            printf '%s ne répond pas en ECP → tentative Wake-on-LAN.\n' "$ip"
+            cmd_wake "$ip" "$@"
+            ;;
+        off)
+            if [ "$pm" = "DisplayOff" ] || [ "$pm" = "Standby" ]; then
+                printf '%s : déjà éteinte (%s). Rien envoyé.\n' "$ip" "$pm"
+                return 0
+            fi
+            cmd_key "$ip" PowerOff
+            ;;
         toggle) cmd_key "$ip" Power ;;
-        on) cmd_wake "$ip" "$@" ;;
         *) die "usage : $PROG power <ip> on|off|toggle" ;;
     esac
 }
