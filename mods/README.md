@@ -42,9 +42,16 @@ L'allowlist accepte une **MAC** en seconde colonne, indispensable à l'allumage 
 | Entrées | `InputHDMI1` … `InputHDMI4`, `InputTuner`, `InputAV1` |
 | Alimentation | `Power` (bascule), `PowerOff` |
 
-Le Roku répond `200`/`204` s'il accepte, `404`/`503` si la touche n'existe pas
-sur ce modèle — le mod rapporte le code au lieu de prétendre avoir réussi.
-La saisie caractère par caractère (`Lit_*`) **n'est pas gérée** : utilise
+Codes observés sur un appareil réel :
+
+| Code | Signification |
+|---|---|
+| `200` / `204` | touche acceptée |
+| `400` | touche inconnue de ce modèle |
+| `000` | aucune réponse : touche non gérée en ECP sur ce modèle (le volume passe souvent **en infrarouge**), ou appareil hors ligne |
+
+Le mod **rapporte le code** au lieu de prétendre avoir réussi. La saisie
+caractère par caractère (`Lit_*`) **n'est pas gérée** : utilise
 `/0do search <ip> <texte>`.
 
 En CLI, sans passer par la TUI :
