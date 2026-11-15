@@ -1,4 +1,5 @@
 mod banner;
+mod blueprint;
 mod menu;
 mod neon;
 mod picker;
@@ -4683,7 +4684,15 @@ fn draw_agent(f: &mut Frame, area: Rect, app: &mut App) {
     }
 
     draw_location(f, chunks[2]);
-    draw_chat(f, chunks[3], app);
+    // Thème `paper` : le chat vit dans un champ de plan (cadre gradué + trame),
+    // donc inséré d'une cellule. Les autres thèmes n'y touchent pas.
+    if blueprint::active() {
+        blueprint::draw(f, chunks[3], " № 0042 · PLAN DE COUPE ");
+        let inner = blueprint::inner(chunks[3]);
+        draw_chat(f, inner, app);
+    } else {
+        draw_chat(f, chunks[3], app);
+    }
 
     // Barre de saisie + boutons 0chan / micro à droite (visibles dès 60 colonnes).
     if chunks[4].width >= 60 {

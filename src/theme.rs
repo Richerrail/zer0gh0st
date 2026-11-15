@@ -21,9 +21,10 @@ pub enum BannerStyle {
     Red,
     /// Dégradé acier bleuté (thème castle / DOS).
     Steel,
-    /// Dégradé d'encre bleue, presque monochrome : pour un fond papier.
-    /// Un plan ne s'imprime pas en arc-en-ciel.
-    Ink,
+    /// Bloc 2D en relief : lettres pleines avec arête claire (haut/gauche) et
+    /// ombre (bas/droite), coloriées par bandes d'encres. Sur fond clair, la
+    /// couleur vient de la teinte, pas de la luminosité.
+    Bevel,
 }
 
 /// Palette complète d'un thème.
@@ -203,7 +204,7 @@ pub const ALL: &[Theme] = &[
         success: Color::Rgb(30, 107, 58), // encre verte
         warning: Color::Rgb(138, 90, 0),  // ocre (le jaune vif est illisible)
         danger: Color::Rgb(166, 27, 27),  // encre rouge
-        banner: BannerStyle::Ink,
+        banner: BannerStyle::Bevel,
         sound_pack: "",
         rail_arrow: "◀☰",
         rail_drawer: false,

@@ -528,8 +528,13 @@ Le seul thème **clair**, et le seul à changer la structure en plus des couleur
 
 - **fond blanc papier forcé** (`Rgb(250,249,245)`) — pas `Reset` : un thème clair
   hérité sur un terminal sombre serait illisible ;
-- **banner à l'encre bleue**, presque monochrome (un plan ne s'imprime pas en
-  arc-en-ciel) ;
+- **banner en blocs 3D** : lettres pleines avec **arête éclairée** (haut/gauche)
+  et **ombre** (bas/droite), calculées sur le masque des glyphes — arc-en-ciel au
+  repos, **4 encres** (bleu, rouge, vert, ocre) qui défilent quand le modèle
+  travaille ;
+- **champ de plan** : cadre fin gradué, cartouche `№ 0042 · PLAN DE COUPE` dans
+  le bord supérieur, trame de points dans les zones vides (le chat est inséré
+  d'une cellule, uniquement sur ce thème) ;
 - **cartouche en pied de page** : `⟐ PLAN  ÉCH. 1:1 │ …` avant les raccourcis ;
 - **hachures** `▚▚▚` au lieu de `…` sur les sorties d'outils repliées.
 
