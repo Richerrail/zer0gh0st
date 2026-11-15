@@ -21,6 +21,9 @@ pub enum BannerStyle {
     Red,
     /// Dégradé acier bleuté (thème castle / DOS).
     Steel,
+    /// Dégradé d'encre bleue, presque monochrome : pour un fond papier.
+    /// Un plan ne s'imprime pas en arc-en-ciel.
+    Ink,
 }
 
 /// Palette complète d'un thème.
@@ -42,6 +45,10 @@ pub struct Theme {
     pub tool: Color,
     pub border: Color,
     pub highlight: Color,
+    /// Texte posé **sur** `highlight` (pastilles de raccourcis, pied de page).
+    /// `Black` convient aux thèmes dont la pastille est claire ; un thème à
+    /// pastille foncée doit mettre ici sa couleur de fond.
+    pub chip_fg: Color,
     pub selection_bg: Color,
     pub selection_fg: Color,
     pub menu_selection_bg: Color,
@@ -76,6 +83,7 @@ pub const ALL: &[Theme] = &[
         tool: Color::Rgb(138, 158, 255),
         border: Color::Rgb(110, 95, 140),
         highlight: Color::Cyan,
+        chip_fg: Color::Black,
         selection_bg: Color::Rgb(40, 50, 110),
         selection_fg: Color::White,
         menu_selection_bg: Color::Rgb(72, 33, 75),
@@ -100,8 +108,9 @@ pub const ALL: &[Theme] = &[
         text: Color::Rgb(235, 235, 239),
         code: Color::Rgb(195, 195, 203),
         tool: Color::Rgb(150, 150, 158),
-        border: Color::Rgb(75, 75, 83),
+        border: Color::Rgb(91, 91, 99),
         highlight: Color::Rgb(220, 220, 226),
+        chip_fg: Color::Black,
         selection_bg: Color::Rgb(55, 55, 61),
         selection_fg: Color::White,
         menu_selection_bg: Color::Rgb(40, 40, 46),
@@ -122,12 +131,13 @@ pub const ALL: &[Theme] = &[
         background: Color::Rgb(7, 2, 3),
         accent: Color::Rgb(255, 45, 55),
         panel: Color::Rgb(28, 5, 8),
-        dim: Color::Rgb(145, 75, 82),
+        dim: Color::Rgb(178, 104, 110),
         text: Color::Rgb(245, 220, 222),
         code: Color::Rgb(255, 125, 130),
-        tool: Color::Rgb(195, 45, 55),
-        border: Color::Rgb(150, 25, 35),
+        tool: Color::Rgb(232, 78, 86),
+        border: Color::Rgb(190, 62, 70),
         highlight: Color::Rgb(255, 75, 82),
+        chip_fg: Color::Black,
         selection_bg: Color::Rgb(92, 10, 18),
         selection_fg: Color::Rgb(255, 235, 235),
         menu_selection_bg: Color::Rgb(68, 6, 12),
@@ -148,23 +158,53 @@ pub const ALL: &[Theme] = &[
         label: "Castle",
         description: "acier bleu, rouge sang — Wolfenstein 3D (1992)",
         background: Color::Rgb(10, 10, 18),
-        accent: Color::Rgb(176, 32, 32),
+        accent: Color::Rgb(222, 72, 72),
         panel: Color::Rgb(20, 24, 36),
-        dim: Color::Rgb(106, 114, 128),
+        dim: Color::Rgb(128, 138, 156),
         text: Color::Rgb(216, 216, 224),
         code: Color::Rgb(112, 184, 216),
         tool: Color::Rgb(128, 144, 176),
-        border: Color::Rgb(60, 70, 88),
+        border: Color::Rgb(84, 96, 118),
         highlight: Color::Rgb(224, 224, 240),
+        chip_fg: Color::Black,
         selection_bg: Color::Rgb(176, 32, 32),
         selection_fg: Color::White,
         menu_selection_bg: Color::Rgb(140, 26, 26),
         popup_bg: Color::Rgb(14, 16, 24),
         success: Color::Rgb(80, 160, 80),
         warning: Color::Rgb(208, 160, 48),
-        danger: Color::Rgb(224, 48, 48),
+        danger: Color::Rgb(232, 74, 74),
         banner: BannerStyle::Steel,
         sound_pack: "castle",
+        rail_arrow: "◀☰",
+        rail_drawer: false,
+        rail_glow: false,
+    },
+    Theme {
+        id: "paper",
+        label: "Paper",
+        description: "feuille blanche, encres bleue/rouge/verte/noire — dessin industriel",
+        // Fond **forcé** : un thème clair sur le fond noir d'un autre terminal
+        // serait illisible. On peint le papier, on ne l'espère pas.
+        background: Color::Rgb(250, 249, 245),
+        accent: Color::Rgb(31, 78, 140), // encre bleue (bleu de plan)
+        panel: Color::Rgb(240, 239, 233),
+        dim: Color::Rgb(116, 114, 105), // crayon gris
+        text: Color::Rgb(27, 27, 31),   // encre noire
+        code: Color::Rgb(56, 56, 62),
+        tool: Color::Rgb(15, 106, 106), // bleu-vert de tire-ligne
+        border: Color::Rgb(74, 74, 69), // trait de construction
+        highlight: Color::Rgb(31, 78, 140),
+        chip_fg: Color::Rgb(250, 249, 245), // papier sur pastille encre
+        selection_bg: Color::Rgb(214, 228, 240), // lavis bleu clair
+        selection_fg: Color::Rgb(16, 20, 24),
+        menu_selection_bg: Color::Rgb(220, 231, 243),
+        popup_bg: Color::Rgb(243, 242, 236),
+        success: Color::Rgb(30, 107, 58), // encre verte
+        warning: Color::Rgb(138, 90, 0),  // ocre (le jaune vif est illisible)
+        danger: Color::Rgb(166, 27, 27),  // encre rouge
+        banner: BannerStyle::Ink,
+        sound_pack: "",
         rail_arrow: "◀☰",
         rail_drawer: false,
         rail_glow: false,
@@ -229,6 +269,11 @@ pub fn activate(name: &str) -> Result<&'static Theme> {
 }
 
 // Raccourcis de lecture : le rendu ne doit pas répéter `active().champ`.
+/// Couleur du texte posé sur une pastille `highlight` (pied de page).
+pub fn chip_fg() -> Color {
+    active().chip_fg
+}
+
 pub fn background() -> Color {
     active().background
 }
@@ -288,6 +333,112 @@ pub fn rail_drawer() -> bool {
 /// Le rail affiche-t-il un halo néon autour de son glyphe ?
 pub fn rail_glow() -> bool {
     active().rail_glow
+}
+
+#[cfg(test)]
+mod contrast_tests {
+    use super::*;
+
+    /// Couleur ANSI → RGB conventionnel (xterm). `Reset` reste non mesurable.
+    fn to_rgb(c: Color) -> Option<(u8, u8, u8)> {
+        Some(match c {
+            Color::Rgb(r, g, b) => (r, g, b),
+            Color::Black => (0, 0, 0),
+            Color::Red => (205, 49, 49),
+            Color::Green => (13, 188, 121),
+            Color::Yellow => (229, 229, 16),
+            Color::Blue => (36, 114, 200),
+            Color::Magenta => (188, 63, 188),
+            Color::Cyan => (17, 168, 205),
+            Color::Gray => (229, 229, 229),
+            Color::DarkGray => (102, 102, 102),
+            Color::LightRed => (241, 76, 76),
+            Color::LightGreen => (35, 209, 139),
+            Color::LightYellow => (245, 245, 67),
+            Color::LightBlue => (59, 142, 234),
+            Color::LightMagenta => (214, 112, 214),
+            Color::LightCyan => (41, 184, 219),
+            Color::White => (255, 255, 255),
+            _ => return None,
+        })
+    }
+
+    /// Luminance relative (WCAG 2.1).
+    fn lum(c: Color) -> Option<f64> {
+        let (r, g, b) = to_rgb(c)?;
+        let f = |v: u8| {
+            let s = v as f64 / 255.0;
+            if s <= 0.039_28 {
+                s / 12.92
+            } else {
+                ((s + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        Some(0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b))
+    }
+
+    fn contrast(a: Color, b: Color) -> Option<f64> {
+        let (la, lb) = (lum(a)?, lum(b)?);
+        let (hi, lo) = if la > lb { (la, lb) } else { (lb, la) };
+        Some((hi + 0.05) / (lo + 0.05))
+    }
+
+    /// Textes lisibles : au moins 4,5:1 (AA) sur le fond du thème.
+    #[test]
+    fn text_colors_are_readable_on_their_background() {
+        for theme in ALL {
+            // `ghost` hérite du fond du terminal : on teste contre un fond
+            // sombre, ce qu'il suppose.
+            let bg = match theme.background {
+                Color::Reset => Color::Rgb(16, 16, 20),
+                c => c,
+            };
+            for (role, color) in [
+                ("text", theme.text),
+                ("accent", theme.accent),
+                ("tool", theme.tool),
+                ("danger", theme.danger),
+                ("success", theme.success),
+            ] {
+                let c = contrast(color, bg).expect("couleurs Rgb attendues");
+                assert!(
+                    c >= 4.5,
+                    "{} / {role} : contraste {c:.2} < 4.5 (illisible)",
+                    theme.id
+                );
+            }
+            // Les traits et le texte atténué peuvent être plus discrets,
+            // mais pas invisibles.
+            for (role, color) in [
+                ("dim", theme.dim),
+                ("border", theme.border),
+                ("code", theme.code),
+            ] {
+                let c = contrast(color, bg).expect("couleurs Rgb attendues");
+                assert!(c >= 3.0, "{} / {role} : contraste {c:.2} < 3.0", theme.id);
+            }
+        }
+    }
+
+    /// Le texte des pastilles doit trancher avec la pastille elle-même.
+    #[test]
+    fn chip_text_stands_out_on_its_chip() {
+        for theme in ALL {
+            let c = contrast(theme.chip_fg, theme.highlight);
+            if let Some(c) = c {
+                assert!(c >= 3.0, "{} : pastilles illisibles ({c:.2})", theme.id);
+            }
+        }
+    }
+
+    #[test]
+    fn paper_is_a_light_theme() {
+        let paper = ALL.iter().find(|t| t.id == "paper").expect("thème paper");
+        let bg = lum(paper.background).expect("fond Rgb");
+        let text = lum(paper.text).expect("texte Rgb");
+        assert!(bg > 0.7, "le fond papier doit être clair, pas {bg:.2}");
+        assert!(text < 0.2, "l'encre doit être sombre, pas {text:.2}");
+    }
 }
 
 #[cfg(test)]

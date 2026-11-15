@@ -4834,15 +4834,15 @@ fn draw_chat(f: &mut Frame, area: Rect, app: &mut App) {
                         let preview: String = text.lines().take(3).collect::<Vec<_>>().join("\n");
                         push_message(&mut lines, &m.role, &preview, w);
                         if total > 3 {
-                            push_message(
-                                &mut lines,
-                                "notice",
-                                &format!(
-                                    "   … {} ligne(s) de plus — clic droit ou Ctrl+O",
-                                    total - 3
-                                ),
-                                w,
-                            );
+                            // Sur le thème paper, des hachures de dessin
+                            // technique au lieu de points de suspension.
+                            let more = total - 3;
+                            let text = if theme::active().id == "paper" {
+                                format!("   ▚▚▚ {more} ligne(s) — clic droit ou Ctrl+O")
+                            } else {
+                                format!("   … {more} ligne(s) de plus — clic droit ou Ctrl+O")
+                            };
+                            push_message(&mut lines, "notice", &text, w);
                         }
                     }
                     let rendered: Vec<Line<'static>> = lines[before..].to_vec();
@@ -5653,12 +5653,14 @@ fn history_down(app: &mut App) {
 }
 
 fn draw_footer(f: &mut Frame, area: Rect, app: &mut App) {
-    let key = Style::default().fg(Color::Black).bg(theme::highlight());
+    // `chip_fg` : le texte des pastilles suit le thème (noir sur pastille
+    // claire, papier sur pastille encre).
+    let key = Style::default().fg(theme::chip_fg()).bg(theme::highlight());
     let txt = Style::default().fg(theme::dim());
     // État visible : `code_exec` lance de vraies commandes, l'écran doit dire
     // s'il est armé (c'était le trou de sécurité de l'audit).
     let rw = if app.read_write {
-        Style::default().fg(Color::Black).bg(theme::warning())
+        Style::default().fg(theme::chip_fg()).bg(theme::warning())
     } else {
         txt
     };
@@ -5667,13 +5669,24 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &mut App) {
     } else {
         // Désarmé : clignote jaune/rouge (~2 Hz) pour que ça se voie.
         let warn = (app.anim_phase / 30).is_multiple_of(2);
-        Style::default().fg(Color::Black).bg(if warn {
+        Style::default().fg(theme::chip_fg()).bg(if warn {
             theme::warning()
         } else {
             theme::danger()
         })
     };
-    let spans = vec![
+    let mut spans: Vec<Span> = Vec::new();
+    // Cartouche de plan (thème paper) : la signature visuelle du thème, en tête
+    // du pied de page. Les autres thèmes gardent le pied de page inchangé.
+    if theme::active().id == "paper" {
+        spans.push(Span::styled(
+            " ⟐ PLAN ",
+            Style::default().fg(theme::accent()),
+        ));
+        spans.push(Span::styled("ÉCH. 1:1 ", txt));
+        spans.push(Span::styled("│ ", Style::default().fg(theme::border())));
+    }
+    spans.extend(vec![
         Span::styled(" F6 ", key),
         Span::styled(" Chats  ", txt),
         Span::styled(" F7 ", key),
@@ -5692,7 +5705,7 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &mut App) {
         Span::styled(" Mic  ", txt),
         Span::styled(" Ctrl+O ", key),
         Span::styled(" détail ", txt),
-    ];
+    ]);
     // Le vote (👍/👎) occupe la droite du pied de page : c'est le bas-droite
     // de l'écran principal. Les raccourcis gardent la place restante.
     let cols = Layout::default()

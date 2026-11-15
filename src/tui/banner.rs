@@ -120,6 +120,22 @@ fn color_at(x: usize, w: usize, animated: bool, phase: u16) -> Color {
                 (135.0 + wave * 105.0) as u8,
             )
         }
+        BannerStyle::Ink => {
+            // Encre bleue, presque monochrome : un plan ne s'imprime pas en
+            // couleurs. Légère ondulation quand le modèle travaille.
+            let t = if w <= 1 {
+                0.0
+            } else {
+                x as f32 / (w - 1) as f32
+            };
+            let shift = if animated { phase as f32 / 120.0 } else { 0.0 };
+            let wave = (t * 5.0 + shift).sin() * 0.18 + 0.82;
+            Color::Rgb(
+                (20.0 + wave * 25.0) as u8,
+                (55.0 + wave * 40.0) as u8,
+                (110.0 + wave * 50.0) as u8,
+            )
+        }
         BannerStyle::Red => {
             let t = if w <= 1 {
                 0.0
