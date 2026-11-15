@@ -24,11 +24,16 @@ protocole exotique ; il délègue.
 /0do list-allow                  # état de la liste blanche
 ```
 
-L'allowlist accepte une **MAC** en seconde colonne, indispensable à l'allumage :
+L'allowlist accepte une **MAC** en seconde colonne, indispensable à l'allumage.
+`scan` affiche cette MAC (celle de l'interface active) et donne la ligne prête
+à coller :
 
 ```
-# .zer0/zer0do.allow
-192.168.1.42  A4:2B:8C:11:22:33   # TV du salon
+IP               MODÈLE              ÉTAT       MAC                NOM
+192.168.1.42     RTRU5528-CA         PowerOn    ac:ac:e2:2a:fe:4c  55" RCA Roku TV
+
+Pour autoriser le réveil (Wake-on-LAN), ajoute dans .zer0/zer0do.allow :
+  192.168.1.42  ac:ac:e2:2a:fe:4c
 ```
 
 ### Touches (`/0do key <ip> <TOUCHE>`)
@@ -72,11 +77,15 @@ En CLI, sans passer par la TUI :
 - **Pas de « réparation »** : ce mod envoie des touches et ouvre des
   applications. Redémarrer un service d'un appareil demanderait SSH et des
   identifiants — hors périmètre.
-- **Allumer** passe par **Wake-on-LAN** (paquet magique UDP, port 9). Il faut
-  (a) la MAC dans l'allowlist, (b) que l'appareil garde sa carte réseau
-  alimentée en veille — « Fast TV start » sur Roku. Si ça ne se réveille pas,
-  c'est que l'un des deux manque : le mod le dit, il ne prétend pas avoir
-  réussi (`--dry-run` montre le paquet).
+- **Allumer** passe par **Wake-on-LAN** (paquet magique UDP, port 9), envoyé en
+  broadcast **et** en unicast. Il faut (a) la MAC dans l'allowlist — `scan`
+  l'affiche, (b) que l'appareil garde sa carte réseau alimentée en veille
+  (« Fast TV start » sur Roku).
+  **Le broadcast dépend du shell** : `bash` ne pose pas `SO_BROADCAST`, donc
+  l'envoi en `255.255.255.255` peut échouer en `Permission denied` — le mod le
+  dit ligne par ligne (✅/❌ par destination) au lieu d'annoncer un succès. S'il
+  échoue, l'unicast suffit souvent ; sinon `socat` est utilisé automatiquement
+  s'il est installé. `--dry-run` montre le paquet sans l'envoyer.
 
 ### Dépendances
 

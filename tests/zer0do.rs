@@ -23,15 +23,56 @@ fn bash_available() -> bool {
 }
 
 fn run(args: &[&str], cwd: &std::path::Path) -> (bool, String) {
-    let out = Command::new("bash")
-        .arg(script())
-        .args(args)
-        .current_dir(cwd)
-        .output()
-        .expect("exécution du script");
+    run_env(args, cwd, &[])
+}
+
+fn run_env(args: &[&str], cwd: &std::path::Path, envs: &[(&str, &str)]) -> (bool, String) {
+    let mut cmd = Command::new("bash");
+    cmd.arg(script()).args(args).current_dir(cwd);
+    for (k, v) in envs {
+        cmd.env(k, v);
+    }
+    let out = cmd.output().expect("exécution du script");
     let mut text = String::from_utf8_lossy(&out.stdout).to_string();
     text.push_str(&String::from_utf8_lossy(&out.stderr));
     (out.status.success(), text)
+}
+
+/// Faux Roku : sert une réponse `<device-info>` sur un port libre de la boucle
+/// locale. Permet de tester l'analyse XML et le choix de la MAC **sans réseau**
+/// et sans toucher à un vrai téléviseur.
+fn fake_roku(network_type: &str) -> u16 {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().unwrap().port();
+    let body = format!(
+        "<device-info>\
+         <friendly-device-name>Salon</friendly-device-name>\
+         <model-name>RTRU5528-CA</model-name>\
+         <serial-number>X01200MPCLEW</serial-number>\
+         <software-version>16.0.4</software-version>\
+         <power-mode>PowerOn</power-mode>\
+         <network-type>{network_type}</network-type>\
+         <wifi-mac>18:ef:3a:21:a7:74</wifi-mac>\
+         <ethernet-mac>ac:ac:e2:2a:fe:4c</ethernet-mac>\
+         </device-info>"
+    );
+    // Le thread vit sa vie : une seule requête attendue (`status` en fait une),
+    // et on ne `join()` pas — sinon un test bloquerait si curl ne venait pas.
+    std::thread::spawn(move || {
+        let Ok((mut sock, _)) = listener.accept() else {
+            return;
+        };
+        let mut buf = [0u8; 1024];
+        let _ = sock.read(&mut buf);
+        let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/xml\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+        let _ = sock.write_all(resp.as_bytes());
+    });
+    port
 }
 
 fn tempdir(tag: &str) -> PathBuf {
@@ -228,6 +269,48 @@ fn literal_key_typing_is_refused_with_an_alternative() {
         !text.contains("command substitution") && !text.contains("syntax error"),
         "le message d'erreur s'exécute au lieu de s'afficher : {text}"
     );
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn status_picks_the_mac_of_the_active_interface() {
+    if !bash_available() {
+        return;
+    }
+    let port = fake_roku("ethernet");
+    let d = tempdir("mac-eth");
+    let (ok, text) = run_env(
+        &["status", "127.0.0.1"],
+        &d,
+        &[("ZER0DO_ECP_PORT", &port.to_string())],
+    );
+    assert!(ok, "{text}");
+    assert!(text.contains("RTRU5528-CA"), "modèle absent : {text}");
+    assert!(
+        text.contains("ac:ac:e2:2a:fe:4c"),
+        "en ethernet, c'est l'ethernet-mac qui sert au réveil : {text}"
+    );
+    assert!(
+        !text.contains("18:ef:3a:21:a7:74"),
+        "la MAC wifi ne doit pas être celle retenue en ethernet : {text}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn status_uses_the_wifi_mac_on_a_wifi_device() {
+    if !bash_available() {
+        return;
+    }
+    let port = fake_roku("wifi");
+    let d = tempdir("mac-wifi");
+    let (ok, text) = run_env(
+        &["status", "127.0.0.1"],
+        &d,
+        &[("ZER0DO_ECP_PORT", &port.to_string())],
+    );
+    assert!(ok, "{text}");
+    assert!(text.contains("18:ef:3a:21:a7:74"), "{text}");
     let _ = std::fs::remove_dir_all(&d);
 }
 
