@@ -34,7 +34,7 @@ usage() {
 zer0do — appareils du réseau (Roku ECP), pour ZER0|GH0ST
 
   zer0do scan [--subnet 192.168.1.0/24]   découvre les appareils Roku du LAN
-  zer0do status <ip>                        modèle, nom, série, alimentation
+  zer0do status <ip>                        modèle, nom, série, app active (id)
   zer0do active <ip>                        application au premier plan
   zer0do apps <ip>                          applications installées (id + nom)
   zer0do launch <ip> <id|nom>               ouvre une application
@@ -231,6 +231,17 @@ cmd_status() {
     printf '  alimentation: %s\n' "$(xml_field "$info" power-mode)"
     printf '  réseau     : %s\n' "$(xml_field "$info" network-type)"
     printf '  MAC        : %s  (Wake-on-LAN)\n' "$(pick_mac "$info")"
+    # L'id de l'application est ce qu'attend `launch <ip> <id>` : on l'affiche
+    # ici pour éviter d'enchaîner `active` puis `apps` pour le retrouver.
+    local line id name
+    line=$(active_app "$ip" 2>/dev/null)
+    if [ -n "$line" ]; then
+        id=$(printf '%s' "$line" | cut -f1)
+        name=$(printf '%s' "$line" | cut -f2)
+        printf '  application: %s (id %s)\n' "$name" "$id"
+    else
+        printf "  application: écran d'accueil\n"
+    fi
 }
 
 # L'adresse est-elle autorisée pour une action ?
@@ -461,22 +472,30 @@ roku_apps() {
         | sed -n 's:.*<app id="\([^"]*\)"[^>]*>\([^<]*\)</app>.*:\1\t\2:p'
 }
 
+# Application au premier plan : `id<TAB>nom` (vide si écran d'accueil).
+active_app() {
+    local ip="$1" xml
+    xml=$(curl -s -m 3 "http://$ip:$ECP_PORT/query/active-app" 2>/dev/null) || return 1
+    [ -n "$xml" ] || return 1
+    printf '%s' "$xml" | tr -d '\r\n' \
+        | sed -n 's:.*<app id="\([^"]*\)"[^>]*>\([^<]*\)</app>.*:\1\t\2:p' | head -n 1
+}
+
 cmd_active() {
     [ $# -eq 1 ] || die "usage : $PROG active <ip>"
-    local ip="$1" xml
-    xml=$(curl -s -m 3 "http://$ip:$ECP_PORT/query/active-app" 2>/dev/null) || true
-    if [ -z "$xml" ]; then
+    local ip="$1" line
+    line=$(active_app "$ip") || {
         printf '%s : aucune réponse (pas un Roku, ou hors ligne).\n' "$ip"
         return 1
+    }
+    if [ -z "$line" ]; then
+        printf "%s : écran d'accueil (aucune application au premier plan).\n" "$ip"
+        return 0
     fi
-    local name
-    name=$(printf '%s' "$xml" | tr -d '\r\n' \
-        | sed -n 's:.*<app[^>]*>\([^<]*\)</app>.*:\1:p' | head -n 1)
-    if [ -n "$name" ]; then
-        printf '%s : %s\n' "$ip" "$name"
-    else
-        printf '%s : écran d'\''accueil (aucune application au premier plan).\n' "$ip"
-    fi
+    local id name
+    id=$(printf '%s' "$line" | cut -f1)
+    name=$(printf '%s' "$line" | cut -f2)
+    printf '%s : %s (id %s)\n' "$ip" "$name" "$id"
 }
 
 cmd_apps() {

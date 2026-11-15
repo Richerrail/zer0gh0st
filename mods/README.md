@@ -12,9 +12,9 @@ protocole exotique ; il délègue.
 
 ```bash
 /0do scan                        # découvre les appareils Roku du sous-réseau
-/0do status 192.168.1.42         # modèle, nom, série, logiciel, alimentation
+/0do status 192.168.1.42         # modèle, nom, série, alimentation, app active (id)
 /0do apps 192.168.1.42           # applications installées (id + nom)
-/0do active 192.168.1.42         # application au premier plan
+/0do active 192.168.1.42         # application au premier plan (+ id)
 /0do launch 192.168.1.42 Netflix # ouvre une application (allowlist requise)
 /0do search 192.168.1.42 météo   # recherche globale du Roku (allowlist requise)
 /0do key 192.168.1.42 Home       # envoie une touche (allowlist requise)

@@ -45,7 +45,7 @@ fn fake_roku(network_type: &str) -> u16 {
     use std::io::{Read, Write};
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
     let port = listener.local_addr().unwrap().port();
-    let body = format!(
+    let device_info = format!(
         "<device-info>\
          <friendly-device-name>Salon</friendly-device-name>\
          <model-name>RTRU5528-CA</model-name>\
@@ -57,22 +57,51 @@ fn fake_roku(network_type: &str) -> u16 {
          <ethernet-mac>ac:ac:e2:2a:fe:4c</ethernet-mac>\
          </device-info>"
     );
-    // Le thread vit sa vie : une seule requête attendue (`status` en fait une),
-    // et on ne `join()` pas — sinon un test bloquerait si curl ne venait pas.
+    let active_app =
+        "<active-app><app id=\"837\" type=\"appl\" version=\"1.0\">YouTube</app></active-app>";
+    // Plusieurs requêtes servies (`status` interroge device-info **et**
+    // active-app) ; routage sur le chemin demandé.
     std::thread::spawn(move || {
-        let Ok((mut sock, _)) = listener.accept() else {
-            return;
-        };
-        let mut buf = [0u8; 1024];
-        let _ = sock.read(&mut buf);
-        let resp = format!(
+        for _ in 0..6 {
+            let Ok((mut sock, _)) = listener.accept() else {
+                return;
+            };
+            let mut buf = [0u8; 1024];
+            let n = sock.read(&mut buf).unwrap_or(0);
+            let req = String::from_utf8_lossy(&buf[..n]).to_string();
+            let body: &str = if req.contains("active-app") {
+                active_app
+            } else {
+                &device_info
+            };
+            let resp = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: text/xml\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                 body.len(),
                 body
             );
-        let _ = sock.write_all(resp.as_bytes());
+            let _ = sock.write_all(resp.as_bytes());
+        }
     });
     port
+}
+
+/// Le script doit au minimum être **syntaxiquement valide** : une apostrophe
+/// dans une chaîne simple l'a déjà cassé deux fois.
+#[test]
+fn the_script_parses() {
+    if !bash_available() {
+        return;
+    }
+    let out = Command::new("bash")
+        .arg("-n")
+        .arg(script())
+        .output()
+        .expect("bash -n");
+    assert!(
+        out.status.success(),
+        "syntaxe invalide : {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 fn tempdir(tag: &str) -> PathBuf {
@@ -365,6 +394,29 @@ fn wake_warns_when_the_allowlist_mac_is_the_wrong_interface() {
         text.contains("ac:ac:e2:2a:fe:4c"),
         "la MAC du réseau doit être retenue : {text}"
     );
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn status_and_active_show_the_app_id() {
+    if !bash_available() {
+        return;
+    }
+    let port = fake_roku("ethernet");
+    let d = tempdir("app-id");
+    let port_s = port.to_string();
+    let envs = [("ZER0DO_ECP_PORT", port_s.as_str())];
+
+    let (ok, text) = run_env(&["status", "127.0.0.1"], &d, &envs);
+    assert!(ok, "{text}");
+    assert!(
+        text.contains("application: YouTube (id 837)"),
+        "status doit donner l'id, utilisable tel quel dans `launch` : {text}"
+    );
+
+    let (ok2, text2) = run_env(&["active", "127.0.0.1"], &d, &envs);
+    assert!(ok2, "{text2}");
+    assert!(text2.contains("YouTube (id 837)"), "{text2}");
     let _ = std::fs::remove_dir_all(&d);
 }
 
