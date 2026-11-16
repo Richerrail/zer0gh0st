@@ -101,7 +101,8 @@
     <h2>Ce que c'est</h2>
     <div class="grid">
       <div class="card"><h3>Boucle d'agent</h3><p>utilisateur → modèle → outils → réponse, avec streaming et détection de boucle.</p></div>
-      <div class="card"><h3>Outils réels</h3><p><code>code_exec</code> (shell), <code>text_editor</code> (fichiers), <code>web_search</code>, mémoire, tâches.</p></div>
+      <div class="card"><h3>0box — débat multi-agents</h3><p><code>/0box &lt;sujet&gt;</code> fait débattre plusieurs rôles (code → raisonnement → synthèse). La synthèse est le livrable ; les outils d'écriture ne s'ouvrent que si le sujet demande <em>explicitement</em> un livrable. Chaque rôle tourne dans un contexte isolé.</p></div>
+      <div class="card"><h3>Outils réels</h3><p><code>code_exec</code> (shell), <code>text_editor</code> (fichiers), <code>web_search</code>, mémoire, tâches — 18 outils, journalisés dans <code>audit.jsonl</code>.</p></div>
       <div class="card"><h3>Multi-provider</h3><p>10 providers + custom, failover, backoff 429, modèles <code>:free</code>.</p></div>
       <div class="card"><h3>Passerelle <code>zer0-gw</code></h3><p>Binaire séparé, 3 modes de sécurité (standard/anonyme/zero-knowledge) — chiffrement de bout en bout.</p></div>
       <div class="card"><h3>Zero-chan (voix)</h3><p>Assistante vocale intégrée : STT Whisper local, avatar kawaii animé.</p></div>
@@ -152,7 +153,10 @@ cd zer0gh0st
 zer0 kb embed fetch      <span class="c"># bge-m3 Q8 (~605 Mo), SHA256 vérifié</span>
 zer0 kb ingest base_connaissance --embed</pre>
 
-    <pre style="margin-top:12px"><span class="c"># thèmes</span>
+    <pre style="margin-top:12px"><span class="c"># débat multi-agents, en headless (sans TUI)</span>
+zer0 0box "faut-il un cache pour cette fonction ?"   <span class="c"># alias : zer0box</span>
+
+<span class="c"># thèmes</span>
 /theme                     <span class="c"># ghost · noir · noir-rouge · castle · paper</span>
 /theme paper default       <span class="c"># mémorise paper comme défaut</span>
 /theme default             <span class="c"># y revient</span></pre>
@@ -173,6 +177,7 @@ zer0 kb ingest base_connaissance --embed</pre>
     <h2>Quelques commandes</h2>
     <p class="cmds">
       /help · /think · /provider · /model · /ctx · /route · /role · /theme<br>
+      <span class="kbd">débat &amp; sous-agents :</span> /0box &lt;sujet&gt; · /ask · /review · /jev<br>
       /memory · /task · /work · /ask · /review · /search · /kb · /embeddings<br>
       /telegram on|off · /whoami · /vault · /pdf · /0do · /0cg · /0file · /0cl<br>
       /radio · /bintime · /t0p · /pong · /jev · /apis · /quota · /vote<br>
