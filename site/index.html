@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ZER0│GH0ST — agent IA en terminal</title>
-<meta name="description" content="ZER0│GH0ST : un agent IA qui vit dans ton terminal. Rust, TUI, outils (shell, fichiers, web), multi-provider, vocal, Telegram. Local ou cloud.">
+<meta name="description" content="ZER0│GH0ST : un agent IA qui vit dans ton terminal. Rust, TUI, 18 outils, multi-provider, mémoire sémantique locale, thèmes, mods (appareils du réseau, crypto), vocal, Telegram.">
 <link rel="icon" href="avatar.svg" type="image/svg+xml">
 <meta property="og:title" content="ZER0│GH0ST — agent IA en terminal">
 <meta property="og:description" content="Un agent IA qui vit dans ton terminal. Rust · TUI · local ou cloud · aucune clé requise.">
@@ -58,6 +58,12 @@
   .cmds{color:var(--yellow);font-size:.88rem;line-height:2}
   code{color:var(--cyan);background:rgba(122,232,255,.08);padding:1px 5px;border-radius:5px}
   .shot img{width:100%;border-radius:12px;border:1px solid var(--border)}
+  .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+  .grid2 img{width:100%;border-radius:12px;border:1px solid var(--border)}
+  #demo img{width:100%;border-radius:12px;border:1px solid var(--border);
+    box-shadow:0 0 50px rgba(255,113,206,.14)}
+  .badge{display:inline-block;padding:2px 9px;border-radius:999px;font-size:.78rem;
+    border:1px solid var(--border);color:var(--muted);margin-left:6px}
   .hero img.logo{max-width:520px;border:0;border-radius:0;margin-bottom:18px}
   footer{text-align:center;color:var(--dim);padding:30px 0 50px;font-size:.85rem}
   .bmc{display:block;margin:18px auto 0;width:200px}
@@ -67,9 +73,11 @@
 <body>
 <div class="wrap">
   <header>
-    <div class="brand">ZER0│GH0ST</div>
+    <div class="brand">ZER0│GH0ST <span class="badge">v0.7.52</span></div>
     <nav>
       <a href="#features">Features</a>
+      <a href="#demo">Démo</a>
+      <a href="#mods">Mods</a>
       <a href="#install">Installer</a>
       <a href="#cmd">Commandes</a>
       <a href="https://github.com/Richerrail/zer0gh0st">GitHub ↗</a>
@@ -98,13 +106,31 @@
       <div class="card"><h3>Passerelle <code>zer0-gw</code></h3><p>Binaire séparé, 3 modes de sécurité (standard/anonyme/zero-knowledge) — chiffrement de bout en bout.</p></div>
       <div class="card"><h3>Zero-chan (voix)</h3><p>Assistante vocale intégrée : STT Whisper local, avatar kawaii animé.</p></div>
       <div class="card"><h3>Telegram</h3><p>Converse à distance : texte, vocal, fichiers, progression. Long polling, aucune exposition.</p></div>
-      <div class="card"><h3>Menu cliquable</h3><p>Toutes les commandes à droite de la TUI, dépliables — sans rien taper.</p></div>
+      <div class="card"><h3>Thèmes</h3><p><code>ghost</code>, <code>noir</code>, <code>noir-rouge</code>, <code>castle</code> (Wolfenstein 3D) et <code>paper</code> — feuille de plan : banner en blocs 3D, cadre gradué, cartouche. <code>/theme</code> + <code>/theme &lt;nom&gt; default</code>.</p></div>
+      <div class="card"><h3>Mémoire sémantique locale</h3><p>Base SQLite + FTS5, et <strong>bge-m3</strong> en local (<code>local-embed</code>) : multilingue, sans clé ni réseau. Une question française retrouve une fiche anglaise.</p></div>
     </div>
   </section>
 
   <section class="shot">
     <h2>Aperçu</h2>
     <img src="screenshot.png" alt="ZER0│GH0ST — TUI">
+    <div class="grid2" style="margin-top:14px">
+      <img src="screenshot1.png" alt="zer0CL — un shell dans le panneau latéral">
+    </div>
+  </section>
+
+  <section id="demo">
+    <h2>Démo (59 s)</h2>
+    <p style="color:var(--muted);margin-bottom:14px">
+      L'agent qui lance une <strong>vraie commande</strong> avec <code>code_exec</code>,
+      le thème <code>castle</code>, l'explorateur <code>0file</code>, le moniteur
+      <code>t0p</code>, Pong contre l'agent, puis la bascule sur un modèle
+      <code>deepseek</code> — et la baleine.
+    </p>
+    <img src="demo.gif" alt="Démo de ZER0│GH0ST (GIF, 59 s)">
+    <p style="color:var(--dim);font-size:.85rem;margin-top:10px">
+      GIF compressé (900 px, 12 fps) · <a href="demo.mp4">vidéo complète en 1920×1080 (2,4 Mo)</a>
+    </p>
   </section>
 
   <section id="install">
@@ -116,17 +142,40 @@ cd zer0gh0st
 ./scripts/install.sh          <span class="c"># dépendances + build</span>
 ./target/release/zer0         <span class="c"># ou ./scripts/run.sh</span></pre>
     <pre style="margin-top:12px"><span class="c"># mode 100% local (aucune clé API)</span>
-export ZER0_MODEL=/chemin/mon-modele.gguf
-./scripts/serve.sh            <span class="c"># llama-server sur :8080</span>
-./target/release/zer0         <span class="c"># puis, dans la TUI : /provider local</span></pre>
+<span class="c"># 1. dépose un GGUF (template de chat inclus) dans models/</span>
+./target/release/zer0
+<span class="c">#   puis dans la TUI :</span>
+/provider use local      <span class="c"># llama-server démarre tout seul (:8080)</span>
+/model                   <span class="c"># choisit le .gguf</span>
+
+<span class="c"># embedder local (mémoire sémantique, hors ligne)</span>
+zer0 kb embed fetch      <span class="c"># bge-m3 Q8 (~605 Mo), SHA256 vérifié</span>
+zer0 kb ingest base_connaissance --embed</pre>
+
+    <pre style="margin-top:12px"><span class="c"># thèmes</span>
+/theme                     <span class="c"># ghost · noir · noir-rouge · castle · paper</span>
+/theme paper default       <span class="c"># mémorise paper comme défaut</span>
+/theme default             <span class="c"># y revient</span></pre>
+  </section>
+
+  <section id="mods">
+    <h2>Mods</h2>
+    <p style="color:var(--muted);margin-bottom:14px">
+      Un mod est un programme fourni, lancé par Zer0 mais hors de son noyau.
+    </p>
+    <div class="grid">
+      <div class="card"><h3><code>zer0do</code> — /0do</h3><p>Appareils du réseau : découverte Roku (IP, modèle, état, MAC), applications installées, touches, allumage ECP puis Wake-on-LAN. Toute action exige une <strong>allowlist</strong> écrite par toi.</p></div>
+      <div class="card"><h3><code>0cg</code> — /0cg</h3><p>Watchlist crypto dans le panneau latéral : API publique <strong>sans clé</strong>, sparkline braille 7 jours, rafraîchie toutes les 15 s. <code>/0cg add bitcoin</code>, dans ton ordre.</p></div>
+    </div>
   </section>
 
   <section id="cmd">
     <h2>Quelques commandes</h2>
     <p class="cmds">
-      /help · /think · /provider · /model · /ctx · /route · /role<br>
-      /memory · /task · /work · /ask · /review · /search · /kb<br>
-      /telegram on|off · /whoami · /vault · /pdf · /radio · /bintime · /pong<br>
+      /help · /think · /provider · /model · /ctx · /route · /role · /theme<br>
+      /memory · /task · /work · /ask · /review · /search · /kb · /embeddings<br>
+      /telegram on|off · /whoami · /vault · /pdf · /0do · /0cg · /0file · /0cl<br>
+      /radio · /bintime · /t0p · /pong · /jev · /apis · /quota · /vote<br>
       F3 Read&amp;Write · F4 Code-exec · F6 Chats · F7 Nudge · F8 0chan · F10 Mic
     </p>
   </section>
@@ -146,7 +195,7 @@ export ZER0_MODEL=/chemin/mon-modele.gguf
   </section>
 
   <footer>
-    ZER0│GH0ST · MIT © 2026 richerrail ·
+    ZER0│GH0ST · <span class="kbd">v0.7.52</span> · MIT © 2026 richerrail ·
     <a href="https://github.com/Richerrail/zer0gh0st">github.com/Richerrail/zer0gh0st</a>
   </footer>
 </div>
