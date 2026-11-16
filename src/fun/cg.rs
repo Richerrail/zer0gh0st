@@ -16,7 +16,7 @@
 use std::time::{Duration, Instant};
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::symbols::Marker;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Axis, Chart, Dataset, GraphType};
@@ -371,13 +371,18 @@ impl Cg {
         if cols.len() < 3 {
             return;
         }
+        // Couleur **explicite** : sans fg, le symbole prenait la couleur par
+        // défaut du terminal — claire sur un terminal sombre, donc invisible sur
+        // le fond papier de `paper`. (Même classe de bug que la palette `/`.)
         let sym = Span::styled(
             format!(
                 " {:<width$}",
                 q.symbol,
                 width = cols[0].width.saturating_sub(1) as usize
             ),
-            Style::default(),
+            Style::default()
+                .fg(theme::text())
+                .add_modifier(Modifier::BOLD),
         );
         let price = Span::styled(
             format!(
@@ -658,6 +663,47 @@ mod tests {
             text.contains("-2,3") || text.contains("\u{2212}2,3"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn the_symbol_is_coloured_by_the_theme() {
+        // Régression : le symbole était rendu sans couleur explicite, donc avec
+        // la couleur par défaut du terminal — illisible sur le fond clair de
+        // `paper`. On vérifie la couleur réelle de la cellule.
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let q = Quote {
+            id: "bitcoin".into(),
+            symbol: "BTC".into(),
+            price: 64910.0,
+            change_24h: Some(0.8),
+            spark: vec![1.0, 2.0, 3.0],
+        };
+        let cg = Cg::new(vec!["bitcoin".into()]);
+
+        for theme_name in ["paper", "noir", "castle"] {
+            crate::theme::activate(theme_name).unwrap();
+            let mut term = Terminal::new(TestBackend::new(60, 6)).unwrap();
+            term.draw(|f| cg.draw_quote(f, &q, f.area(), true)).unwrap();
+            let buf = term.backend().buffer();
+            let mut found = false;
+            for y in 0..buf.area.height {
+                for x in 0..buf.area.width {
+                    let cell = &buf[(x, y)];
+                    if cell.symbol().contains('B') {
+                        assert_eq!(
+                            cell.fg,
+                            crate::theme::text(),
+                            "symbole sans couleur du thème ({theme_name})"
+                        );
+                        found = true;
+                    }
+                }
+            }
+            assert!(found, "symbole absent du rendu ({theme_name})");
+        }
+        crate::theme::activate("ghost").unwrap();
     }
 
     #[test]
