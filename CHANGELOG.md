@@ -1,3 +1,17 @@
+## v0.7.53 — Lisibilité : symbole `0cg` et site (2026-11-16)
+
+- **fix(0cg)** : sur le thème **`paper`**, les actifs de la watchlist étaient
+  **illisibles**. Le symbole était rendu sans couleur explicite
+  (`Style::default()`), donc avec le fg par défaut du terminal — clair sur fond
+  blanc. Même classe de bug que la palette `/` et `t0p` : `fg(theme::text())`
+  + gras, et un test qui vérifie la **couleur de la cellule** (pas le texte)
+  sous `paper`, `noir` et `castle`.
+- **docs(site)** : la page mentionne enfin **0box** (carte « débat
+  multi-agents », ligne de commandes `/0box` · `/ask` · `/review` · `/jev`,
+  exemple CLI `zer0 0box "<sujet>"`) et ne duplique plus `/ask` et `/review`.
+  Elle avait été mise à jour en v0.7.52 (démo GIF, mods, thèmes, embedder
+  local) ; il n'y manquait que la fonction la plus distinctive du projet.
+
 ## v0.7.52 — Mod `0cg` : watchlist crypto (2026-11-16)
 
 Deuxième mod natif après `zer0do`, sur le modèle de `t0p` : un panneau latéral
