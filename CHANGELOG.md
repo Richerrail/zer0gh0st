@@ -1,3 +1,49 @@
+## v0.7.52 — Mod `0cg` : watchlist crypto (2026-11-16)
+
+Deuxième mod natif après `zer0do`, sur le modèle de `t0p` : un panneau latéral
+qui vit à côté du chat, **sans clé API**.
+
+```
+/0cg                    # ouvrir le panneau
+/0cg add bitcoin tao    # ids CoinGecko, dans TON ordre
+/0cg rm xrp
+/0cg list
+```
+
+- **API publique** (`api.coingecko.com/api/v3`) : rien à configurer, aucun
+  secret. Les endpoints payants (WebSocket, historique long) ne sont pas
+  utilisés — et donc pas annoncés.
+- **Une requête pour toute la liste** : `/coins/markets` renvoie prix, variation
+  24 h et `sparkline_in_7d` ; rafraîchi toutes les 15 s (`ZER0_CG_SECS`,
+  plancher 5 s) → 4 req/min.
+- **Watchlist de l'utilisateur** : persistée (`cg_coins`), **dans son ordre**
+  (l'API ne le garantit pas). Deux densités : 3 rangées par actif jusqu'à 4,
+  compact au-delà.
+- **Honnêteté** : le pied donne l'âge des données ; une panne s'affiche
+  (`! prix indisponibles (HTTP 403)`) au lieu de laisser des chiffres figés.
+
+Trois bugs trouvés et corrigés en le testant sur du réel :
+
+- **`HTTP 403 Forbidden`** : l'API CoinGecko (Cloudflare) refuse un client sans
+  `User-Agent`, et `reqwest`/rustls n'en envoie pas (curl oui). D'où un panneau
+  vide avec « 403 » pour seule explication. `user-agent: zer0gh0st/<version>`
+  ajouté.
+- **prix et variation jamais affichés** : la ligne ne rendait que le symbole,
+  `price_label()`/`change_label()` n'étaient appelés nulle part. Colonnes à
+  largeur fixe (7 / 13 / 9) + repli « chiffres seuls » si le panneau est étroit.
+- **« prix indisponibles depuis jamais »** : `age_label()` renvoyait `jamais`
+  (aucun succès) et le pied en faisait une phrase absurde.
+
+Corrigé au passage : le **coffre** n'est plus déverrouillé pour les sous-commandes
+qui n'utilisent aucune clé (`0cg`, `bintime`, `pong`, `t0p`, `kb`, `pdf`…) —
+`cmd_needs_keys()`. Avant, `zer0 0cg` réclamait une passphrase au démarrage.
+
+Dépendance : feature `blocking` de `reqwest` (client dédié aux sous-commandes
+hors runtime asynchrone ; `tokio::block_on` y paniquerait).
+
+Limite : `ids=` attend l'**id** CoinGecko (`bitcoin`), pas le symbole
+(`ids=btc` renvoie une liste vide) — l'aide le dit.
+
 ## v0.7.51 — Thème `paper` (feuille de plan) et correctifs d'affichage (2026-11-15)
 
 ### Thème `paper` — feuille blanche, dessin industriel
