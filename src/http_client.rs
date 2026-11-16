@@ -12,6 +12,20 @@ pub static HTTP_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
         .expect("failed to build shared reqwest client")
 });
 
+/// Client **bloquant**, pour les modules qui tournent hors runtime asynchrone
+/// (`zer0 0cg`, `zer0 bintime`). Même politique que `HTTP_CLIENT`, mais sans
+/// runtime : `reqwest::blocking` s'interdit d'être appelé depuis un runtime,
+/// donc c'est ce client qu'utilise le mode standalone.
+pub static BLOCKING_CLIENT: Lazy<reqwest::blocking::Client> = Lazy::new(|| {
+    reqwest::blocking::Client::builder()
+        .pool_max_idle_per_host(2)
+        .pool_idle_timeout(Duration::from_secs(60))
+        .timeout(Duration::from_secs(20))
+        .user_agent("zer0gh0st/0.7.51")
+        .build()
+        .expect("failed to build shared blocking reqwest client")
+});
+
 /// Retry a request on 429 (rate limit) with exponential backoff + Retry-After header.
 /// Helper disponible pour les appelants externes (pas encore utilisé en interne).
 #[allow(dead_code)]

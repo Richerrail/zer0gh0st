@@ -178,6 +178,9 @@ enum Command {
     },
     /// Preview: CRT binary clock (full screen).
     Bintime,
+    /// Preview: watchlist crypto (full screen, API publique sans clé).
+    #[command(name = "0cg")]
+    Cg,
     /// Preview: Pong vs the agent (full screen).
     Pong,
     /// Hidden: dump one Pong frame (diagnostic).
@@ -581,7 +584,10 @@ pub async fn entry() -> Result<()> {
     let cli = Cli::parse_from(args);
 
     if let Some(cmd) = cli.command {
-        if !matches!(cmd, Command::Vault { .. }) {
+        // Le coffre n'est déverrouillé que pour ce qui en a besoin. Sans cette
+        // exception, `zer0 0cg` (qui n'utilise aucune clé) réclamait une
+        // passphrase au démarrage — bloquant, et sans rapport avec la commande.
+        if !matches!(cmd, Command::Vault { .. }) && cmd_needs_keys(&cmd) {
             ensure_vault();
         }
         return run_command(cmd).await;
@@ -705,6 +711,7 @@ async fn run_command(cmd: Command) -> Result<()> {
             Ok(())
         }
         Command::Bintime => fun::run_standalone(fun::Mode::BinTime),
+        Command::Cg => fun::run_standalone(fun::Mode::Cg),
         Command::Pong => fun::run_standalone(fun::Mode::Pong),
         Command::PongFrame => fun::debug_pong_frame(),
         Command::Stt { file } => stt_cmd(file).await,
@@ -1113,6 +1120,34 @@ async fn jev_cmd(file: String) -> Result<()> {
 }
 
 /// If a vault exists and is locked, try env then an interactive prompt.
+/// La sous-commande a-t-elle besoin des clés (coffre) ?
+///
+/// Les commandes **locales** (aperçu, aide, audit, catalogue, base de
+/// connaissance…) n'ouvrent aucune requête authentifiée : leur demander une
+/// passphrase est un blocage sans objet.
+fn cmd_needs_keys(cmd: &Command) -> bool {
+    !matches!(
+        cmd,
+        Command::Vault { .. }
+            | Command::Bintime
+            | Command::Cg
+            | Command::Pong
+            | Command::PongFrame
+            | Command::Commands
+            | Command::Audit { .. }
+            | Command::Top { .. }
+            | Command::Stt { .. }
+            | Command::Pdf { .. }
+            | Command::Kb { .. }
+            | Command::Apis { .. }
+            | Command::Task { .. }
+            | Command::Whoami { .. }
+            | Command::Memory { .. }
+            | Command::Embeddings { .. }
+            | Command::Project { .. }
+    )
+}
+
 fn ensure_vault() {
     if !vault::enabled() || vault::is_unlocked() {
         return;

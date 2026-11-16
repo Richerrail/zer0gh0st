@@ -26,6 +26,107 @@ pub fn set_theme(name: &str) -> Result<Vec<String>> {
     )])
 }
 
+// Watchlist `0cg`
+
+/// Identifiant CoinGecko plausible : minuscules, chiffres, `-` et `_`.
+/// (Les symboles boursiers (`btc`) passent aussi : l'API les résout.)
+pub fn normalize_coin(raw: &str) -> Option<String> {
+    let c = raw.trim().to_lowercase();
+    if c.is_empty() || c.len() > 64 {
+        return None;
+    }
+    if !c
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+    {
+        return None;
+    }
+    Some(c)
+}
+
+/// Watchlist configurée, **dans l'ordre de l'utilisateur**.
+pub fn cg_coins() -> Vec<String> {
+    crate::config::load_global().cg_coins
+}
+
+fn save_cg_coins(coins: Vec<String>) -> Result<()> {
+    let mut g = crate::config::load_global();
+    g.cg_coins = coins;
+    crate::config::save_global(&g)?;
+    Ok(())
+}
+
+/// Ajoute des devises (sans doublon), dans l'ordre donné.
+pub fn cg_add(names: &[&str]) -> Result<Vec<String>> {
+    if names.is_empty() {
+        return Err(anyhow!("usage : /0cg add <id|symbole>…"));
+    }
+    let mut coins = cg_coins();
+    let mut added = Vec::new();
+    for raw in names {
+        let c = normalize_coin(raw)
+            .ok_or_else(|| anyhow!("devise invalide : {raw} (minuscules, chiffres, - et _)"))?;
+        if !coins.contains(&c) {
+            coins.push(c.clone());
+            added.push(c);
+        }
+    }
+    if added.is_empty() {
+        return Ok(vec!["déjà dans la watchlist".to_string()]);
+    }
+    save_cg_coins(coins.clone())?;
+    Ok(vec![format!(
+        "ajouté : {} · watchlist ({}) : {}",
+        added.join(", "),
+        coins.len(),
+        coins.join(", ")
+    )])
+}
+
+/// Retire des devises.
+pub fn cg_rm(names: &[&str]) -> Result<Vec<String>> {
+    if names.is_empty() {
+        return Err(anyhow!("usage : /0cg rm <id|symbole>…"));
+    }
+    let mut coins = cg_coins();
+    let mut removed = Vec::new();
+    for raw in names {
+        if let Some(c) = normalize_coin(raw) {
+            if let Some(i) = coins.iter().position(|x| *x == c) {
+                coins.remove(i);
+                removed.push(c);
+            }
+        }
+    }
+    if removed.is_empty() {
+        return Ok(vec!["aucune de ces devises dans la watchlist".to_string()]);
+    }
+    save_cg_coins(coins.clone())?;
+    Ok(vec![format!(
+        "retiré : {} · watchlist ({}) : {}",
+        removed.join(", "),
+        coins.len(),
+        if coins.is_empty() {
+            "vide".to_string()
+        } else {
+            coins.join(", ")
+        }
+    )])
+}
+
+/// Liste lisible de la watchlist.
+pub fn cg_list() -> Vec<String> {
+    let coins = cg_coins();
+    if coins.is_empty() {
+        return vec!["watchlist vide — `/0cg add btc` (id CoinGecko ou symbole)".to_string()];
+    }
+    vec![format!(
+        "watchlist ({}) : {}",
+        coins.len(),
+        coins.join(", ")
+    )]
+}
+
 /// `/theme <nom> default` : mémorise ce thème comme **défaut** (et l'applique).
 pub fn set_theme_default(name: &str) -> Result<Vec<String>> {
     let selected = crate::theme::resolve(name)?;

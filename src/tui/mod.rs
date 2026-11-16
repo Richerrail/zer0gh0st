@@ -119,6 +119,8 @@ pub struct App {
     pub wizard: Option<wizard::Wizard>,
     /// Saisie masquée (clé API, jeton) : le buffer reste réel, l'affichage non.
     pub secret_mode: bool,
+    /// Mod « 0cg » : watchlist crypto (panneau latéral). `None` = jamais ouvert.
+    pub cg: Option<crate::fun::cg::Cg>,
     /// Cible à appliquer quand la liste de modèles arrivera (ex. rôle à définir).
     pub pending_picker_target: Option<String>,
     /// Liste de tâches animée : (index du message, tâches chargées).
@@ -344,6 +346,7 @@ pub async fn run(
         picker: None,
         wizard: None,
         secret_mode: false,
+        cg: None,
         pending_picker_target: None,
         task_view: None,
         pending_image: None,
@@ -624,6 +627,11 @@ async fn event_loop(
                     if let Some(t) = &mut app.top {
                         t.tick();
                     }
+                }
+                if app.mode == crate::fun::Mode::Cg
+                    || app.side_mode == Some(crate::fun::Mode::Cg)
+                {
+                    tick_cg(app, ui_tx);
                 }
                 if app.mode == crate::fun::Mode::Pong {
                     app.pong.step();
@@ -1256,6 +1264,13 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
                     .push(ChatMessage::notice(format!("Réglage non enregistré: {e}"))),
             }
         }
+        "/0cg" | "/cg" => {
+            if let Some(t) = &app.term {
+                t.stop();
+            }
+            crate::sound::event(crate::sound::Event::Panel);
+            handle_cg(app, &args, ui_tx);
+        }
         "/t0p" => {
             if let Some(t) = &app.term {
                 t.stop();
@@ -1346,6 +1361,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
              /think                     active/desactive le raisonnement\n\
              /provider [list|keys|add|use|remove]  (sans arg : sélection)\n\
              /theme [nom [default] | default | list]  thème actif / défaut\n\
+             /0cg [add|rm|list|off]  watchlist crypto (panneau latéral)\n\
              /provider add <id> <clé>   dépose la clé sur zer0-gw (sinon local)\n\
              /provider keys             clés détenues par zer0-gw\n\
              /provider use <id>         change de provider\n\
@@ -1972,6 +1988,90 @@ fn push_lines(app: &mut App, res: anyhow::Result<Vec<String>>, prefix: &str) {
             .messages
             .push(ChatMessage::notice(format!("{prefix} : {e}"))),
     }
+}
+
+/// `/0cg` — watchlist crypto dans le panneau latéral (API publique, sans clé).
+///
+/// Sans argument : ouvrir/fermer le panneau. `add`/`rm` modifient la liste
+/// **persistée** (`config.toml`, `cg_coins`), dans l'ordre choisi par
+/// l'utilisateur — aucune liste par défaut n'est imposée.
+fn handle_cg(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) {
+    let sub = args.first().copied().unwrap_or("");
+    let res: anyhow::Result<Vec<String>> = match sub {
+        "" | "on" | "show" => {
+            if app.cg.is_none() {
+                app.cg = Some(crate::fun::cg::Cg::new(crate::commands::cg_coins()));
+            }
+            app.side_mode = Some(crate::fun::Mode::Cg);
+            app.focus_panel = false;
+            tick_cg(app, ui_tx);
+            Ok(vec![format!(
+                "0cg — watchlist ({} actif(s)) · `/0cg add <id|symbole>`",
+                crate::commands::cg_coins().len()
+            )])
+        }
+        "off" | "close" => {
+            app.side_mode = None;
+            app.focus_panel = false;
+            Ok(vec!["0cg fermé".to_string()])
+        }
+        "add" => crate::commands::cg_add(&args[1..]),
+        "rm" | "remove" | "del" => crate::commands::cg_rm(&args[1..]),
+        "list" => Ok(crate::commands::cg_list()),
+        other => Err(anyhow::anyhow!(
+            "usage : /0cg [add <id|symbole>… | rm <id|symbole>… | list | off] (reçu : {other})"
+        )),
+    };
+    match res {
+        Ok(lines) => {
+            // La liste a pu changer : le panneau vivant suit la config.
+            let coins = crate::commands::cg_coins();
+            match &mut app.cg {
+                Some(c) => {
+                    c.coins = coins;
+                    c.reload();
+                }
+                None => app.cg = Some(crate::fun::cg::Cg::new(coins)),
+            }
+            for line in lines {
+                app.messages.push(ChatMessage::notice(line));
+            }
+        }
+        Err(e) => app.messages.push(ChatMessage::notice(format!("{e}"))),
+    }
+}
+
+/// Lance la requête si elle est due (intervalle + pas déjà en vol).
+fn tick_cg(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
+    let Some(cg) = &mut app.cg else {
+        return;
+    };
+    if !cg.due() {
+        return;
+    }
+    cg.loading = true;
+    let coins = cg.coins.clone();
+    let ui = ui_tx.clone();
+    tokio::spawn(async move {
+        let url = crate::fun::cg::markets_url(&coins, "usd");
+        let ev = match crate::http_client::HTTP_CLIENT
+            .get(&url)
+            .header("accept", "application/json")
+            // Sans agent, l'API répond 403 (Cloudflare) : le panneau restait
+            // vide avec « HTTP 403 » pour seule explication.
+            .header("user-agent", crate::fun::cg::USER_AGENT)
+            .send()
+            .await
+        {
+            Ok(r) if r.status().is_success() => match r.json::<serde_json::Value>().await {
+                Ok(v) => UiEvent::CgQuotes(crate::fun::cg::parse_markets(&v)),
+                Err(e) => UiEvent::CgError(format!("réponse illisible : {e}")),
+            },
+            Ok(r) => UiEvent::CgError(format!("HTTP {}", r.status())),
+            Err(e) => UiEvent::CgError(format!("réseau : {e}")),
+        };
+        let _ = ui.send(ev);
+    });
 }
 
 fn apply_theme(app: &mut App, name: &str) {
@@ -3950,6 +4050,11 @@ fn handle_input(ev: Event, app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
                         app.mode = crate::fun::Mode::Chat;
                     }
                 }
+                crate::fun::Mode::Cg => {
+                    if matches!(k.code, KeyCode::Esc | KeyCode::Char('q')) {
+                        app.mode = crate::fun::Mode::Chat;
+                    }
+                }
                 crate::fun::Mode::Top => {
                     if matches!(k.code, KeyCode::Esc | KeyCode::Char('q')) {
                         app.side_mode = None;
@@ -4299,6 +4404,16 @@ fn handle_input(ev: Event, app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
 
 fn handle_ui(ev: UiEvent, app: &mut App) {
     match ev {
+        UiEvent::CgQuotes(qs) => {
+            if let Some(c) = &mut app.cg {
+                c.apply(qs);
+            }
+        }
+        UiEvent::CgError(e) => {
+            if let Some(c) = &mut app.cg {
+                c.fail(e);
+            }
+        }
         UiEvent::Token(t) => {
             if app.zc.on {
                 app.zc.state = crate::zerochan::State::Speaking;
@@ -4504,6 +4619,7 @@ fn draw(f: &mut Frame, app: &mut App) {
         | crate::fun::Mode::BinTime
         | crate::fun::Mode::Top
         | crate::fun::Mode::File
+        | crate::fun::Mode::Cg
         | crate::fun::Mode::Term => {
             let mode = app.mode;
             draw_panel(f, area, app, mode);
@@ -4599,6 +4715,11 @@ fn draw_panel(f: &mut Frame, area: Rect, app: &mut App, mode: crate::fun::Mode) 
             app.term_rect = area;
             if let Some(t) = &mut app.term {
                 t.draw(f, area);
+            }
+        }
+        crate::fun::Mode::Cg => {
+            if let Some(c) = &app.cg {
+                c.draw(f, area);
             }
         }
         _ => {}
@@ -5926,6 +6047,7 @@ mod tests {
             picker: None,
             wizard: None,
             secret_mode: false,
+            cg: None,
             pending_picker_target: None,
             task_view: None,
             pending_image: None,

@@ -461,6 +461,10 @@ Journal d'audit des actions de l'agent (commandes exécutées, fichiers écrits)
 
 Preview: CRT binary clock (full screen)
 
+### `zer0 0cg`
+
+Preview: watchlist crypto (full screen, API publique sans clé)
+
 ### `zer0 pong`
 
 Preview: Pong vs the agent (full screen)

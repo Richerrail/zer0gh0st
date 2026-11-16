@@ -91,6 +91,10 @@ pub struct GlobalConfig {
     /// disparaissait à chaque redémarrage, sans le dire.
     #[serde(default)]
     pub persona: Option<String>,
+    /// Watchlist `0cg` : identifiants CoinGecko, **dans l'ordre choisi**.
+    /// Aucune liste par défaut n'est imposée : c'est la tienne.
+    #[serde(default)]
+    pub cg_coins: Vec<String>,
     /// Raisonnement (`think`) activé au démarrage (choix de l'assistant).
     #[serde(default)]
     pub thinking: bool,
@@ -146,6 +150,7 @@ impl Default for GlobalConfig {
             github_prompt_count: 0,
             github_prompted: false,
             persona: None,
+            cg_coins: Vec::new(),
             thinking: false,
             code_exec: false,
             setup_done: false,

@@ -33,6 +33,16 @@ pub fn truncate_utf8(s: &mut String, max: usize) -> bool {
     true
 }
 
+/// Entier lu depuis une variable d'environnement, avec valeur par défaut et
+/// minimum (les valeurs absurdes — 0, négatif, non numérique — sont ignorées).
+pub fn env_u64(name: &str, default: u64, min: u64) -> u64 {
+    std::env::var(name)
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|v| *v >= min)
+        .unwrap_or(default)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
