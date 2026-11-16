@@ -3,6 +3,10 @@ use crate::agent::history::ChatMessage;
 /// Events sent from background agent turns back to the TUI.
 #[derive(Debug, Clone)]
 pub enum UiEvent {
+    /// Watchlist `0cg` : réponse de l'API (devises déjà analysées).
+    CgQuotes(Vec<crate::fun::cg::Quote>),
+    /// Watchlist `0cg` : échec (réseau, HTTP, JSON) — affiché tel quel.
+    CgError(String),
     /// A streamed token of the assistant response.
     Token(String),
     /// A streamed token of the model's internal reasoning (thinking models).

@@ -180,6 +180,15 @@ pub const TREE: &[Node] = &[
             n("power", "/0do power "),
         ],
     ),
+    g(
+        "0cg",
+        &[
+            n("ouvrir", "/0cg"),
+            n("add", "/0cg add "),
+            n("rm", "/0cg rm "),
+            n("list", "/0cg list"),
+        ],
+    ),
     g("whoami", &[n("status", "/whoami"), n("off", "/whoami off")]),
     g(
         "vault",

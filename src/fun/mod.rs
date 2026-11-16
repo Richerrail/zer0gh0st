@@ -1,4 +1,5 @@
 pub mod bintime;
+pub mod cg;
 pub mod file;
 pub mod pong;
 pub mod radio;
@@ -19,6 +20,7 @@ pub enum Mode {
     Top,
     File,
     Term,
+    Cg,
 }
 
 /// Dump a single Pong frame to stdout (diagnostic).
@@ -49,6 +51,7 @@ pub fn run_standalone(mode: Mode) -> anyhow::Result<()> {
     let mut top = top::Top::new();
     let mut file = file::FileExplorer::open("");
     let mut term = term::Term::new();
+    let mut cg = cg::Cg::new(crate::commands::cg_coins());
 
     let res = (|| -> anyhow::Result<()> {
         let tick = Duration::from_millis(45);
@@ -63,6 +66,7 @@ pub fn run_standalone(mode: Mode) -> anyhow::Result<()> {
                     Mode::Top => top.draw(f, area),
                     Mode::File => file.draw(f, area),
                     Mode::Term => term.draw(f, area),
+                    Mode::Cg => cg.draw(f, area),
                     Mode::Chat => {}
                 }
             })?;
@@ -83,6 +87,11 @@ pub fn run_standalone(mode: Mode) -> anyhow::Result<()> {
                                 KeyCode::Down | KeyCode::Char('s') => pong.set_dir(1),
                                 _ => {}
                             },
+                            Mode::Cg => {
+                                if matches!(k.code, KeyCode::Esc | KeyCode::Char('q')) {
+                                    break;
+                                }
+                            }
                             Mode::Top => {
                                 if matches!(k.code, KeyCode::Esc | KeyCode::Char('q')) {
                                     break;
@@ -129,6 +138,11 @@ pub fn run_standalone(mode: Mode) -> anyhow::Result<()> {
                 next = now;
             }
             while now >= next {
+                // Panneau crypto : rafraîchissement par son propre intervalle
+                // (15 s), pas à 45 Hz.
+                if mode == Mode::Cg {
+                    cg.tick_standalone();
+                }
                 match mode {
                     Mode::BinTime => bt.tick(),
                     Mode::Pong => pong.step(),
@@ -136,6 +150,7 @@ pub fn run_standalone(mode: Mode) -> anyhow::Result<()> {
                     Mode::Top => top.tick(),
                     Mode::File => {}
                     Mode::Term => {}
+                    Mode::Cg => {}
                     Mode::Chat => {}
                 }
                 next += tick;
