@@ -6,9 +6,9 @@ use crate::llm::llama::{ApiClient, ChatError, ChatOptions, ToolsMode};
 use crate::route::{self, Endpoint};
 use crate::tools::{self, ToolSpec};
 
-const MAX_ITERATIONS: usize = 8;
+pub(crate) const MAX_ITERATIONS: usize = 8;
 /// Hard ceiling on tool calls within a single turn.
-const MAX_TOOL_CALLS: usize = 24;
+pub(crate) const MAX_TOOL_CALLS: usize = 24;
 /// Reprises automatiques après une réponse tronquée (`finish_reason = length`).
 const MAX_CONTINUATIONS: u32 = 4;
 
@@ -118,6 +118,11 @@ pub async fn run_turn_budgeted(
     max_iterations: usize,
     max_tool_calls: usize,
 ) {
+    if crate::cancel::is_cancelled() {
+        let _ = ui.send(UiEvent::Info("⏹ génération interrompue".into()));
+        let _ = ui.send(UiEvent::TurnComplete(messages));
+        return;
+    }
     if endpoints.is_empty() {
         let _ = ui.send(UiEvent::Error("aucun endpoint configuré".into()));
         return;
@@ -160,10 +165,16 @@ pub async fn run_turn_budgeted(
 
         let client = ep.client();
 
-        match client
-            .stream_chat(&system, &wire_messages(&messages), &tools, &options, &ui)
-            .await
-        {
+        let wire = wire_messages(&messages);
+        let response = tokio::select! {
+            biased;
+            _ = crate::cancel::cancelled() => {
+                let _ = ui.send(UiEvent::TurnComplete(messages));
+                return;
+            }
+            response = client.stream_chat(&system, &wire, &tools, &options, &ui) => response,
+        };
+        match response {
             Ok((content, calls, _)) if content.trim().is_empty() && calls.is_empty() => {
                 // Model produced nothing usable (e.g. reasoning-only) → fail over.
                 route::mark_failed(&ep.label);
@@ -286,10 +297,16 @@ pub async fn run_turn_budgeted(
                 let _ = ui.send(UiEvent::Info(format!(
                     "↪ réponse tronquée → reprise automatique ({continuations}/{MAX_CONTINUATIONS})"
                 )));
-                match client
-                    .stream_chat(&system, &wire_messages(&messages), &tools, &options, &ui)
-                    .await
-                {
+                let wire = wire_messages(&messages);
+                let response = tokio::select! {
+                    biased;
+                    _ = crate::cancel::cancelled() => {
+                        let _ = ui.send(UiEvent::TurnComplete(messages));
+                        return;
+                    }
+                    response = client.stream_chat(&system, &wire, &tools, &options, &ui) => response,
+                };
+                match response {
                     Ok((c, cs, f)) => {
                         content = c;
                         calls = cs;
@@ -309,7 +326,6 @@ pub async fn run_turn_budgeted(
 
         for call in &calls {
             if crate::cancel::is_cancelled() {
-                let _ = ui.send(UiEvent::Error("⏹ interrompu par /stop".into()));
                 cancelled = true;
                 break;
             }
@@ -319,7 +335,7 @@ pub async fn run_turn_budgeted(
             let n = seen.entry(fp).or_insert(0);
             *n += 1;
             if *n >= 3 {
-                let _ = ui.send(UiEvent::Error(format!(
+                let _ = ui.send(UiEvent::Info(format!(
                     "boucle détectée : `{}` appelé {} fois avec les mêmes arguments → arrêt",
                     call.function.name, *n
                 )));
@@ -327,7 +343,7 @@ pub async fn run_turn_budgeted(
                 break;
             }
             if total_calls > max_tool_calls {
-                let _ = ui.send(UiEvent::Error(format!(
+                let _ = ui.send(UiEvent::Info(format!(
                     "budget d'appels d'outils dépassé ({max_tool_calls}) → arrêt"
                 )));
                 stop_reason = Some("budget d'outils".into());
@@ -352,6 +368,12 @@ pub async fn run_turn_budgeted(
                 ChatMessage::tool_result(call.id.clone(), result)
             };
             messages.push(tool_msg);
+            // Ne jamais relancer le modèle ou un autre outil après un arrêt,
+            // y compris quand le dernier outil vient juste de se terminer.
+            if crate::cancel::is_cancelled() {
+                cancelled = true;
+                break;
+            }
         }
 
         // Budget/boucle/annulation : on ne relance pas le modèle avec des
@@ -360,11 +382,17 @@ pub async fn run_turn_budgeted(
             break;
         }
 
-        // subsequent calls stay on the chosen endpoint
-        match client
-            .stream_chat(&system, &wire_messages(&messages), &tools, &options, &ui)
-            .await
-        {
+        // Subsequent calls stay on the chosen endpoint, but remain interruptible.
+        let wire = wire_messages(&messages);
+        let response = tokio::select! {
+            biased;
+            _ = crate::cancel::cancelled() => {
+                let _ = ui.send(UiEvent::TurnComplete(messages));
+                return;
+            }
+            response = client.stream_chat(&system, &wire, &tools, &options, &ui) => response,
+        };
+        match response {
             Ok((c, cs, f)) => {
                 content = c;
                 calls = cs;
@@ -390,10 +418,16 @@ pub async fn run_turn_budgeted(
             "Tu as atteint la limite d'outils pour ce tour. Réponds MAINTENANT en texte, \
              sans appeler d'outil : résume ce qui a été fait, ce qui reste, et l'état exact.",
         ));
-        match client
-            .stream_chat(&system, &wire_messages(&messages), &[], &options, &ui)
-            .await
-        {
+        let wire = wire_messages(&messages);
+        let response = tokio::select! {
+            biased;
+            _ = crate::cancel::cancelled() => {
+                let _ = ui.send(UiEvent::TurnComplete(messages));
+                return;
+            }
+            response = client.stream_chat(&system, &wire, &[], &options, &ui) => response,
+        };
+        match response {
             Ok((c, _cs, _f)) => {
                 if !c.trim().is_empty() {
                     messages.push(ChatMessage::assistant(c, Vec::new()));

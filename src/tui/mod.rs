@@ -62,8 +62,8 @@ const HELP_SHORT: &str =
   /help all           la liste complète (26 commandes de plus)
   /quit  /new  /chats session
 
-  Touches : F2 palette · F3 écriture · F4 shell · F5 aide · F6 sessions
-            F7 relance · F8 0chan · F10 micro · Ctrl+O déplier un outil";
+  Touches : Échap arrêter · F2 palette · F3 écriture · F4 shell · F5 aide
+            F6 sessions · F7 relance · F8 0chan · F10 micro · Ctrl+O déplier un outil";
 
 pub struct App {
     pub messages: Vec<ChatMessage>,
@@ -676,6 +676,9 @@ fn system_with_tools(base: &str, tools: &[ToolSpec]) -> String {
 }
 
 fn start_turn(app: &mut App, text: String, ui_tx: &UnboundedSender<UiEvent>) {
+    // Effacer avant de lancer la tâche : Échap immédiatement après l'envoi
+    // ne doit pas être effacé au démarrage asynchrone du tour.
+    crate::cancel::clear();
     let role = match &app.forced_role {
         Some(r) => r.clone(),
         None => route::auto_role(&text).to_string(),
@@ -750,12 +753,34 @@ fn start_turn(app: &mut App, text: String, ui_tx: &UnboundedSender<UiEvent>) {
     tokio::spawn(async move {
         // Mode local : llama-server doit tourner avant tout appel.
         if settings.provider_id == "local" {
-            if !crate::local::is_up().await {
+            if crate::cancel::is_cancelled() {
+                let _ = ui.send(UiEvent::TurnComplete(messages));
+                return;
+            }
+            let is_up = tokio::select! {
+                biased;
+                _ = crate::cancel::cancelled() => {
+                    let _ = ui.send(UiEvent::TurnComplete(messages));
+                    return;
+                }
+                up = crate::local::is_up() => up,
+            };
+            if !is_up {
                 let _ = ui.send(UiEvent::Info(
                     "⏳ mode local : démarrage de llama-server…".into(),
                 ));
             }
-            match crate::local::ensure(Some(&settings.model)).await {
+            // Le serveur peut continuer à démarrer : ce n'est pas une réponse
+            // de l'agent et on ne tue pas un serveur potentiellement partagé.
+            let local = tokio::select! {
+                biased;
+                _ = crate::cancel::cancelled() => {
+                    let _ = ui.send(UiEvent::TurnComplete(messages));
+                    return;
+                }
+                result = crate::local::ensure(Some(&settings.model)) => result,
+            };
+            match local {
                 Ok(msg) => {
                     let _ = ui.send(UiEvent::Info(format!("🖥 {msg}")));
                 }
@@ -778,7 +803,15 @@ fn start_turn(app: &mut App, text: String, ui_tx: &UnboundedSender<UiEvent>) {
         }
         // Connaissance locale : bloc partagé avec `--once` (`crate::knowledge_block`).
         if kb_auto {
-            if let Some((block, srcs)) = crate::knowledge_block(&search_text).await {
+            let knowledge = tokio::select! {
+                biased;
+                _ = crate::cancel::cancelled() => {
+                    let _ = ui.send(UiEvent::TurnComplete(messages));
+                    return;
+                }
+                result = crate::knowledge_block(&search_text) => result,
+            };
+            if let Some((block, srcs)) = knowledge {
                 system.push_str(&block);
                 let _ = ui.send(UiEvent::Info(format!(
                     "📚 connaissance injectée : {}",
@@ -791,13 +824,30 @@ fn start_turn(app: &mut App, text: String, ui_tx: &UnboundedSender<UiEvent>) {
         // 4 000). Définition unique dans `compact::budget_for`.
         let budget = crate::agent::compact::budget_for(ctx_window);
         if crate::agent::compact::estimate_tokens(&base) >= budget {
-            let (b, outcome) = crate::agent::compact::compact_now(utility, &system, base, 6).await;
+            let (b, outcome) = tokio::select! {
+                biased;
+                _ = crate::cancel::cancelled() => {
+                    let _ = ui.send(UiEvent::TurnComplete(base));
+                    return;
+                }
+                result = crate::agent::compact::compact_now(utility, &system, base.clone(), 6) => result,
+            };
             if matches!(outcome, crate::agent::compact::CompactOutcome::Compacted) {
                 let _ = ui.send(UiEvent::Compacted(b.clone()));
             }
             base = b;
         }
-        crate::agent::turn::run_turn(endpoints, system, base, tools, options, ui).await;
+        crate::agent::turn::run_turn_budgeted(
+            endpoints,
+            system,
+            base,
+            tools,
+            options,
+            ui,
+            crate::agent::turn::MAX_ITERATIONS,
+            crate::agent::turn::MAX_TOOL_CALLS,
+        )
+        .await;
     });
 }
 
@@ -836,6 +886,19 @@ fn nudge(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
         .push(ChatMessage::notice("👉 Coup de coude (Nudge)"));
     let text = "Continue ton raisonnement ou ton exécution.".to_string();
     start_turn(app, text, ui_tx);
+}
+
+/// Échap et /stop demandent le même arrêt coopératif, sans fermer la TUI.
+fn request_stop(app: &mut App) {
+    if app.streaming {
+        if !crate::cancel::is_cancelled() {
+            crate::cancel::request();
+            app.messages.push(ChatMessage::notice("⏹ arrêt demandé…"));
+        }
+    } else {
+        app.messages
+            .push(ChatMessage::notice("Rien à interrompre."));
+    }
 }
 
 fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
@@ -917,14 +980,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
         "/ask" => cmd_ask(app, &args, ui_tx),
         "/review" => cmd_review(app, &args, ui_tx),
         "/search" => cmd_search(&args, ui_tx),
-        "/stop" => {
-            if app.streaming {
-                crate::cancel::request();
-            } else {
-                app.messages
-                    .push(ChatMessage::notice("Rien à interrompre."));
-            }
-        }
+        "/stop" => request_stop(app),
         "/context" => handle_context(app),
         "/whoami" => handle_whoami(app, &args),
         "/vault" => handle_vault(app, &args),
@@ -1400,7 +1456,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
              /ask <role> <question>      sous-agent isolé (sans outils)\n\
              /review <fichier>           relecture par le rôle review + verdict\n\
              /search <requête>           recherche web (DuckDuckGo)\n\
-             /stop                       interrompt la génération en cours\n\
+             /stop ou Échap              demande l'arrêt de l'agent en cours\n\
              /context                    état de la conversation\n\
              /whoami [nom|off]           persona (prompt système alternatif, persistée)\n\
              /system                     prompt actif (local/cloud) + persona\n\
@@ -1467,16 +1523,64 @@ fn handle_provider(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent
                 "list" => Ok(crate::commands::provider_list()),
                 "keys" => Ok(crate::commands::provider_keys()),
                 "add" => {
-                    let first = args.get(1).copied().unwrap_or("");
-                    if first.eq_ignore_ascii_case("cline") {
-                        // /provider add cline [url] [clé]
-                        crate::commands::provider_add_cline(
-                            args.get(2).copied(),
-                            args.get(3).copied(),
-                        )
-                    } else {
-                        crate::commands::provider_add(first, args.get(2).copied())
+                    // /provider add <id> [<base_url>] [<nom>] <clé> [--gw|--local|--force]
+                    // Flagles --base-url/--name/--key lèvent l'ambiguïté positionnelle.
+                    let mut route = crate::commands::GwRoute::Auto;
+                    let mut force = false;
+                    let mut base_url: Option<&str> = None;
+                    let mut name: Option<&str> = None;
+                    let mut key_opt: Option<&str> = None;
+                    let mut pos: Vec<&str> = Vec::new();
+                    let mut i = 1;
+                    while i < args.len() {
+                        match args[i] {
+                            "--gw" => route = crate::commands::GwRoute::Gw,
+                            "--local" => route = crate::commands::GwRoute::Local,
+                            "--force" => force = true,
+                            "--base-url" => {
+                                i += 1;
+                                base_url = args.get(i).copied();
+                            }
+                            "--name" => {
+                                i += 1;
+                                name = args.get(i).copied();
+                            }
+                            "--key" => {
+                                i += 1;
+                                key_opt = args.get(i).copied();
+                            }
+                            tok => pos.push(tok),
+                        }
+                        i += 1;
                     }
+                    let id = pos.first().copied().unwrap_or("");
+                    let mut rest: Vec<&str> = pos.iter().skip(1).copied().collect();
+                    if base_url.is_none() {
+                        if let Some(p) = rest
+                            .iter()
+                            .position(|t| t.starts_with("http://") || t.starts_with("https://"))
+                        {
+                            base_url = Some(rest.remove(p));
+                        }
+                    }
+                    if key_opt.is_none() {
+                        if rest.len() >= 2 {
+                            name = name.or(Some(rest[0]));
+                            key_opt = rest.last().copied();
+                        } else if rest.len() == 1 {
+                            key_opt = Some(rest[0]);
+                        }
+                    } else if rest.first().is_some() && name.is_none() {
+                        name = Some(rest[0]);
+                    }
+                    crate::commands::provider_add(crate::commands::ProviderAddArgs {
+                        id,
+                        base_url,
+                        name,
+                        key: key_opt,
+                        route,
+                        force,
+                    })
                 }
                 "add-custom" => crate::commands::provider_add_custom(
                     args.get(1).copied().unwrap_or(""),
@@ -2657,6 +2761,13 @@ pub fn cmd_0box(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent>) 
         }
     }
 
+    if app.streaming {
+        app.messages.push(ChatMessage::notice(
+            "Un tour est déjà en cours ; utilise Échap ou /stop avant de lancer un débat.",
+        ));
+        return;
+    }
+
     let topic = args.to_vec().join(" ");
     if topic.trim().is_empty() {
         app.messages.push(ChatMessage::notice("usage: /0box <sujet> [--perspectives main,code,reasoning]\n       /0box fallback <add|remove|list> <provider/model>\n       /0box help"));
@@ -2768,8 +2879,8 @@ pub async fn run_0box_debate(topic: String, perspectives: Vec<String>, setup: De
         all_tools,
         ui,
     } = setup;
-    // B5 : un `/stop` antérieur ne doit pas tuer ce débat dès la première ligne.
-    crate::cancel::clear();
+    // Le drapeau est préparé par l'appelant de premier niveau ; un débat
+    // imbriqué ne doit jamais effacer un arrêt demandé au tour parent.
     // Build tools available (respect F3/F4)
     let tools: Vec<crate::tools::ToolSpec> = all_tools
         .iter()
@@ -3003,7 +3114,7 @@ pub async fn run_0box_debate(topic: String, perspectives: Vec<String>, setup: De
 fn debate_end_message(cancelled: bool, done_turns: usize, total_turns: usize) -> String {
     if cancelled {
         format!(
-            "⏹ [0box] Débat interrompu par /stop après {done_turns}/{total_turns} tour(s) — pas de synthèse complète."
+            "⏹ [0box] Débat interrompu par Échap ou /stop après {done_turns}/{total_turns} tour(s) — pas de synthèse complète."
         )
     } else {
         format!(
@@ -4326,7 +4437,7 @@ fn handle_input(ev: Event, app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
             KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => {
                 app.should_quit = true
             }
-            KeyCode::Esc => app.should_quit = true,
+            KeyCode::Esc => request_stop(app),
             KeyCode::Enter => send_message(app, ui_tx),
             KeyCode::Left => app.cursor = app.cursor.saturating_sub(1),
             KeyCode::Right => {
@@ -4511,6 +4622,11 @@ fn handle_ui(ev: UiEvent, app: &mut App) {
                 let _ = crate::convo::append(m);
             }
             app.conversation = full;
+            if crate::cancel::is_cancelled() {
+                app.messages.push(ChatMessage::notice(
+                    "⏹ agent interrompu. Les actions déjà effectuées ne sont pas annulées.",
+                ));
+            }
             app.streaming = false;
             app.streaming_text.clear();
             app.reasoning_text.clear();
@@ -5869,6 +5985,8 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &mut App) {
         Span::styled(" Chats  ", txt),
         Span::styled(" F7 ", key),
         Span::styled(" Nudge  ", txt),
+        Span::styled(" Esc ", key),
+        Span::styled(" Stop  ", txt),
         Span::styled(" Ctrl+C ", key),
         Span::styled(" Exit  ", txt),
         Span::styled(" F3 ", key),
@@ -6400,11 +6518,19 @@ mod tests {
             app.streaming,
             "cmd_0box n'arme pas `streaming` : /stop répondra « Rien à interrompre. »"
         );
-        handle_command(&mut app, "/stop", &tx);
+        handle_input(
+            Event::Key(crossterm::event::KeyEvent::new(
+                KeyCode::Esc,
+                KeyModifiers::NONE,
+            )),
+            &mut app,
+            &tx,
+        );
         assert!(
             crate::cancel::is_cancelled(),
-            "/stop ignoré alors qu'un débat tourne"
+            "Échap ignoré alors qu'un débat tourne"
         );
+        assert!(!app.should_quit, "Échap ne doit pas quitter l'application");
 
         // Fin de débat : la TUI doit se débloquer.
         handle_ui(UiEvent::DebateEnd { cancelled: true }, &mut app);
@@ -6412,16 +6538,46 @@ mod tests {
         crate::cancel::clear();
     }
 
-    /// B5 : `/stop` doit être lisible par la boucle de débat, et un nouveau
-    /// débat doit repartir d'un drapeau propre.
     #[test]
-    fn cancel_flag_roundtrip() {
-        crate::cancel::clear();
-        assert!(!crate::cancel::is_cancelled());
-        crate::cancel::request();
-        assert!(crate::cancel::is_cancelled());
-        crate::cancel::clear();
-        assert!(!crate::cancel::is_cancelled());
+    fn escape_closes_views_and_quit_still_exits() {
+        let mut app = test_app();
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let esc = || {
+            Event::Key(crossterm::event::KeyEvent::new(
+                KeyCode::Esc,
+                KeyModifiers::NONE,
+            ))
+        };
+        handle_input(esc(), &mut app, &tx);
+        assert!(!app.should_quit);
+        assert!(app
+            .messages
+            .last()
+            .unwrap()
+            .content
+            .as_deref()
+            .unwrap()
+            .contains("Rien"));
+
+        open_command_palette(&mut app);
+        assert!(app.picker.is_some());
+        handle_input(esc(), &mut app, &tx);
+        assert!(app.picker.is_none());
+        assert!(!app.should_quit);
+
+        app.chats_popup = Some((vec![], 0));
+        handle_input(esc(), &mut app, &tx);
+        assert!(app.chats_popup.is_none());
+        assert!(!app.should_quit);
+
+        app.side_mode = Some(crate::fun::Mode::BinTime);
+        app.focus_panel = true;
+        handle_input(esc(), &mut app, &tx);
+        assert!(app.side_mode.is_none());
+        assert!(!app.should_quit);
+
+        handle_command(&mut app, "/quit", &tx);
+        assert!(app.should_quit);
     }
 
     #[test]

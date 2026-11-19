@@ -40,6 +40,11 @@ Store an API key for a known provider (reads $ENV if omitted)
 |---|---|
 | ` <ID>` |  |
 | ` <KEY>` |  |
+| `--base-url <BASE_URL>` | Base URL (http(s)://…). Required for custom providers |
+| `--name <NAME>` | Display name for a custom provider |
+| `--gw <GW>` | Force routing through zer0-gw (error if unreachable) |
+| `--local <LOCAL>` | Force local storage (config.toml), never the gateway |
+| `--force <FORCE>` | Activate even if the connectivity test is inconclusive |
 
 #### `zer0 provider add-custom`
 

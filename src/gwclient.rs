@@ -82,9 +82,14 @@ fn http_req(method: &str, path: &str, body: Option<&str>) -> Result<(u16, String
         .map_err(|e| e.to_string())?;
 
     let body = body.unwrap_or("");
+    // Jeton admin si configuré (env prioritaire, sinon config.toml). Sans effet
+    // sur le proxy (chemin `/provider/v1/...`), requis sur `/admin/*`.
+    let auth = admin_token()
+        .map(|t| format!("x-zer0-admin: {t}\r\n"))
+        .unwrap_or_default();
     let req = format!(
         "{method} {path} HTTP/1.1\r\nHost: {host}\r\nContent-Type: application/json\r\n\
-         Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+         {auth}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
     stream
@@ -100,16 +105,118 @@ fn http_req(method: &str, path: &str, body: Option<&str>) -> Result<(u16, String
         .nth(1)
         .and_then(|s| s.parse().ok())
         .ok_or_else(|| "réponse zer0-gw illisible".to_string())?;
-    let body = buf
+    let (head, body_raw) = buf
         .split_once("\r\n\r\n")
-        .map(|(_, b)| b.to_string())
-        .unwrap_or_default();
+        .map(|(h, b)| (h, b))
+        .unwrap_or(("", buf.as_str()));
+    // Le proxy de zer0-gw streame (pas de Content-Length) ré => réponses
+    // `Transfer-Encoding: chunked`. On dé-chunke pour pouvoir parser le JSON.
+    let body = if head
+        .to_ascii_lowercase()
+        .contains("transfer-encoding: chunked")
+    {
+        dechunk(body_raw)
+    } else {
+        body_raw.to_string()
+    };
     Ok((status, body))
+}
+
+/// Décode un corps HTTP `Transfer-Encoding: chunked` en texte brut.
+fn dechunk(s: &str) -> String {
+    let mut out = String::new();
+    let mut rest = s;
+    while let Some((size_str, after)) = rest.split_once("\r\n") {
+        let size = usize::from_str_radix(size_str.trim(), 16).unwrap_or(0);
+        if size == 0 {
+            break;
+        }
+        if after.len() < size {
+            out.push_str(after);
+            break;
+        }
+        out.push_str(&after[..size]);
+        rest = &after[size..];
+        if let Some(stripped) = rest.strip_prefix("\r\n") {
+            rest = stripped;
+        }
+    }
+    out
 }
 
 /// `true` si la passerelle répond (`/health`).
 pub fn probe() -> bool {
     matches!(http_req("GET", "/health", None), Ok((200..=299, _)))
+}
+
+/// Jeton admin : `ZER0_GW_ADMIN_TOKEN` (env, prioritaire) sinon `gw_admin_token`
+/// de la config globale. `None` = passerelle sans jeton (loopback historique).
+fn admin_token() -> Option<String> {
+    if let Some(t) = std::env::var("ZER0_GW_ADMIN_TOKEN")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+    {
+        return Some(t);
+    }
+    crate::config::load_global()
+        .gw_admin_token
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Enregistre (ou met à jour) un provider sur la passerelle — écriture seule,
+/// aucune clé. Idempotent : met à jour `base_url` si le provider existe déjà.
+/// Retourne une erreur si la passerelle est absente ou refuse (id/base_url).
+pub fn register_provider(id: &str, base_url: &str) -> Result<(), String> {
+    if !probe() {
+        return Err("zer0-gw injoignable (sudo systemctl start zer0-gw)".to_string());
+    }
+    let payload = serde_json::json!({ "id": id, "base_url": base_url }).to_string();
+    let (status, body) = http_req("POST", "/admin/providers", Some(&payload))?;
+    match status {
+        200..=299 => Ok(()),
+        s => Err(format!("zer0-gw a refusé le provider ({s}) : {body}")),
+    }
+}
+
+/// Sonde `GET /{id}/v1/models` **à travers la passerelle** (le chemin réel).
+/// `Err` = injoignable ; sinon `(status HTTP, corps)`.
+pub fn probe_models(id: &str) -> Result<(u16, String), String> {
+    http_req("GET", &format!("/{id}/v1/models"), None)
+}
+
+/// Sonde `POST /{id}/v1/chat/completions` (1 token) à travers la passerelle.
+pub fn probe_chat(id: &str, model: &str) -> Result<(u16, String), String> {
+    let body = serde_json::json!({
+        "model": model,
+        "messages": [{"role": "user", "content": "ping"}],
+        "max_tokens": 1,
+        "stream": false,
+    })
+    .to_string();
+    http_req("POST", &format!("/{id}/v1/chat/completions"), Some(&body))
+}
+
+/// Jusqu'à `max` ids de modèles d'une réponse `GET /v1/models` (`data[i].id`).
+/// Les premiers `[0..max]` suffisent pour sonder : un seul modèle en 404 ne
+/// condamne pas le provider (listes d'agrégateurs comme NVIDIA/OpenRouter).
+pub fn model_ids(models_body: &str, max: usize) -> Vec<String> {
+    serde_json::from_str::<serde_json::Value>(models_body)
+        .ok()
+        .and_then(|v| v.get("data").and_then(|d| d.as_array()).cloned())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| m.get("id")?.as_str().map(str::to_string))
+                .take(max)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Premier id de modèle d'une réponse `GET /v1/models` (`data[0].id`).
+pub fn first_model_id(models_body: &str) -> Option<String> {
+    model_ids(models_body, 1).into_iter().next()
 }
 
 /// Providers connus de la passerelle et présence d'une clé (jamais la valeur).
@@ -151,6 +258,11 @@ fn post_key(gw_id: &str, key: &str) -> Result<(), String> {
         )),
         s => Err(format!("zer0-gw a refusé la clé ({s}) : {body}")),
     }
+}
+
+/// Dépose une clé pour `id` (résout l'id passerelle). Écriture seule.
+pub fn set_key(id: &str, key: &str) -> Result<(), String> {
+    post_key(&gw_target(id), key)
 }
 
 /// Demande à la passerelle d'oublier une clé (best-effort pour `provider remove`).
@@ -196,6 +308,34 @@ pub fn activate_provider(g: &mut GlobalConfig, provider_id: &str) -> (String, St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dechunk_rebuilds_body() {
+        // Deux chunks "Hello " (6) et "world" (5), fin 0.
+        let raw = "6\r\nHello \r\n5\r\nworld\r\n0\r\n\r\n";
+        assert_eq!(dechunk(raw), "Hello world");
+    }
+
+    #[test]
+    fn dechunk_handles_json_chunk() {
+        let body = r#"{"data":[{"id":"demo/model-1"}]}"#;
+        let hex = format!("{:x}", body.len());
+        let raw = format!("{hex}\r\n{body}\r\n0\r\n\r\n");
+        assert_eq!(
+            first_model_id(&dechunk(&raw)).as_deref(),
+            Some("demo/model-1")
+        );
+    }
+
+    #[test]
+    fn first_model_id_reads_data() {
+        assert_eq!(
+            first_model_id(r#"{"data":[{"id":"a/b"}]}"#).as_deref(),
+            Some("a/b")
+        );
+        assert_eq!(first_model_id("{}"), None);
+        assert_eq!(first_model_id("pas json"), None);
+    }
 
     #[test]
     fn gw_target_mapping() {

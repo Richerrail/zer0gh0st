@@ -1,6 +1,7 @@
 pub mod box0;
 pub mod code_exec;
 pub mod delegate;
+pub mod email;
 pub mod knowledge_add;
 pub mod knowledge_delete;
 pub mod knowledge_search;
@@ -87,6 +88,7 @@ pub fn all() -> Vec<ToolSpec> {
         box0::spec(),
         code_exec::spec(),
         delegate::spec(),
+        email::spec(),
         text_editor::spec(),
         memory_save::spec(),
         memory_search::spec(),
@@ -128,9 +130,10 @@ pub async fn execute(name: &str, args: &str) -> String {
 
 async fn dispatch(name: &str, args: &str) -> String {
     match name {
-        "0box" => box0::run(args).await,
+        "box0" => box0::run(args).await,
         "code_exec" => code_exec::run(args).await,
         "delegate" => delegate::run(args).await,
+        "email" => email::run(args).await,
         "web_read" => web_read::run(args).await,
         "text_editor" => text_editor::run(args),
         "memory_save" => memory_save::run(args).await,

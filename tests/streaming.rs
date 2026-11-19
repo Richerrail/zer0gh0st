@@ -111,6 +111,100 @@ fn status(code: &str, extra_headers: &str) -> String {
     format!("HTTP/1.1 {code}\r\n{extra_headers}content-length: 0\r\nconnection: close\r\n\r\n")
 }
 
+/// Vérifie l'arrêt pendant l'attente réseau et pendant une commande shell.
+/// À exécuter en série : le signal d'annulation existant est global.
+#[tokio::test]
+#[ignore = "signal d'annulation global : lancer séparément avec --ignored --test-threads=1"]
+async fn cancellation_interrupts_network_and_shell_without_restarting() {
+    use zer0::agent::turn::run_turn_budgeted;
+    zer0::cancel::clear();
+    let (tx, mut rx) = unbounded_channel();
+    zer0::cancel::request();
+    run_turn_budgeted(
+        vec![],
+        "system".into(),
+        vec![ChatMessage::user("test")],
+        vec![],
+        ChatOptions::default(),
+        tx,
+        8,
+        24,
+    )
+    .await;
+    assert!(matches!(rx.recv().await, Some(UiEvent::Info(_))));
+    assert!(matches!(rx.recv().await, Some(UiEvent::TurnComplete(_))));
+    zer0::cancel::clear();
+    for send_headers in [false, true] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            read_request(&mut sock).await.unwrap();
+            if send_headers {
+                sock.write_all(b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\n\r\n")
+                    .await
+                    .unwrap();
+                sock.flush().await.unwrap();
+            }
+            let _ = ready_tx.send(());
+            let mut buf = [0; 32];
+            let _ = sock.read(&mut buf).await;
+        });
+        let endpoint = Endpoint {
+            provider_id: "mock".into(),
+            label: format!("cancel-{addr}"),
+            base_url: format!("http://{addr}/v1"),
+            api_key: None,
+            model: "m".into(),
+        };
+        let (tx, mut rx) = unbounded_channel();
+        let task = tokio::spawn(run_turn_budgeted(
+            vec![endpoint],
+            "system".into(),
+            vec![ChatMessage::user("test")],
+            vec![],
+            ChatOptions::default(),
+            tx,
+            8,
+            24,
+        ));
+        tokio::time::timeout(Duration::from_secs(3), ready_rx)
+            .await
+            .unwrap()
+            .unwrap();
+        zer0::cancel::request();
+        tokio::time::timeout(Duration::from_secs(3), task)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut completed = false;
+        while let Ok(ev) = rx.try_recv() {
+            match ev {
+                UiEvent::TurnComplete(_) => completed = true,
+                UiEvent::Error(e) => panic!("arrêt traité comme erreur : {e}"),
+                UiEvent::ToolCall { .. } => panic!("outil relancé après arrêt"),
+                _ => {}
+            }
+        }
+        assert!(completed);
+        tokio::time::timeout(Duration::from_secs(3), server)
+            .await
+            .unwrap()
+            .unwrap();
+        zer0::cancel::clear();
+    }
+    let shell = tokio::spawn(zer0::tools::code_exec::run(r#"{"command":"sleep 30"}"#));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    zer0::cancel::request();
+    let result = tokio::time::timeout(Duration::from_secs(3), shell)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(result.contains("interrompu"), "{result}");
+    zer0::cancel::clear();
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Client
 // ─────────────────────────────────────────────────────────────────────────────

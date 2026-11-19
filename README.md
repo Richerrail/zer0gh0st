@@ -613,7 +613,8 @@ Zer0 agit : tu décris un but, il appelle les outils nécessaires.
 | `F6` | gérer les conversations (sessions sauvegardées) |
 | `F7` | relancer/poursuivre l'agent (nudge) |
 | `F8` / `F10` | zero-chan (assistante) / micro |
-| `Ctrl+C` / `/stop` | interrompre la génération |
+| `Échap` / `/stop` | demander l'arrêt de la génération ou de l'action en cours |
+| `Ctrl+C` / `/quit` | quitter Zer0gh0st |
 | souris | clic + glisser → sélection, relâcher → copie ; **clic droit** = déplier un bloc |
 
 ---

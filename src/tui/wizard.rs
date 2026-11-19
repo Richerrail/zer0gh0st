@@ -456,7 +456,14 @@ fn activate(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
                 set_error(app, "provider inconnu".into());
                 return;
             };
-            match crate::commands::provider_add(&id, Some(&input)) {
+            match crate::commands::provider_add(crate::commands::ProviderAddArgs {
+                id: &id,
+                base_url: None,
+                name: None,
+                key: Some(&input),
+                route: crate::commands::GwRoute::Auto,
+                force: false,
+            }) {
                 Ok(_) => {
                     app.reload_settings();
                     next = Some(Step::Model);
