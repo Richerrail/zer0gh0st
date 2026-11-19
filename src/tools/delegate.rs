@@ -47,7 +47,7 @@ pub async fn run(args: &str) -> String {
     let tools: Vec<ToolSpec> = rt
         .all_tools
         .iter()
-        .filter(|t| t.name != "delegate" && t.name != "0box")
+        .filter(|t| t.name != "delegate" && t.name != "box0")
         .cloned()
         .collect();
     let system = "Tu es un sous-agent isolé de ZER0|GH0ST. Tu ne vois PAS la conversation \

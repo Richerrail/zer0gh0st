@@ -52,6 +52,17 @@ rpassword = "7"
 sha2 = "0.10"
 lopdf = "0.34"
 pdf-extract = "0.8"
+# Module email zer0gh0st
+async-imap = { version = "0.10", default-features = false, features = ["runtime-tokio"] }
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-rustls-tls", "builder"] }
+mail-parser = "0.9"
+thiserror = "2"
+async-trait = "0.1"
+tracing = "0.1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+webpki-roots = "0.26"
 # Optionnel — uniquement pour la passerelle zer0-gw (feature "gateway") :
 axum = { version = "0.7", default-features = false, features = ["http1", "tokio", "json"], optional = true }
 

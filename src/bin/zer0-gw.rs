@@ -29,7 +29,7 @@
 use std::{
     collections::HashMap,
     net::SocketAddr,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, RwLock},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -110,6 +110,10 @@ struct ProviderCfg {
     /// Nom de la variable d'environnement contenant la clé (via `EnvironmentFile`).
     #[serde(default)]
     api_key_env: Option<String>,
+    /// Si défini, la clé est passée en **paramètre d'URL** `?<name>=<clé>`
+    /// (au lieu de `Authorization: Bearer`). Ex. Google natif : `api_key_query = "key"`.
+    #[serde(default)]
+    api_key_query: Option<String>,
     /// Chemins autorisés pour ce provider (défaut : chat/completions + models).
     #[serde(default)]
     allowed_paths: Option<Vec<String>>,
@@ -170,6 +174,12 @@ struct AppState {
     keys_path: String,
     /// Jeton admin effectif (config ou env). `None` = pas d'authentification.
     admin_token: Option<String>,
+    /// Fichier des providers ajoutés à chaud (`/admin/providers`). Écrit par la
+    /// passerelle (comme keys) — JAMAIS gw.toml, qui reste root/lecture seule.
+    providers_path: String,
+    /// Providers ajoutés à chaud (via `/admin/providers`), non présents dans
+    /// gw.toml au démarrage. Persistés dans `providers.managed`.
+    dynamic: RwLock<HashMap<String, ProviderCfg>>,
 }
 
 /// Résolution d'une clé, par ordre : dépôt admin → variable d'env → gw.toml.
@@ -192,6 +202,39 @@ fn lock<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 impl AppState {
     fn key_for(&self, id: &str, pcfg: &ProviderCfg) -> Option<String> {
         resolve_key(&lock(&self.keys), id, pcfg)
+    }
+
+    /// Config d'un provider : d'abord les providers dynamiques (ajoutés via
+    /// `/admin/providers`), sinon ceux chargés depuis gw.toml.
+    fn provider_cfg(&self, id: &str) -> Option<ProviderCfg> {
+        if let Some(p) = self
+            .dynamic
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(id)
+        {
+            return Some(p.clone());
+        }
+        self.cfg.providers.get(id).cloned()
+    }
+
+    fn has_provider(&self, id: &str) -> bool {
+        self.provider_cfg(id).is_some()
+    }
+
+    /// Tous les ids connus (gw.toml + dynamiques), triés et dédoublonnés.
+    fn provider_ids(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self.cfg.providers.keys().cloned().collect();
+        ids.extend(
+            self.dynamic
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .keys()
+                .cloned(),
+        );
+        ids.sort();
+        ids.dedup();
+        ids
     }
 }
 
@@ -256,11 +299,16 @@ fn window_allow(windows: &mut HashMap<String, Window>, provider: &str, rpm: u32)
 // Routage / sécurité
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Découpe `/{provider}/v1/...` → `("provider", "v1/...")`.
+/// Découpe `/{provider}/{v…}/...` → `("provider", "v…/...")`.
+/// Le sous-chemin doit commencer par une version (`v1/`, `v1beta/`, `v4/`…).
 fn split_provider(path: &str) -> Option<(&str, &str)> {
     let rest = path.strip_prefix('/')?;
     let (provider, subpath) = rest.split_once('/')?;
-    if provider.is_empty() || !subpath.starts_with("v1/") {
+    if provider.is_empty() {
+        return None;
+    }
+    let b = subpath.as_bytes();
+    if !(b.len() > 1 && b[0] == b'v' && b[1].is_ascii_digit()) {
         return None;
     }
     Some((provider, subpath))
@@ -308,10 +356,20 @@ fn path_allowed(pcfg: &ProviderCfg, subpath: &str) -> bool {
     let want = format!("/{subpath}");
     match &pcfg.allowed_paths {
         Some(list) => list.iter().any(|p| p.trim_end_matches('/') == want),
-        None => matches!(
-            want.as_str(),
-            "/v1/chat/completions" | "/v1/models" | "/v1/embeddings"
-        ),
+        // Indépendant du numéro de version : v1/, v1beta/, v4/…
+        // (Google: v1beta/openai/chat/completions). Le 1er segment doit être une
+        // version et aucun `..` (anti-traversée) ; on finit par un endpoint connu.
+        None => {
+            let first = subpath.split('/').next().unwrap_or("");
+            let b = first.as_bytes();
+            let is_version = b.len() > 1 && b[0] == b'v' && b[1].is_ascii_digit();
+            let no_traversal = !subpath.split('/').any(|s| s == "..");
+            is_version
+                && no_traversal
+                && (subpath.ends_with("/models")
+                    || subpath.ends_with("/chat/completions")
+                    || subpath.ends_with("/embeddings"))
+        }
     }
 }
 
@@ -353,7 +411,7 @@ async fn proxy(
     let Some((provider_id, subpath)) = split_provider(uri.path()) else {
         return err(StatusCode::NOT_FOUND, "format attendu : /{provider}/v1/…");
     };
-    let Some(pcfg) = state.cfg.providers.get(provider_id) else {
+    let Some(pcfg) = state.provider_cfg(provider_id) else {
         return err(StatusCode::NOT_FOUND, "provider inconnu");
     };
 
@@ -364,7 +422,7 @@ async fn proxy(
             "seules POST et GET sont autorisées",
         );
     }
-    if !path_allowed(pcfg, subpath) {
+    if !path_allowed(&pcfg, subpath) {
         return err(StatusCode::FORBIDDEN, "chemin non autorisé");
     }
 
@@ -387,7 +445,24 @@ async fn proxy(
                 .map(str::to_owned)
         });
 
-    let url = upstream_url(&pcfg.base_url, subpath, uri.query());
+    let mut url = upstream_url(&pcfg.base_url, subpath, uri.query());
+    // Auth : soit Bearer (OpenAI-compatible), soit `?<name>=<clé>` (API native
+    // type Google). Pour un provider à `api_key_query`, les chemins OpenAI-compat
+    // (qui contiennent `openai`) gardent le Bearer ; les autres (ex. `v1beta/models`)
+    // utilisent la query.
+    let query_auth = pcfg
+        .api_key_query
+        .as_deref()
+        .filter(|_| !subpath.contains("openai"));
+    if let Some(name) = query_auth {
+        if let Some(key) = state.key_for(provider_id, &pcfg) {
+            let sep = if url.contains('?') { '&' } else { '?' };
+            url.push(sep);
+            url.push_str(name);
+            url.push('=');
+            url.push_str(&key);
+        }
+    }
 
     let Ok(rm) = reqwest::Method::from_bytes(method.as_str().as_bytes()) else {
         return err(StatusCode::METHOD_NOT_ALLOWED, "méthode invalide");
@@ -402,8 +477,10 @@ async fn proxy(
             req = req.header(name, v);
         }
     }
-    if let Some(key) = state.key_for(provider_id, pcfg) {
-        req = req.bearer_auth(key);
+    if query_auth.is_none() {
+        if let Some(key) = state.key_for(provider_id, &pcfg) {
+            req = req.bearer_auth(key);
+        }
     }
 
     let req_bytes = body.len();
@@ -511,16 +588,16 @@ async fn health(
     if let Some(r) = loopback_or_403(peer) {
         return r;
     }
+    let ids = state.provider_ids();
     let keys = lock(&state.keys);
-    let providers: serde_json::Map<String, serde_json::Value> = state
-        .cfg
-        .providers
+    let providers: serde_json::Map<String, serde_json::Value> = ids
         .iter()
-        .map(|(id, p)| {
-            (
-                id.clone(),
-                serde_json::json!({ "has_key": resolve_key(&keys, id, p).is_some() }),
-            )
+        .map(|id| {
+            let has = state
+                .provider_cfg(id)
+                .map(|p| resolve_key(&keys, id, &p).is_some())
+                .unwrap_or(false);
+            (id.clone(), serde_json::json!({ "has_key": has }))
         })
         .collect();
     Json(serde_json::json!({ "ok": true, "providers": providers })).into_response()
@@ -535,17 +612,22 @@ async fn admin_list(
     if let Some(r) = admin_guard(peer, &headers, state.admin_token.as_deref()) {
         return r;
     }
+    let ids = state.provider_ids();
     let keys = lock(&state.keys);
-    let providers: serde_json::Map<String, serde_json::Value> = state
-        .cfg
-        .providers
+    let providers: serde_json::Map<String, serde_json::Value> = ids
         .iter()
-        .map(|(id, p)| {
+        .map(|id| {
+            let p = state.provider_cfg(id);
+            let has = p
+                .as_ref()
+                .map(|p| resolve_key(&keys, id, p).is_some())
+                .unwrap_or(false);
+            let env_key = p.and_then(|p| p.api_key_env);
             (
                 id.clone(),
                 serde_json::json!({
-                    "has_key": resolve_key(&keys, id, p).is_some(),
-                    "env_key": p.api_key_env,
+                    "has_key": has,
+                    "env_key": env_key,
                 }),
             )
         })
@@ -566,7 +648,7 @@ async fn admin_set(
         return r;
     }
     let id = provider.trim().to_ascii_lowercase();
-    if !state.cfg.providers.contains_key(&id) {
+    if !state.has_provider(&id) {
         return err(StatusCode::NOT_FOUND, "provider inconnu de zer0-gw");
     }
     let parsed: serde_json::Value = match serde_json::from_slice(&body) {
@@ -633,6 +715,134 @@ async fn admin_delete(
     Json(serde_json::json!({ "ok": true, "provider": id })).into_response()
 }
 
+/// Charge les providers « à chaud » : lignes `id=base_url` (commentaires `#`
+/// ignorés). Fichier entièrement géré par la passerelle (`providers.managed`).
+fn load_managed_providers(path: &str) -> HashMap<String, ProviderCfg> {
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return HashMap::new();
+    };
+    raw.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .filter_map(|l| l.split_once('='))
+        .filter(|(id, url)| {
+            let id = id.trim();
+            let url = url.trim();
+            !id.is_empty() && (url.starts_with("http://") || url.starts_with("https://"))
+        })
+        .map(|(id, url)| {
+            (
+                id.trim().to_ascii_lowercase(),
+                ProviderCfg {
+                    base_url: url.trim().to_string(),
+                    api_key: None,
+                    api_key_env: None,
+                    api_key_query: None,
+                    allowed_paths: None,
+                },
+            )
+        })
+        .collect()
+}
+
+/// Réécrit le fichier des providers « à chaud » (fichier **entièrement géré**)
+/// puis chmod 640. Atomique (tmp + rename). Évite de toucher gw.toml (root,
+/// lecture seule pour le compte de service `zer0-gw`).
+fn save_managed_providers(path: &str, provs: &HashMap<String, ProviderCfg>) -> std::io::Result<()> {
+    let mut out =
+        String::from("# Providers ajoutés via /provider add — fichier géré par zer0-gw.\n");
+    let mut entries: Vec<(&String, &ProviderCfg)> = provs.iter().collect();
+    entries.sort_by(|a, b| a.0.cmp(b.0));
+    for (id, p) in entries {
+        out.push_str(&format!("{id}={}\n", p.base_url));
+    }
+    let tmp = format!("{path}.tmp");
+    std::fs::write(&tmp, out)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o640));
+    }
+    std::fs::rename(&tmp, path)
+}
+
+/// `POST /admin/providers` — enregistre/maj un provider (`{id, base_url}`).
+/// Écriture seule (aucune clé). Persiste dans gw.toml et l'expose à chaud.
+async fn admin_upsert_provider(
+    State(state): State<Arc<AppState>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    if let Some(r) = admin_guard(peer, &headers, state.admin_token.as_deref()) {
+        return r;
+    }
+    let parsed: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(_) => {
+            return err(
+                StatusCode::BAD_REQUEST,
+                "corps JSON attendu : {\"id\":…,\"base_url\":…}",
+            )
+        }
+    };
+    let id = parsed
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    let valid_id = !id.is_empty()
+        && id.len() <= 64
+        && id.chars().next().is_some_and(|c| c.is_ascii_alphanumeric())
+        && id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-');
+    if !valid_id {
+        return err(
+            StatusCode::BAD_REQUEST,
+            "id invalide (a-z 0-9 _ -, ≤ 64, alphanumérique en tête)",
+        );
+    }
+    let base_url = parsed
+        .get("base_url")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .trim();
+    if !(base_url.starts_with("http://") || base_url.starts_with("https://")) {
+        return err(
+            StatusCode::BAD_REQUEST,
+            "base_url invalide (http(s)://… attendu)",
+        );
+    }
+    let pcfg = ProviderCfg {
+        base_url: base_url.to_string(),
+        api_key: None,
+        api_key_env: None,
+        api_key_query: None,
+        allowed_paths: None,
+    };
+    {
+        let mut dynp = state.dynamic.write().unwrap_or_else(|e| e.into_inner());
+        dynp.insert(id.clone(), pcfg);
+        if let Err(e) = save_managed_providers(&state.providers_path, &dynp) {
+            log_line(
+                "admin_persist_error",
+                serde_json::json!({ "provider": id, "error": e.to_string() }),
+            );
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!("échec d'écriture du fichier providers : {e}"),
+            );
+        }
+    }
+    log_line(
+        "admin_provider_upsert",
+        serde_json::json!({ "provider": id }),
+    );
+    Json(serde_json::json!({ "ok": true, "provider": id, "base_url": base_url })).into_response()
+}
+
 fn router(state: Arc<AppState>) -> Router {
     let max_body = state.cfg.limits.max_body_bytes;
     Router::new()
@@ -642,6 +852,7 @@ fn router(state: Arc<AppState>) -> Router {
             "/admin/keys/:provider",
             post(admin_set).delete(admin_delete),
         )
+        .route("/admin/providers", post(admin_upsert_provider))
         .fallback(proxy)
         .layer(DefaultBodyLimit::max(max_body))
         .with_state(state)
@@ -683,9 +894,16 @@ async fn main() -> anyhow::Result<()> {
             .unwrap_or_else(|| "keys.managed".to_string())
     });
     let mut keys = load_keys(&keys_path);
-    // Ne gérer que les clés des providers connus : le reste (variables d'env
-    // MAJUSCULES) est laissé au fichier et rechargé par systemd.
-    keys.retain(|id, _| cfg.providers.contains_key(id));
+    // Providers ajoutés à chaud (`/admin/providers`) : fichier dédié à côté de
+    // gw.toml (gw.toml reste root / lecture seule pour le compte de service).
+    let providers_path = std::path::Path::new(&path)
+        .parent()
+        .map(|d| d.join("providers.managed").to_string_lossy().into_owned())
+        .unwrap_or_else(|| "providers.managed".to_string());
+    let dynamic = load_managed_providers(&providers_path);
+    // Ne gérer que les clés des providers connus (gw.toml + managed) : le reste
+    // (variables d'env MAJUSCULES) est laissé au fichier et rechargé par systemd.
+    keys.retain(|id, _| cfg.providers.contains_key(id) || dynamic.contains_key(id));
 
     // Jeton admin : variable d'environnement prioritaire (systemd), sinon gw.toml.
     // Absent → endpoints admin ouverts à tout processus local (comportement
@@ -712,6 +930,8 @@ async fn main() -> anyhow::Result<()> {
         keys: Mutex::new(keys.clone()),
         keys_path: keys_path.clone(),
         admin_token,
+        providers_path: providers_path.clone(),
+        dynamic: RwLock::new(dynamic),
     });
 
     let app = router(state);
@@ -790,6 +1010,7 @@ mod tests {
             base_url: base.to_owned(),
             api_key: None,
             api_key_env: None,
+            api_key_query: None,
             allowed_paths: allowed.map(|l| l.into_iter().map(str::to_owned).collect()),
         }
     }
@@ -822,6 +1043,8 @@ mod tests {
         assert!(path_allowed(&p, "v1/chat/completions"));
         assert!(path_allowed(&p, "v1/models"));
         assert!(path_allowed(&p, "v1/embeddings")); // mémoire sémantique
+        assert!(path_allowed(&p, "v1beta/models")); // Google natif, version-agnostique
+        assert!(path_allowed(&p, "v1beta/openai/chat/completions")); // Google OpenAI-compat
         assert!(!path_allowed(&p, "v1/keys"));
         assert!(!path_allowed(&p, "admin/v1/chat/completions"));
         assert!(!path_allowed(&p, "v1/chat/completions/../../secret"));

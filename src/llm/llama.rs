@@ -207,11 +207,14 @@ impl ApiClient {
         // `chat_template_kwargs` est un paramètre llama.cpp/vLLM : l'endpoint OpenAI-compat
         // de Google le REJETTE (400 « Unknown name "chat_template_kwargs" ») — bug constaté
         // en débat 0box (rôle reasoning via gemma). On ne l'envoie pas à Google.
-        if !self.base_url.contains("generativelanguage.googleapis.com") {
+        // (base_url peut être l'URL directe OU celle de la passerelle `/google/v1` — d'où
+        // le simple « google » qui couvre les deux.)
+        if !self.base_url.contains("google") {
             body["chat_template_kwargs"] = json!({ "enable_thinking": options.thinking });
         }
         // OpenRouter's unified reasoning control (Qwen uses chat_template_kwargs).
-        if self.base_url.contains("openrouter.ai") {
+        // « openrouter » couvre l'URL directe (openrouter.ai) et la passerelle (/openrouter/v1).
+        if self.base_url.contains("openrouter") {
             body["reasoning"] = json!({ "enabled": options.thinking });
         }
 
@@ -235,7 +238,7 @@ impl ApiClient {
                 .post(&url)
                 .json(&body)
                 .timeout(request_timeout(options));
-            if self.base_url.contains("openrouter.ai") {
+            if self.base_url.contains("openrouter") {
                 req = attribution(req);
             }
             if let Some(k) = &self.api_key {
@@ -452,7 +455,7 @@ impl ApiClient {
                     });
                 }
                 let mut req2 = self.http.post(&url).json(&body2);
-                if self.base_url.contains("openrouter.ai") {
+                if self.base_url.contains("openrouter") {
                     req2 = attribution(req2);
                 }
                 if let Some(k) = &self.api_key {

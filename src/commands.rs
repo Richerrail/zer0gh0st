@@ -708,7 +708,10 @@ pub fn provider_list_with(active_id: Option<&str>, gw: bool) -> Vec<String> {
     }
     out.push(String::new());
     out.push("« — » = aucune clé dans l'agent (une clé déposée reste chez zer0-gw).".into());
-    out.push("Ajouter une clé : provider add <id> [clé]  ·  Activer : provider use <id>".into());
+    out.push(
+        "Ajouter : provider add <id> [<base_url>] [<nom>] <clé> [--gw|--local] [--force]  ·  Activer : provider use <id>"
+            .into(),
+    );
     out
 }
 
@@ -727,7 +730,7 @@ pub fn provider_keys() -> Vec<String> {
             }
             out.push(String::new());
             out.push(
-                "Déposer : provider add <id> <clé>   ·   Oublier : provider remove <id>".into(),
+                "Déposer : provider add <id> [<base_url>] <clé>   ·   Oublier : provider remove <id>".into(),
             );
             out
         }
@@ -735,95 +738,321 @@ pub fn provider_keys() -> Vec<String> {
     }
 }
 
-/// Cas particulier `cline` : c'est un endpoint OpenAI-compatible, pas une clé.
-/// `url` absent → Ollama local. La clé est optionnelle (stockée localement, ou
-/// déposée sur la passerelle comme les autres providers).
-pub fn provider_add_cline(url: Option<&str>, key: Option<&str>) -> Result<Vec<String>> {
-    let url = url
-        .map(str::trim)
-        .filter(|u| !u.is_empty())
-        .unwrap_or("http://localhost:11434/v1");
-    if !(url.starts_with("http://") || url.starts_with("https://")) {
-        return Err(anyhow!(
-            "« provider add cline » attend une URL (http://…), pas une clé.\n\
-             usage: provider add cline [http://hôte:port/v1] [clé]\n\
-             Sans argument → Ollama local (http://localhost:11434/v1)."
-        ));
-    }
-    let mut g = crate::config::load_global();
-    g.custom.insert(
-        "cline".to_string(),
-        crate::config::CustomProvider {
-            name: "cline".to_string(),
-            base_url: url.to_string(),
-            env_key: None,
-        },
-    );
-    if let Some(k) = key.map(str::trim).filter(|k| !k.is_empty()) {
-        g.keys.insert("cline".to_string(), k.to_string());
-    }
-    crate::config::save_global(&g)?;
-    Ok(vec![format!(
-        "Provider 'cline' ajouté → {url}. Ensuite : provider use cline, puis models."
-    )])
+/// Choix de transport pour l'ajout/résolution d'un provider.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum GwRoute {
+    /// Passerelle si elle répond, sinon stockage local (avec avertissement).
+    Auto,
+    /// Forcer la passerelle (échec si injoignable).
+    Gw,
+    /// Forcer le stockage local (aucune passerelle).
+    Local,
 }
 
-/// Ajoute la clé d'un provider intégré : dépôt sur zer0-gw si elle répond,
-/// sinon repli local **avec avertissement**.
-pub fn provider_add(id: &str, key: Option<&str>) -> Result<Vec<String>> {
-    if id.eq_ignore_ascii_case("cline") {
-        return provider_add_cline(key, None);
+/// Arguments de [`provider_add`].
+pub struct ProviderAddArgs<'a> {
+    pub id: &'a str,
+    /// Base URL (override, ex. pour un provider custom ou une base obsolète).
+    pub base_url: Option<&'a str>,
+    pub name: Option<&'a str>,
+    pub key: Option<&'a str>,
+    pub route: GwRoute,
+    /// Activer malgré un test d'inférence non concluant.
+    pub force: bool,
+}
+
+/// Verdict d'une sonde provider (via la passerelle).
+enum Verdict {
+    /// `/models` OK **et** chat OK.
+    Ready,
+    /// `/models` OK mais aucun modèle pour tester le chat.
+    NotTested,
+    /// `/models` OK mais chat refusé (clé non autorisée pour l'inférence).
+    NoInference,
+    /// 402 : compte sans crédits.
+    NoCredits,
+    /// 401/403 sur `/models` : clé refusée.
+    BadKey,
+    /// Injoignable / 404 / 410 : URL ou modèle obsolète.
+    BadUrl,
+    /// 429.
+    RateLimited,
+    Other,
+}
+
+fn is2xx(s: u16) -> bool {
+    (200..=299).contains(&s)
+}
+
+fn short(s: &str) -> String {
+    let t = s.trim();
+    if t.len() > 180 {
+        format!("{}…", &t[..180])
+    } else {
+        t.to_string()
     }
-    let p = crate::providers::find(id).ok_or_else(|| anyhow!("provider inconnu: {id}"))?;
-    let resolved = match key.map(str::trim).filter(|k| !k.is_empty()) {
-        Some(k) => k.to_string(),
-        None => {
-            let from_env = if p.env_key.is_empty() {
-                None
-            } else {
-                std::env::var(&p.env_key).ok().filter(|s| !s.is_empty())
-            };
-            match (from_env, p.env_key.is_empty()) {
-                (Some(k), _) => k,
-                (None, false) => {
-                    return Err(anyhow!(
-                        "clé manquante. Passe-la en argument, ou `export {}` puis relance.",
-                        p.env_key
-                    ))
-                }
-                (None, true) => {
-                    return Err(anyhow!("clé manquante. usage: provider add {id} <clé>"))
-                }
+}
+
+/// Sonde un provider **à travers la passerelle** : `GET /v1/models` puis, si
+/// possible, un `POST /v1/chat/completions` de 1 token. Retourne un verdict
+/// explicite + un détail lisible. Distingue « URL obsolète », « clé refusée »,
+/// « 402 crédits » et « clé valide pour lister mais pas pour l'inférence ».
+fn probe_provider(id: &str) -> (Verdict, String, Option<String>) {
+    let models = match crate::gwclient::probe_models(id) {
+        Err(e) => {
+            return (
+                Verdict::BadUrl,
+                format!("base_url injoignable ({e}) — URL erronée ou obsolète ?"),
+                None,
+            )
+        }
+        Ok((ms, mb)) => {
+            if !is2xx(ms) {
+                return match ms {
+                    401 | 403 => (
+                        Verdict::BadKey,
+                        format!("/models → {ms} : clé refusée (401/403)."),
+                        None,
+                    ),
+                    404 | 410 => (
+                        Verdict::BadUrl,
+                        format!("/models → {ms} : URL ou modèle obsolète/introuvable."),
+                        None,
+                    ),
+                    429 => (
+                        Verdict::RateLimited,
+                        "/models → 429 : rate-limit, réessaie.".to_string(),
+                        None,
+                    ),
+                    _ => (
+                        Verdict::Other,
+                        format!("/models → {ms} : {}", short(&mb)),
+                        None,
+                    ),
+                };
             }
+            mb
         }
     };
-
-    match crate::gwclient::add_key_flow(&p.id, &resolved) {
-        Ok(crate::gwclient::AddRoute::ViaGateway { provider_id }) => {
-            let mut g = crate::config::load_global();
-            let (name, _) = crate::gwclient::activate_provider(&mut g, &provider_id);
-            Ok(vec![
-                "🔑 Clé déposée sur zer0-gw (écriture seule) — aucune clé stockée ici.".to_string(),
-                format!("Provider actif : {name}"),
-            ])
-        }
-        Ok(crate::gwclient::AddRoute::Local) => {
-            let mut g = crate::config::load_global();
-            g.keys.insert(p.id.clone(), resolved);
-            crate::config::save_global(&g)?;
-            Ok(vec![
-                format!(
-                    "⚠ zer0-gw injoignable — clé enregistrée localement pour {} → {}",
-                    p.name,
-                    crate::config::global_path().display()
-                ),
-                "Pour le durcissement : lance zer0-gw puis relance cette commande.".to_string(),
-            ])
-        }
-        Err(e) => Err(anyhow!("zer0-gw : {e}")),
+    let ids = crate::gwclient::model_ids(&models, 5);
+    if ids.is_empty() {
+        return (
+            Verdict::NotTested,
+            "/models → 200, mais aucun modèle listé pour tester l'inférence.".to_string(),
+            None,
+        );
     }
+    // Teste jusqu'à 5 modèles : un seul modèle en 404/410 ne condamne pas le
+    // provider (cas des agrégateurs). On agrège par priorité : 2xx > 402 >
+    // 401/403 > 429 > 404/410 > autre.
+    let mut statuses: Vec<u16> = Vec::new();
+    for m in &ids {
+        match crate::gwclient::probe_chat(id, m) {
+            Err(e) => return (Verdict::BadUrl, format!("chat injoignable ({e})."), None),
+            Ok((cs, _)) => {
+                if is2xx(cs) {
+                    // Modèle qui répond : à mémoriser pour régler un modèle valide.
+                    return (
+                        Verdict::Ready,
+                        format!("/models → 200 · chat ({m}) → {cs} : OK."),
+                        Some(m.clone()),
+                    );
+                }
+                statuses.push(cs);
+            }
+        }
+    }
+    let n = statuses.len();
+    let last = statuses.last().copied().unwrap_or(0);
+    let verdict = if statuses.contains(&402) {
+        Verdict::NoCredits
+    } else if statuses.iter().any(|&c| c == 401 || c == 403) {
+        Verdict::NoInference
+    } else if statuses.contains(&429) {
+        Verdict::RateLimited
+    } else if statuses.iter().all(|&c| c == 404 || c == 410) {
+        Verdict::BadUrl
+    } else {
+        Verdict::Other
+    };
+    let msg = match verdict {
+        Verdict::NoCredits => {
+            format!("/models → 200 mais chat → 402 sur {n} modèle(s) : compte sans crédits.")
+        }
+        Verdict::NoInference => format!(
+            "/models → 200 mais chat refusé (401/403) sur {n} modèle(s) : clé valide pour lister \
+             mais non autorisée pour l'inférence."
+        ),
+        Verdict::RateLimited => format!("chat → 429 sur {n} modèle(s) : rate-limit, réessaie."),
+        Verdict::BadUrl => {
+            format!("chat → 404/410 sur les {n} modèle(s) testés : modèles/URL obsolètes.")
+        }
+        _ => format!("chat → {last} sur {n} modèle(s) testé(s)."),
+    };
+    (verdict, msg, None)
 }
 
+/// Ajoute un provider et sa clé. Selon `route` : passerelle (dépôt + sonde,
+/// clé hors agent) ou stockage local (avec avertissement). Par défaut, la
+/// passerelle est utilisée si elle répond.
+pub fn provider_add(args: ProviderAddArgs) -> Result<Vec<String>> {
+    let id = args.id.trim().to_ascii_lowercase();
+    if id.is_empty() {
+        return Err(anyhow!(
+            "usage: provider add <id> [<base_url>] [<nom>] <clé> [--gw|--local] [--force]"
+        ));
+    }
+    let builtin = crate::providers::find(&id);
+    let base_url = args.base_url.map(str::trim).filter(|u| !u.is_empty());
+    if let Some(u) = base_url {
+        if !(u.starts_with("http://") || u.starts_with("https://")) {
+            return Err(anyhow!(
+                "base_url invalide : « {u} » (http://… ou https://… ; une clé n'est pas une URL)"
+            ));
+        }
+    }
+    if builtin.is_none() && base_url.is_none() {
+        return Err(anyhow!(
+            "provider personnalisé : base_url requise. usage: provider add {id} <base_url> [nom] <clé>"
+        ));
+    }
+    let key = args.key.map(str::trim).filter(|k| !k.is_empty());
+    let is_local = matches!(id.as_str(), "local" | "local-embed");
+
+    let gw_ok = crate::gwclient::probe();
+    let use_gw = !is_local
+        && match args.route {
+            GwRoute::Local => false,
+            GwRoute::Gw => {
+                if !gw_ok {
+                    return Err(anyhow!(
+                        "zer0-gw injoignable — lance-le (sudo systemctl start zer0-gw) \
+                         ou retire --gw / passe --local."
+                    ));
+                }
+                true
+            }
+            GwRoute::Auto => gw_ok,
+        };
+
+    if use_gw {
+        let gw_base = base_url
+            .map(str::to_string)
+            .or_else(|| builtin.as_ref().map(|p| p.base_url.clone()))
+            .unwrap_or_default();
+        return provider_add_via_gateway(&id, &gw_base, builtin.is_some(), key, args.force);
+    }
+    provider_add_local(&id, base_url, args.name, builtin.is_some(), key)
+}
+
+/// Enregistre le provider sur la passerelle, y dépose la clé, sonde, puis
+/// active ssi le test passe (ou `--force`). La clé ne transite jamais par l'agent.
+fn provider_add_via_gateway(
+    id: &str,
+    base_url: &str,
+    is_builtin: bool,
+    key: Option<&str>,
+    force: bool,
+) -> Result<Vec<String>> {
+    if base_url.is_empty() {
+        return Err(anyhow!("base_url manquante pour la passerelle"));
+    }
+    crate::gwclient::register_provider(id, base_url)
+        .map_err(|e| anyhow!("enregistrement passerelle échoué : {e}"))?;
+    let mut out = vec![format!(
+        "🔧 Provider « {id} » enregistré dans zer0-gw → {base_url}"
+    )];
+    let Some(key) = key else {
+        out.push("⚠ Aucune clé fournie : provider enregistré mais NON activé.".into());
+        out.push("Ajoute une clé : provider add <id> [<base_url>] <clé>".into());
+        return Ok(out);
+    };
+    crate::gwclient::set_key(id, key).map_err(|e| anyhow!("dépôt de clé échoué : {e}"))?;
+    out.push("🔑 Clé déposée sur zer0-gw (écriture seule) — aucune clé dans l'agent.".into());
+
+    let (verdict, detail, ok_model) = probe_provider(id);
+    out.push(format!("🧪 Test : {detail}"));
+    let activate = matches!(verdict, Verdict::Ready | Verdict::NotTested) || force;
+    if !activate {
+        return Err(anyhow!(
+            "provider « {id} » enregistré dans zer0-gw mais NON activé : {detail}\n\
+             Corrige la base_url ou la clé puis relance, ou ajoute --force pour activer malgré tout."
+        ));
+    }
+
+    let mut g = crate::config::load_global();
+    if is_builtin {
+        // Comme activate_provider, mais on règle aussi un modèle qui marche.
+        g.custom.remove(&format!("gw-{id}"));
+        g.provider = Some(id.to_string());
+    } else {
+        // Provider custom : pointer sa base_url vers la passerelle, sans clé.
+        g.custom.insert(
+            id.to_string(),
+            crate::config::CustomProvider {
+                name: id.to_string(),
+                base_url: format!(
+                    "{}/{}/v1",
+                    crate::gwclient::gw_base().trim_end_matches('/'),
+                    id
+                ),
+                env_key: None,
+            },
+        );
+        g.provider = Some(id.to_string());
+    }
+    // Modèle validé par la sonde : évite le 404 « modèle inconnu » au 1er tour.
+    if let Some(m) = ok_model {
+        g.model = Some(m.clone());
+        out.push(format!("🎯 Modèle réglé : {m}"));
+    }
+    crate::config::save_global(&g)?;
+    out.push(format!("✅ Provider actif : {id}"));
+    if !matches!(verdict, Verdict::Ready) {
+        out.push(
+            "⚠ Activé malgré un test non concluant (--force). Choisis un modèle : /model".into(),
+        );
+    }
+    Ok(out)
+}
+
+/// Stockage local (config.toml, non chiffré) — avec avertissement de durcissement.
+fn provider_add_local(
+    id: &str,
+    base_url: Option<&str>,
+    name: Option<&str>,
+    is_builtin: bool,
+    key: Option<&str>,
+) -> Result<Vec<String>> {
+    let mut g = crate::config::load_global();
+    if !is_builtin {
+        let base_url =
+            base_url.ok_or_else(|| anyhow!("base_url requise pour un provider personnalisé"))?;
+        g.custom.insert(
+            id.to_string(),
+            crate::config::CustomProvider {
+                name: name.map(str::to_string).unwrap_or_else(|| id.to_string()),
+                base_url: base_url.to_string(),
+                env_key: None,
+            },
+        );
+    }
+    if let Some(key) = key {
+        g.keys.insert(id.to_string(), key.to_string());
+    }
+    g.provider = Some(id.to_string());
+    if let Some(dm) = crate::providers::default_model(id) {
+        g.model = Some(dm.to_string());
+    }
+    crate::config::save_global(&g)?;
+    let mut out = vec![format!("Provider actif (local) : {id}")];
+    if key.is_some() {
+        out.push("⚠ Clé stockée localement (config.toml, non chiffré). Lance zer0-gw pour le durcissement.".into());
+    }
+    Ok(out)
+}
+
+/// Compat : `add-custom` (id + base_url + nom + variable d'env de clé).
 pub fn provider_add_custom(
     id: &str,
     base_url: &str,
@@ -831,34 +1060,50 @@ pub fn provider_add_custom(
     env: Option<&str>,
 ) -> Result<Vec<String>> {
     let id = id.trim().to_ascii_lowercase();
-    let base_url = base_url.trim();
     if id.is_empty() {
         return Err(anyhow!("usage: provider add-custom <id> <base_url>"));
-    }
-    if !(base_url.starts_with("http://") || base_url.starts_with("https://")) {
-        return Err(anyhow!(
-            "base_url invalide : « {base_url} » — elle doit commencer par http:// ou https:// \
-             (une clé API ne peut PAS servir de base_url)"
-        ));
     }
     if crate::providers::builtins().iter().any(|p| p.id == id) {
         return Err(anyhow!(
             "'{id}' est déjà un provider intégré — pas besoin de add-custom."
         ));
     }
-    let mut g = crate::config::load_global();
-    g.custom.insert(
-        id.clone(),
-        crate::config::CustomProvider {
-            name: name.map(str::to_string).unwrap_or_else(|| id.clone()),
-            base_url: base_url.to_string(),
-            env_key: env.map(str::to_string),
-        },
-    );
-    crate::config::save_global(&g)?;
-    Ok(vec![format!(
-        "Provider personnalisé '{id}' enregistré. Ensuite : provider use {id}"
-    )])
+    // La clé peut venir d'une variable d'env (param `env` = nom de variable).
+    let key = env
+        .map(str::trim)
+        .filter(|e| !e.is_empty())
+        .and_then(|e| std::env::var(e).ok())
+        .filter(|s| !s.is_empty());
+    provider_add(ProviderAddArgs {
+        id: &id,
+        base_url: Some(base_url),
+        name,
+        key: key.as_deref(),
+        route: GwRoute::Auto,
+        force: false,
+    })
+}
+
+/// Compat : ancien helper `cline` (URL requise). Délègue au flux générique,
+/// qui route désormais par la passerelle si elle répond.
+pub fn provider_add_cline(url: Option<&str>, key: Option<&str>) -> Result<Vec<String>> {
+    let url = url.map(str::trim).filter(|u| !u.is_empty());
+    if let Some(u) = url {
+        if !(u.starts_with("http://") || u.starts_with("https://")) {
+            return Err(anyhow!(
+                "« provider add cline » attend une URL (http://…), pas une clé.\n\
+                 usage: provider add cline <http://hôte:port/v1> [<clé>]"
+            ));
+        }
+    }
+    provider_add(ProviderAddArgs {
+        id: "cline",
+        base_url: url,
+        name: None,
+        key,
+        route: GwRoute::Auto,
+        force: false,
+    })
 }
 
 pub fn provider_use(id: &str) -> Result<Vec<String>> {
@@ -1355,7 +1600,26 @@ mod tests {
 
     #[test]
     fn provider_commands_validate_before_writing_config() {
-        assert!(provider_add("provider-qui-nexiste-pas", Some("k")).is_err());
+        // Provider inexistant sans base_url : erreur avant toute écriture / réseau.
+        assert!(provider_add(ProviderAddArgs {
+            id: "provider-qui-nexiste-pas",
+            base_url: None,
+            name: None,
+            key: Some("k"),
+            route: GwRoute::Auto,
+            force: false,
+        })
+        .is_err());
+        // base_url invalide (ce n'est pas une URL) : rejetée avant le réseau.
+        assert!(provider_add(ProviderAddArgs {
+            id: "monapi",
+            base_url: Some("sk-abc123"),
+            name: None,
+            key: Some("k"),
+            route: GwRoute::Local,
+            force: false,
+        })
+        .is_err());
         assert!(provider_use("inconnu").is_err());
         assert!(provider_remove("inconnu").is_err());
         // base_url qui est en réalité une clé API

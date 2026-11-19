@@ -270,7 +270,29 @@ enum ProviderAction {
     /// Show where the keys live: zer0-gw gateway status (never the values).
     Keys,
     /// Store an API key for a known provider (reads $ENV if omitted).
-    Add { id: String, key: Option<String> },
+    ///
+    /// With `--base-url`, registers/updates a custom OpenAI-compatible provider
+    /// (or overrides a builtin's base URL). The key is deposited on zer0-gw when
+    /// it is running (default), else stored locally with a warning.
+    Add {
+        id: String,
+        key: Option<String>,
+        /// Base URL (http(s)://…). Required for custom providers.
+        #[arg(long)]
+        base_url: Option<String>,
+        /// Display name for a custom provider.
+        #[arg(long)]
+        name: Option<String>,
+        /// Force routing through zer0-gw (error if unreachable).
+        #[arg(long)]
+        gw: bool,
+        /// Force local storage (config.toml), never the gateway.
+        #[arg(long)]
+        local: bool,
+        /// Activate even if the connectivity test is inconclusive.
+        #[arg(long)]
+        force: bool,
+    },
     /// Define a custom OpenAI-compatible provider.
     AddCustom {
         id: String,
@@ -909,6 +931,7 @@ async fn zerobox_cmd(topic: Vec<String>, perspectives: Vec<String>) -> Result<()
     };
 
     // En headless, tous les outils sont armés (même politique que --once).
+    crate::cancel::clear();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<UiEvent>();
     tokio::spawn(async move {
         tui::run_0box_debate(
@@ -1258,7 +1281,31 @@ fn provider_cmd(action: ProviderAction) -> Result<()> {
     let lines = match action {
         ProviderAction::List => commands::provider_list(),
         ProviderAction::Keys => commands::provider_keys(),
-        ProviderAction::Add { id, key } => commands::provider_add(&id, key.as_deref())?,
+        ProviderAction::Add {
+            id,
+            key,
+            base_url,
+            name,
+            gw,
+            local,
+            force,
+        } => {
+            let route = if gw {
+                commands::GwRoute::Gw
+            } else if local {
+                commands::GwRoute::Local
+            } else {
+                commands::GwRoute::Auto
+            };
+            commands::provider_add(commands::ProviderAddArgs {
+                id: &id,
+                base_url: base_url.as_deref(),
+                name: name.as_deref(),
+                key: key.as_deref(),
+                route,
+                force,
+            })?
+        }
         ProviderAction::AddCustom {
             id,
             base_url,

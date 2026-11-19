@@ -21,7 +21,7 @@ const MAX_REPORT: usize = 8_000;
 
 pub fn spec() -> ToolSpec {
     ToolSpec {
-        name: "0box",
+        name: "box0",
         description: "Débat multi-agents (0box) : plusieurs perspectives IA débattent \
                       sur un sujet, puis MAIN synthétise et peut exécuter les actions \
                       (tâches, fichiers). Renvoie la transcription du débat.",
