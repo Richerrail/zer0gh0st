@@ -1570,7 +1570,7 @@ fn handle_provider(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent
                         } else if rest.len() == 1 {
                             key_opt = Some(rest[0]);
                         }
-                    } else if rest.first().is_some() && name.is_none() {
+                    } else if !rest.is_empty() && name.is_none() {
                         name = Some(rest[0]);
                     }
                     crate::commands::provider_add(crate::commands::ProviderAddArgs {

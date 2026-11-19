@@ -868,7 +868,7 @@ fn probe_provider(id: &str) -> (Verdict, String, Option<String>) {
         Verdict::NoCredits
     } else if statuses.iter().any(|&c| c == 401 || c == 403) {
         Verdict::NoInference
-    } else if statuses.iter().any(|&c| c == 429) {
+    } else if statuses.contains(&429) {
         Verdict::RateLimited
     } else if statuses.iter().all(|&c| c == 404 || c == 410) {
         Verdict::BadUrl

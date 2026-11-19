@@ -163,7 +163,7 @@ impl ImapClient {
 
         let mut results = Vec::new();
         for uid in uids.into_iter().take(limit as usize) {
-            if let Ok(msg) = self.get_message(mailbox, uid.into()).await {
+            if let Ok(msg) = self.get_message(mailbox, uid).await {
                 results.push(msg.summary);
             }
         }
@@ -299,7 +299,7 @@ impl ImapClient {
         let mut summaries = Vec::new();
         while let Some(item) = fetch.next().await {
             let msg = item.map_err(|e| EmailError::Imap(format!("Fetch error: {}", e)))?;
-            let uid = msg.uid.map(|u| u.into()).unwrap_or(0);
+            let uid = msg.uid.unwrap_or(0);
             let flags: Vec<String> = msg
                 .flags()
                 .map(|f| match f {

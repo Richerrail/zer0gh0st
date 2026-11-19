@@ -105,10 +105,7 @@ fn http_req(method: &str, path: &str, body: Option<&str>) -> Result<(u16, String
         .nth(1)
         .and_then(|s| s.parse().ok())
         .ok_or_else(|| "réponse zer0-gw illisible".to_string())?;
-    let (head, body_raw) = buf
-        .split_once("\r\n\r\n")
-        .map(|(h, b)| (h, b))
-        .unwrap_or(("", buf.as_str()));
+    let (head, body_raw) = buf.split_once("\r\n\r\n").unwrap_or(("", buf.as_str()));
     // Le proxy de zer0-gw streame (pas de Content-Length) ré => réponses
     // `Transfer-Encoding: chunked`. On dé-chunke pour pouvoir parser le JSON.
     let body = if head
