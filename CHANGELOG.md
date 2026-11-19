@@ -1,3 +1,25 @@
+## v0.7.54 — Email et providers (2026-11-19)
+
+- **feat(email)** : nouvel outil `email` complet — IMAP/SMTP, lecture,
+  recherche, envoi, réponse, transfert, marquage lu, déplacement et
+  suppression (en deux temps, `expunge` explicite). Permissions
+  granulaires (`read`/`write`/`manage`/`delete`), audit JSONL, TLS
+  obligatoire, parsing MIME et pièces jointes en base64. 16 tests,
+  aucun serveur réel contacté. Doc : `docs/EMAIL.md`.
+- **feat(providers)** : `provider add` gère `--base-url`, `--name`,
+  `--gw`/`--local` et `--force`. Sondes `/models` + chat sur jusqu'à
+  5 modèles, verdicts explicites (clé refusée, 402 crédits, URL
+  obsolète, rate-limit, clé sans inférence) et réglage automatique
+  d'un modèle valide.
+- **fix(tui)** : Échap interrompt l'agent en cours (`/stop` équivalent)
+  et ferme proprement palette, popups et panneaux ; la déduplication
+  ConPTY de Windows laisse passer un second Échap quand une vue est
+  ouverte.
+- **fix(0box)** : `/0box` refuse de démarrer pendant un tour en cours ;
+  un débat imbriqué n'efface plus un arrêt demandé par le parent.
+- **chore** : clippy sans warning sur toutes les cibles (lib + gateway).
+
+
 ## v0.7.53 — Lisibilité : symbole `0cg` et site (2026-11-16)
 
 - **fix(0cg)** : sur le thème **`paper`**, les actifs de la watchlist étaient
