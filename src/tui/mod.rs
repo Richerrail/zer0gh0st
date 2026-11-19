@@ -3992,7 +3992,18 @@ fn handle_input(ev: Event, app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
                         && last_mods == mods
                         && now.duration_since(last_time).as_millis() < 50
                     {
-                        return; // Ignorer le doublon
+                        // Un doublon ConPTY ne change pas l'état de l'interface.
+                        // Deux Échap successifs, eux, peuvent fermer deux vues
+                        // différentes : il faut laisser passer le second.
+                        let closes_view = code == KeyCode::Esc
+                            && (app.picker.is_some()
+                                || app.wizard.is_some()
+                                || app.chats_popup.is_some()
+                                || app.task_view.is_some()
+                                || app.side_mode.is_some());
+                        if !closes_view {
+                            return; // Ignorer le doublon
+                        }
                     }
                 }
             }
