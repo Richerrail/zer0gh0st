@@ -1,3 +1,23 @@
+## v0.8.0 — Email configurable depuis la TUI (2026-11-20)
+
+- **feat(tui)** : nouvelle commande **`/zer0_mail`** (alias `/mail`) — un
+  assistant en 4 étapes (serveur IMAP, adresse, mot de passe d'application
+  masqué, confirmation) écrit `~/.config/zer0/mail.env` de façon atomique
+  (fichier temporaire `0600` puis `rename`) et exporte les 14 variables
+  `ZER0_EMAIL_*` dans le processus courant : l'outil `email` devient
+  utilisable **immédiatement**, sans redémarrage. SMTP est déduit de l'hôte
+  IMAP (`imap.X` → `smtp.X`, port 465). `Échap` abandonne sans rien écrire.
+  Les étapes sont numérotées 100-103, hors de la plage du setup (0-8), pour ne
+  pas perturber la reprise de `/setup`. La commande apparaît dans la palette
+  `/` et dans `/help`.
+- **fix(email)** : `list_messages` renvoyait **toujours** une liste vide.
+  `fetch_range` appelait `uid_fetch` avec des **numéros de séquence**
+  (1..total) ; sur Gmail les UID réels (ex. 19102) sont très supérieurs au
+  nombre de messages (3867), donc aucun message ne correspondait. On passe à
+  `FETCH` en demandant explicitement `UID` pour conserver le champ rempli.
+- **chore** : `cargo fmt` et clippy propres sur toutes les cibles ; 399 tests
+  au vert.
+
 ## v0.7.54 — Email et providers (2026-11-19)
 
 - **feat(email)** : nouvel outil `email` complet — IMAP/SMTP, lecture,
