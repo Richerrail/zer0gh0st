@@ -108,7 +108,11 @@ impl Step {
     pub fn needs_text(self) -> bool {
         matches!(
             self,
-            Step::ApiKey | Step::TelegramToken | Step::MailHost | Step::MailUser | Step::MailPassword
+            Step::ApiKey
+                | Step::TelegramToken
+                | Step::MailHost
+                | Step::MailUser
+                | Step::MailPassword
         )
     }
 }
@@ -158,7 +162,10 @@ pub fn start(app: &mut App, ui_tx: &UnboundedSender<UiEvent>, step: Step) {
     app.wizard = Some(Wizard::new(step));
     app.input.clear();
     app.cursor = 0;
-    app.secret_mode = matches!(step, Step::ApiKey | Step::TelegramToken | Step::MailPassword);
+    app.secret_mode = matches!(
+        step,
+        Step::ApiKey | Step::TelegramToken | Step::MailPassword
+    );
     app.messages.push(super::ChatMessage::notice(
         "Assistant de démarrage — Échap pour reprendre plus tard (/setup).",
     ));
@@ -672,7 +679,10 @@ fn activate(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
         }
         Step::MailPassword => {
             if input.is_empty() {
-                set_error(app, "mot de passe vide — colle le mot de passe d'application".into());
+                set_error(
+                    app,
+                    "mot de passe vide — colle le mot de passe d'application".into(),
+                );
                 return;
             }
             if let Some(w) = app.wizard.as_mut() {
@@ -684,7 +694,11 @@ fn activate(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
         }
         Step::MailConfirm => {
             let (host, user, pass) = match app.wizard.as_ref() {
-                Some(w) => (w.mail_host.clone(), w.mail_user.clone(), w.mail_pass.clone()),
+                Some(w) => (
+                    w.mail_host.clone(),
+                    w.mail_user.clone(),
+                    w.mail_pass.clone(),
+                ),
                 None => return,
             };
             match save_mail_env(&host, &user, &pass) {
@@ -897,7 +911,11 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
                 lines.push(item_line(i == w.cursor, c));
             }
         }
-        Step::ApiKey | Step::TelegramToken | Step::MailHost | Step::MailUser | Step::MailPassword => {
+        Step::ApiKey
+        | Step::TelegramToken
+        | Step::MailHost
+        | Step::MailUser
+        | Step::MailPassword => {
             let label = match w.step {
                 Step::ApiKey => "Clé API : ",
                 Step::TelegramToken => "Jeton Telegram : ",
@@ -924,10 +942,7 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
                         .fg(theme::accent())
                         .add_modifier(Modifier::SLOW_BLINK),
                 ));
-                spans.push(Span::styled(
-                    placeholder,
-                    Style::default().fg(theme::dim()),
-                ));
+                spans.push(Span::styled(placeholder, Style::default().fg(theme::dim())));
             } else {
                 spans.push(Span::styled(
                     mask(&app.input, app.secret_mode),
@@ -939,7 +954,11 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
         }
         Step::MailConfirm => {
             let (host, user, pass) = match app.wizard.as_ref() {
-                Some(w) => (w.mail_host.as_str(), w.mail_user.as_str(), w.mail_pass.as_str()),
+                Some(w) => (
+                    w.mail_host.as_str(),
+                    w.mail_user.as_str(),
+                    w.mail_pass.as_str(),
+                ),
                 None => ("", "", ""),
             };
             let smtp = if let Some(rest) = host.strip_prefix("imap.") {
@@ -956,7 +975,10 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
             lines.push(kv("IMAP", &format!("{host}:993")));
             lines.push(kv("SMTP", &format!("{smtp}:465")));
             lines.push(kv("Adresse", user));
-            lines.push(kv("Mot de passe", &format!("{} caractères", pass.chars().count())));
+            lines.push(kv(
+                "Mot de passe",
+                &format!("{} caractères", pass.chars().count()),
+            ));
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 "  Fichier cible : ~/.config/zer0/mail.env (0600)",
