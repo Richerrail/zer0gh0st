@@ -72,6 +72,7 @@ pub const TREE: &[Node] = &[
     n("audit", "/audit"),
     n("chats", "/chats"),
     n("login", "/login"),
+    n("zer0_mail", "/zer0_mail"),
     n("logout", "/logout"),
     // Visibles directement (sans déplier le groupe « model »).
     n("model use", "/model use "),

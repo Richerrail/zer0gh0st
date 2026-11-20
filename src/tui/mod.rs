@@ -1396,6 +1396,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
         }
         "/setup" => wizard::start(app, ui_tx, wizard::Step::Inference),
         "/login" => wizard::start(app, ui_tx, wizard::Step::Provider),
+        "/zer0_mail" | "/mail" => wizard::start(app, ui_tx, wizard::Step::MailHost),
         "/logout" => match crate::commands::provider_remove(&app.provider_id) {
             Ok(lines) => {
                 for line in lines {
@@ -1434,6 +1435,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
              /models [free]             liste les modèles du provider\n\
              /ctx [N|1M|auto]           contexte du modèle (auto/override)\n\
              /telegram [on|off]         bot Telegram à distance (long polling)\n\
+             /zer0_mail                 configurer l'email (IMAP/SMTP, persistant)\n\
              /free                      menu des modèles gratuits\n\
              /quota                     usage des modèles (appels, 429, solde de clé)\n\
              /vote [up|down|status]     vote pour zer0gh0st (👍 = une star GitHub)\n\
@@ -6253,7 +6255,7 @@ mod tests {
         }
         assert!(text.contains("Clé API"), "titre absent: {text}");
         assert!(
-            text.contains("colle ta clé ici"),
+            text.contains("colle le mot de passe") || text.contains("colle ta clé"),
             "champ de saisie invisible: {text}"
         );
         assert!(

@@ -289,12 +289,15 @@ impl ImapClient {
         start: u32,
         end: u32,
     ) -> Result<Vec<EmailSummary>, EmailError> {
+        // `start`/`end` sont des numéros de séquence (1..=total) : on utilise
+        // FETCH (et non UID FETCH), sinon les UID réels (souvent ≫ total sur
+        // Gmail) ne correspondent à rien et la liste revient vide.
         let range = format!("{}:{}", start, end);
         let mut fetch = self
             .session
-            .uid_fetch(range, "(FLAGS BODY.PEEK[HEADER])")
+            .fetch(range, "(UID FLAGS BODY.PEEK[HEADER])")
             .await
-            .map_err(|e| EmailError::Imap(format!("UID FETCH échoué: {}", e)))?;
+            .map_err(|e| EmailError::Imap(format!("FETCH échoué: {}", e)))?;
 
         let mut summaries = Vec::new();
         while let Some(item) = fetch.next().await {

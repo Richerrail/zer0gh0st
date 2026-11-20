@@ -37,6 +37,11 @@ pub enum Step {
     Exec,
     Commands,
     Done,
+    // ── Assistant email (`/zer0_mail`) ──────────────────────────────────────
+    MailHost,
+    MailUser,
+    MailPassword,
+    MailConfirm,
 }
 
 impl Step {
@@ -54,6 +59,12 @@ impl Step {
             Step::Exec => 6,
             Step::Commands => 7,
             Step::Done => 8,
+            // Assistant email : hors de la plage du setup (0-8) pour ne pas
+            // perturber la reprise de `/setup`.
+            Step::MailHost => 100,
+            Step::MailUser => 101,
+            Step::MailPassword => 102,
+            Step::MailConfirm => 103,
         }
     }
 
@@ -67,6 +78,10 @@ impl Step {
             5 => Step::Thinking,
             6 => Step::Exec,
             7 => Step::Commands,
+            100 => Step::MailHost,
+            101 => Step::MailUser,
+            102 => Step::MailPassword,
+            103 => Step::MailConfirm,
             _ => Step::Done,
         }
     }
@@ -83,11 +98,22 @@ impl Step {
             Step::Exec => "7/8 — Exécution shell (code_exec)",
             Step::Commands => "8/8 — Les commandes",
             Step::Done => "Terminé",
+            Step::MailHost => "Email 1/4 — Serveur IMAP",
+            Step::MailUser => "Email 2/4 — Adresse",
+            Step::MailPassword => "Email 3/4 — Mot de passe d'application",
+            Step::MailConfirm => "Email 4/4 — Confirmation",
         }
     }
 
     pub fn needs_text(self) -> bool {
-        matches!(self, Step::ApiKey | Step::TelegramToken)
+        matches!(
+            self,
+            Step::ApiKey
+                | Step::TelegramToken
+                | Step::MailHost
+                | Step::MailUser
+                | Step::MailPassword
+        )
     }
 }
 
@@ -104,6 +130,10 @@ pub struct Wizard {
     pub page: usize,
     /// Le modèle courant a-t-il été choisi ? (pour l'étape Model en saisie libre)
     pub manual_model: bool,
+    // ── Assistant email (`/zer0_mail`) ──────────────────────────────────────
+    pub mail_host: String,
+    pub mail_user: String,
+    pub mail_pass: String,
 }
 
 impl Wizard {
@@ -120,6 +150,9 @@ impl Wizard {
             error: None,
             page: 0,
             manual_model: false,
+            mail_host: String::new(),
+            mail_user: String::new(),
+            mail_pass: String::new(),
         }
     }
 }
@@ -129,7 +162,10 @@ pub fn start(app: &mut App, ui_tx: &UnboundedSender<UiEvent>, step: Step) {
     app.wizard = Some(Wizard::new(step));
     app.input.clear();
     app.cursor = 0;
-    app.secret_mode = matches!(step, Step::ApiKey | Step::TelegramToken);
+    app.secret_mode = matches!(
+        step,
+        Step::ApiKey | Step::TelegramToken | Step::MailPassword
+    );
     app.messages.push(super::ChatMessage::notice(
         "Assistant de démarrage — Échap pour reprendre plus tard (/setup).",
     ));
@@ -295,6 +331,38 @@ fn explanatory(step: Step) -> &'static [&'static str] {
         ],
         Step::Commands => command_pages(),
         Step::Done => &["Configuration terminée."],
+        Step::MailHost => &[
+            "Serveur IMAP : c'est la machine qui héberge ta boîte mail.",
+            "",
+            "• Gmail      → imap.gmail.com",
+            "• Outlook    → outlook.office365.com",
+            "• Proton     → 127.0.0.1 (via Proton Bridge)",
+            "• Autre      → demande à ton fournisseur",
+            "",
+            "Le port 993 (TLS implicite) est utilisé automatiquement.",
+        ],
+        Step::MailUser => &[
+            "Ton adresse email complète — c'est aussi l'identifiant de connexion.",
+            "",
+            "Exemple : prenom.nom@gmail.com",
+        ],
+        Step::MailPassword => &[
+            "Mot de passe d'APPLICATION, pas ton mot de passe habituel.",
+            "",
+            "Gmail refuse les mots de passe normaux depuis 2022. Pour en créer un :",
+            "  1. myaccount.google.com/security",
+            "  2. Validation en deux étapes (obligatoire)",
+            "  3. « Mots de passe des applications » → créer",
+            "  4. Copie les 16 caractères (espaces inclus, ils sont acceptés)",
+            "",
+            "La saisie est masquée et le fichier sera écrit en 0600.",
+        ],
+        Step::MailConfirm => &[
+            "Vérifie avant d'enregistrer :",
+            "",
+            "Entrée = écrire ~/.config/zer0/mail.env et activer l'outil `email`.",
+            "Échap = abandonner sans rien écrire.",
+        ],
     }
 }
 
@@ -585,6 +653,75 @@ fn activate(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
             finish(app, ui_tx);
             return;
         }
+        // ── Assistant email (`/zer0_mail`) ──────────────────────────────────
+        Step::MailHost => {
+            if input.is_empty() {
+                set_error(app, "serveur vide — ex. imap.gmail.com".into());
+                return;
+            }
+            if let Some(w) = app.wizard.as_mut() {
+                w.mail_host = input.clone();
+            }
+            next = Some(Step::MailUser);
+            clear_input = true;
+        }
+        Step::MailUser => {
+            if !input.contains('@') || input.len() < 5 {
+                set_error(app, "adresse invalide — ex. prenom.nom@gmail.com".into());
+                return;
+            }
+            if let Some(w) = app.wizard.as_mut() {
+                w.mail_user = input.clone();
+            }
+            next = Some(Step::MailPassword);
+            clear_input = true;
+            secret = true;
+        }
+        Step::MailPassword => {
+            if input.is_empty() {
+                set_error(
+                    app,
+                    "mot de passe vide — colle le mot de passe d'application".into(),
+                );
+                return;
+            }
+            if let Some(w) = app.wizard.as_mut() {
+                w.mail_pass = input.clone();
+            }
+            next = Some(Step::MailConfirm);
+            clear_input = true;
+            secret = false;
+        }
+        Step::MailConfirm => {
+            let (host, user, pass) = match app.wizard.as_ref() {
+                Some(w) => (
+                    w.mail_host.clone(),
+                    w.mail_user.clone(),
+                    w.mail_pass.clone(),
+                ),
+                None => return,
+            };
+            match save_mail_env(&host, &user, &pass) {
+                Ok(path) => {
+                    app.wizard = None;
+                    app.secret_mode = false;
+                    app.input.clear();
+                    app.cursor = 0;
+                    app.messages.push(super::ChatMessage::notice(format!(
+                        "📧 Email configuré — écrit dans {}\n\
+                         Variables exportées dans ce processus : l'outil `email` est actif.\n\
+                         Persistant au prochain lancement via ~/.local/bin/zer0gh0st.\n\
+                         Test : demande « liste mes mails ».",
+                        path.display()
+                    )));
+                    return;
+                }
+                Err(e) => {
+                    set_error(app, format!("écriture impossible : {e}"));
+                    return;
+                }
+            }
+        }
     }
 
     if clear_input {
@@ -611,6 +748,88 @@ fn set_error(app: &mut App, msg: String) {
     if let Some(w) = app.wizard.as_mut() {
         w.error = Some(msg);
     }
+}
+
+/// Écrit `~/.config/zer0/mail.env` (0600) et exporte les variables dans le
+/// processus courant pour que l'outil `email` fonctionne sans redémarrage.
+///
+/// SMTP est déduit de l'hôte IMAP : `imap.X` → `smtp.X`, port 465 (TLS
+/// implicite). Sinon on garde le même hôte (Proton Bridge, serveurs locaux).
+fn save_mail_env(host: &str, user: &str, pass: &str) -> std::io::Result<std::path::PathBuf> {
+    use std::io::Write;
+
+    let smtp_host = if let Some(rest) = host.strip_prefix("imap.") {
+        format!("smtp.{rest}")
+    } else {
+        host.to_string()
+    };
+
+    let dir = config::config_dir();
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join("mail.env");
+
+    let body = format!(
+        "# Configuration email zer0gh0st — générée par /zer0_mail\n\
+         # Fichier 0600. Sourcé par ~/.local/bin/zer0gh0st au lancement.\n\
+         \n\
+         export ZER0_EMAIL_FROM_ADDRESS={user}\n\
+         export ZER0_EMAIL_FROM_NAME=zer0gh0st\n\
+         export ZER0_EMAIL_SMTP_HOST={smtp_host}\n\
+         export ZER0_EMAIL_SMTP_PORT=465\n\
+         export ZER0_EMAIL_SMTP_USER={user}\n\
+         export ZER0_EMAIL_SMTP_PASSWORD='{pass}'\n\
+         export ZER0_EMAIL_IMAP_HOST={host}\n\
+         export ZER0_EMAIL_IMAP_PORT=993\n\
+         export ZER0_EMAIL_IMAP_USER={user}\n\
+         export ZER0_EMAIL_IMAP_PASSWORD='{pass}'\n\
+         export ZER0_EMAIL_ALLOW_READ=true\n\
+         export ZER0_EMAIL_ALLOW_WRITE=true\n\
+         export ZER0_EMAIL_ALLOW_MANAGE=true\n\
+         export ZER0_EMAIL_ALLOW_DELETE=true\n"
+    );
+
+    // Écriture atomique : fichier temporaire 0600 puis rename.
+    let tmp = dir.join(".mail.env.tmp");
+    {
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&tmp)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        }
+        f.write_all(body.as_bytes())?;
+        f.sync_all()?;
+    }
+    std::fs::rename(&tmp, &path)?;
+
+    // Effet immédiat dans ce processus (l'outil `email` lit `env::var`).
+    let vars = [
+        ("ZER0_EMAIL_FROM_ADDRESS", user.to_string()),
+        ("ZER0_EMAIL_FROM_NAME", "zer0gh0st".to_string()),
+        ("ZER0_EMAIL_SMTP_HOST", smtp_host),
+        ("ZER0_EMAIL_SMTP_PORT", "465".to_string()),
+        ("ZER0_EMAIL_SMTP_USER", user.to_string()),
+        ("ZER0_EMAIL_SMTP_PASSWORD", pass.to_string()),
+        ("ZER0_EMAIL_IMAP_HOST", host.to_string()),
+        ("ZER0_EMAIL_IMAP_PORT", "993".to_string()),
+        ("ZER0_EMAIL_IMAP_USER", user.to_string()),
+        ("ZER0_EMAIL_IMAP_PASSWORD", pass.to_string()),
+        ("ZER0_EMAIL_ALLOW_READ", "true".to_string()),
+        ("ZER0_EMAIL_ALLOW_WRITE", "true".to_string()),
+        ("ZER0_EMAIL_ALLOW_MANAGE", "true".to_string()),
+        ("ZER0_EMAIL_ALLOW_DELETE", "true".to_string()),
+    ];
+    for (k, v) in vars {
+        // SAFETY : mono-thread au moment de la validation (l'agent n'écrit pas
+        // dans l'environnement), et les valeurs viennent de la saisie utilisateur.
+        unsafe { std::env::set_var(k, v) };
+    }
+
+    Ok(path)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -692,11 +911,22 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
                 lines.push(item_line(i == w.cursor, c));
             }
         }
-        Step::ApiKey | Step::TelegramToken => {
-            let label = if w.step == Step::ApiKey {
-                "Clé API : "
-            } else {
-                "Jeton Telegram : "
+        Step::ApiKey
+        | Step::TelegramToken
+        | Step::MailHost
+        | Step::MailUser
+        | Step::MailPassword => {
+            let label = match w.step {
+                Step::ApiKey => "Clé API : ",
+                Step::TelegramToken => "Jeton Telegram : ",
+                Step::MailHost => "Serveur IMAP : ",
+                Step::MailUser => "Adresse email : ",
+                _ => "Mot de passe d'application : ",
+            };
+            let placeholder = match w.step {
+                Step::MailHost => " imap.gmail.com, puis Entrée",
+                Step::MailUser => " prenom.nom@gmail.com, puis Entrée",
+                _ => " colle le mot de passe, puis Entrée",
             };
             let mut spans = vec![Span::styled(
                 format!("  {label}"),
@@ -712,18 +942,48 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
                         .fg(theme::accent())
                         .add_modifier(Modifier::SLOW_BLINK),
                 ));
-                spans.push(Span::styled(
-                    " colle ta clé ici, puis Entrée",
-                    Style::default().fg(theme::dim()),
-                ));
+                spans.push(Span::styled(placeholder, Style::default().fg(theme::dim())));
             } else {
                 spans.push(Span::styled(
-                    mask(&app.input, true),
+                    mask(&app.input, app.secret_mode),
                     Style::default().fg(theme::code()),
                 ));
                 spans.push(Span::styled("▏", Style::default().fg(theme::accent())));
             }
             lines.push(Line::from(spans));
+        }
+        Step::MailConfirm => {
+            let (host, user, pass) = match app.wizard.as_ref() {
+                Some(w) => (
+                    w.mail_host.as_str(),
+                    w.mail_user.as_str(),
+                    w.mail_pass.as_str(),
+                ),
+                None => ("", "", ""),
+            };
+            let smtp = if let Some(rest) = host.strip_prefix("imap.") {
+                format!("smtp.{rest}")
+            } else {
+                host.to_string()
+            };
+            let kv = |k: &str, v: &str| {
+                Line::from(vec![
+                    Span::styled(format!("  {k:<14}"), Style::default().fg(theme::dim())),
+                    Span::styled(v.to_string(), Style::default().fg(theme::code())),
+                ])
+            };
+            lines.push(kv("IMAP", &format!("{host}:993")));
+            lines.push(kv("SMTP", &format!("{smtp}:465")));
+            lines.push(kv("Adresse", user));
+            lines.push(kv(
+                "Mot de passe",
+                &format!("{} caractères", pass.chars().count()),
+            ));
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "  Fichier cible : ~/.config/zer0/mail.env (0600)",
+                Style::default().fg(theme::dim()),
+            )));
         }
         Step::Commands => lines.extend(command_page(w.page, inner.width as usize)),
         Step::Done => {}
@@ -745,6 +1005,10 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
     let footer = match w.step {
         Step::ApiKey => " Tape ou colle la clé · Entrée valider · Échap plus tard ",
         Step::TelegramToken => " Tape ou colle le jeton · Entrée valider · Échap plus tard ",
+        Step::MailHost => " Serveur IMAP · Entrée valider · Échap abandonner ",
+        Step::MailUser => " Adresse complète · Entrée valider · Échap abandonner ",
+        Step::MailPassword => " Saisie masquée · Entrée valider · Échap abandonner ",
+        Step::MailConfirm => " Entrée : enregistrer · Échap : abandonner ",
         Step::Model => " ↑↓ choisir · taper = filtrer · Entrée valider · Échap plus tard ",
         Step::Commands => " Entrée : page suivante · Échap : plus tard ",
         Step::Done => " Entrée pour terminer ",
