@@ -52,6 +52,13 @@ rpassword = "7"
 sha2 = "0.10"
 lopdf = "0.34"
 pdf-extract = "0.8"
+# Modules fun dynamiques
+libloading = "0.8"
+notify = "6"
+zer0fun-api = { path = "../zer0fun-api" }
+ed25519-dalek = "2.1"
+dirs = "5"
+log = "0.4"
 # Module email zer0gh0st
 async-imap = { version = "0.10", default-features = false, features = ["runtime-tokio"] }
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-rustls-tls", "builder"] }

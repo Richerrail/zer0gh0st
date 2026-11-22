@@ -1,10 +1,15 @@
 pub mod bintime;
 pub mod cg;
 pub mod file;
+pub mod loader;
 pub mod pong;
 pub mod radio;
+pub mod registry;
 pub mod term;
 pub mod top;
+
+pub use loader::LoadedModule;
+pub use registry::FunRegistry;
 
 use std::time::{Duration, Instant};
 

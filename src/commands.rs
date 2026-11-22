@@ -824,11 +824,36 @@ fn probe_provider(id: &str) -> (Verdict, String, Option<String>) {
                         "/models → 429 : rate-limit, réessaie.".to_string(),
                         None,
                     ),
-                    _ => (
-                        Verdict::Other,
-                        format!("/models → {ms} : {}", short(&mb)),
-                        None,
-                    ),
+                    _ => {
+                        // Cloudflare Workers AI n'expose pas `/v1/models` (405).
+                        // On tente un chat direct avec un modèle connu.
+                        if id == "cloudflare" && ms == 405 {
+                            let m = "@cf/openai/gpt-oss-20b";
+                            match crate::gwclient::probe_chat(id, m) {
+                                Err(e) => {
+                                    return (
+                                        Verdict::BadUrl,
+                                        format!("chat injoignable ({e})."),
+                                        None,
+                                    )
+                                }
+                                Ok((cs, _)) => {
+                                    if is2xx(cs) {
+                                        return (
+                                            Verdict::Ready,
+                                            format!("chat ({m}) → {cs} : OK (pas de /models)."),
+                                            Some(m.to_string()),
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                        (
+                            Verdict::Other,
+                            format!("/models → {ms} : {}", short(&mb)),
+                            None,
+                        )
+                    }
                 };
             }
             mb
@@ -836,9 +861,36 @@ fn probe_provider(id: &str) -> (Verdict, String, Option<String>) {
     };
     let ids = crate::gwclient::model_ids(&models, 5);
     if ids.is_empty() {
+        // Certains providers (ex. Cloudflare Workers AI) n'exposent pas
+        // `/v1/models` : on tente un chat direct avec un modèle connu.
+        let fallback = match id {
+            "cloudflare" => vec!["@cf/openai/gpt-oss-20b".to_string()],
+            _ => vec![],
+        };
+        if fallback.is_empty() {
+            return (
+                Verdict::NotTested,
+                "/models → 200, mais aucun modèle listé pour tester l'inférence.".to_string(),
+                None,
+            );
+        }
+        for m in &fallback {
+            match crate::gwclient::probe_chat(id, m) {
+                Err(e) => return (Verdict::BadUrl, format!("chat injoignable ({e})."), None),
+                Ok((cs, _)) => {
+                    if is2xx(cs) {
+                        return (
+                            Verdict::Ready,
+                            format!("chat ({m}) → {cs} : OK (pas de /models)."),
+                            Some(m.clone()),
+                        );
+                    }
+                }
+            }
+        }
         return (
-            Verdict::NotTested,
-            "/models → 200, mais aucun modèle listé pour tester l'inférence.".to_string(),
+            Verdict::Other,
+            format!("chat → échec sur les modèles de secours pour {id}."),
             None,
         );
     }
@@ -940,7 +992,14 @@ pub fn provider_add(args: ProviderAddArgs) -> Result<Vec<String>> {
             .map(str::to_string)
             .or_else(|| builtin.as_ref().map(|p| p.base_url.clone()))
             .unwrap_or_default();
-        return provider_add_via_gateway(&id, &gw_base, builtin.is_some(), key, args.force);
+        return provider_add_via_gateway(
+            &id,
+            &gw_base,
+            builtin.is_some(),
+            key,
+            args.force,
+            args.name,
+        );
     }
     provider_add_local(&id, base_url, args.name, builtin.is_some(), key)
 }
@@ -953,6 +1012,7 @@ fn provider_add_via_gateway(
     is_builtin: bool,
     key: Option<&str>,
     force: bool,
+    name: Option<&str>,
 ) -> Result<Vec<String>> {
     if base_url.is_empty() {
         return Err(anyhow!("base_url manquante pour la passerelle"));
@@ -990,7 +1050,13 @@ fn provider_add_via_gateway(
         g.custom.insert(
             id.to_string(),
             crate::config::CustomProvider {
-                name: id.to_string(),
+                // Nom lisible fourni par l'utilisateur (overlay `/provider add`),
+                // sinon l'identifiant faute de mieux.
+                name: name
+                    .map(str::trim)
+                    .filter(|n| !n.is_empty())
+                    .unwrap_or(id)
+                    .to_string(),
                 base_url: format!(
                     "{}/{}/v1",
                     crate::gwclient::gw_base().trim_end_matches('/'),

@@ -88,6 +88,7 @@ pub const TREE: &[Node] = &[
         &[
             n("sélection", "/provider"),
             n("list", "/provider list"),
+            n("ajouter (assistant)", "/provider add"),
             n("add", "/provider add "),
             n("use", "/provider use "),
             n("remove", "/provider remove "),
@@ -235,6 +236,15 @@ pub const TREE: &[Node] = &[
             n("zer0CL", "/0cl"),
             n("pong", "/pong"),
             n("panel (fermer)", "/panel"),
+        ],
+    ),
+    g(
+        "fun",
+        &[
+            n("list", "/fun list"),
+            n("reload", "/fun reload"),
+            n("dir", "/fun dir"),
+            n("zer0build", "/zer0build"),
         ],
     ),
 ];

@@ -3,6 +3,7 @@ mod blueprint;
 mod menu;
 mod neon;
 mod picker;
+mod provider_add;
 mod whale;
 mod wizard;
 
@@ -117,6 +118,8 @@ pub struct App {
     pub picker: Option<picker::Picker>,
     /// Assistant de première connexion (écran plein).
     pub wizard: Option<wizard::Wizard>,
+    /// Overlay `/provider add` (ajout guidé d'un provider).
+    pub provider_add: Option<provider_add::ProviderAdd>,
     /// Saisie masquée (clé API, jeton) : le buffer reste réel, l'affichage non.
     pub secret_mode: bool,
     /// Mod « 0cg » : watchlist crypto (panneau latéral). `None` = jamais ouvert.
@@ -157,6 +160,12 @@ pub struct App {
     pub file: Option<crate::fun::file::FileExplorer>,
     /// Mod `zer0CL` (shell) : créé à la demande.
     pub term: Option<crate::fun::term::Term>,
+    /// Registry des modules fun dynamiques (chargés depuis .so).
+    pub fun_registry: Option<crate::fun::FunRegistry>,
+    /// Module fun dynamique actif (nom du module).
+    pub active_fun_module: Option<String>,
+    /// Overlay `/zer0build` (aide et gestion des modules).
+    pub zer0build_overlay: bool,
     /// Zone écran du panneau 0file (molette / clics).
     pub file_rect: Rect,
     /// Zone écran du panneau zer0CL (molette).
@@ -345,6 +354,7 @@ pub async fn run(
         roles_enabled: config::roles_enabled(),
         picker: None,
         wizard: None,
+        provider_add: None,
         secret_mode: false,
         cg: None,
         pending_picker_target: None,
@@ -367,6 +377,9 @@ pub async fn run(
         file_rect: Rect::default(),
         term: None,
         term_rect: Rect::default(),
+        fun_registry: crate::fun::FunRegistry::new(None, true).ok(),
+        active_fun_module: None,
+        zer0build_overlay: false,
         focus_panel: false,
         kb_auto: true,
         history: Vec::new(),
@@ -636,6 +649,28 @@ async fn event_loop(
                 if app.mode == crate::fun::Mode::Pong {
                     app.pong.step();
                 }
+                // Tick du module fun dynamique actif
+                if let Some(module_name) = &app.active_fun_module {
+                    if let Some(registry) = &mut app.fun_registry {
+                        let mut ctx = zer0fun_api::Context::default();
+                        ctx.term_width = app.chat_rect.width;
+                        ctx.term_height = app.chat_rect.height;
+                        registry.on_tick(module_name, &mut ctx);
+                        if ctx.exit {
+                            app.active_fun_module = None;
+                        }
+                    }
+                }
+                // Hot-reload : vérifier les mises à jour des modules
+                if let Some(registry) = &mut app.fun_registry {
+                    let reloaded = registry.check_updates().unwrap_or_default();
+                    for name in reloaded {
+                        app.messages.push(ChatMessage::notice(format!(
+                            "🔄 Module '{}' rechargé",
+                            name
+                        )));
+                    }
+                }
             }
         }
 
@@ -859,8 +894,10 @@ fn send_message(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
     app.input.clear();
     app.cursor = 0;
 
-    // Historique d'entrée (↑ le rappelle).
-    if !app.history.last().map(|h| h == &text).unwrap_or(false) {
+    // Historique d'entrée (↑ le rappelle). On n'y met JAMAIS une commande
+    // porteuse de secret (`/provider add … <clé>`, `/login`, `/vault`…) :
+    // l'historique est persisté sur disque et relu à la frappe.
+    if !contains_secret(&text) && !app.history.last().map(|h| h == &text).unwrap_or(false) {
         app.history.push(text.clone());
     }
     app.hist_pos = None;
@@ -876,6 +913,31 @@ fn send_message(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
     }
 
     start_turn(app, text, ui_tx);
+}
+
+/// Une commande porte-t-elle un secret qui ne doit pas finir dans l'historique
+/// d'entrée (persisté sur disque) ?
+///
+/// Volontairement large : mieux vaut perdre le rappel ↑ d'une commande que
+/// laisser une clé API en clair dans `~/.local/share/zer0gh0st/history`.
+fn contains_secret(text: &str) -> bool {
+    let t = text.trim();
+    if !t.starts_with('/') {
+        return false;
+    }
+    let mut words = t.split_whitespace();
+    let cmd = words.next().unwrap_or("");
+    match cmd {
+        // `/provider add <id> [<base_url>] [<nom>] <clé>` : tout ajout porte
+        // une clé, sauf la forme nue qui ouvre l'overlay.
+        "/provider" => {
+            let sub = words.next().unwrap_or("");
+            sub == "add" && words.next().is_some()
+        }
+        // Commandes dont chaque argument est un secret.
+        "/login" | "/vault" | "/remember" => words.next().is_some(),
+        _ => false,
+    }
 }
 
 fn nudge(app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
@@ -899,6 +961,45 @@ fn request_stop(app: &mut App) {
         app.messages
             .push(ChatMessage::notice("Rien à interrompre."));
     }
+}
+
+/// Convertit un événement clavier crossterm en événement zer0fun.
+fn convert_key_event(k: crossterm::event::KeyEvent) -> zer0fun_api::Event {
+    use zer0fun_api::{Event, KeyEvent};
+    
+    let key = match k.code {
+        KeyCode::Char(c) => {
+            // Gérer les modificateurs Ctrl
+            if k.modifiers.contains(KeyModifiers::CONTROL) {
+                KeyEvent::Ctrl(c)
+            } else if k.modifiers.contains(KeyModifiers::ALT) {
+                KeyEvent::Alt(c)
+            } else if k.modifiers.contains(KeyModifiers::SHIFT) {
+                KeyEvent::Shift(c)
+            } else {
+                KeyEvent::Char(c)
+            }
+        }
+        KeyCode::Esc => KeyEvent::Esc,
+        KeyCode::Enter => KeyEvent::Enter,
+        KeyCode::Up => KeyEvent::Up,
+        KeyCode::Down => KeyEvent::Down,
+        KeyCode::Left => KeyEvent::Left,
+        KeyCode::Right => KeyEvent::Right,
+        KeyCode::Backspace => KeyEvent::Backspace,
+        KeyCode::Delete => KeyEvent::Delete,
+        KeyCode::Insert => KeyEvent::Insert,
+        KeyCode::Home => KeyEvent::Home,
+        KeyCode::End => KeyEvent::End,
+        KeyCode::PageUp => KeyEvent::PageUp,
+        KeyCode::PageDown => KeyEvent::PageDown,
+        KeyCode::Tab => KeyEvent::Tab,
+        KeyCode::BackTab => KeyEvent::BackTab,
+        KeyCode::F(n) => KeyEvent::F(n),
+        _ => KeyEvent::Unknown,
+    };
+    
+    Event::Key(key)
 }
 
 fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
@@ -1042,6 +1143,118 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
         "/pong" => {
             app.pong = crate::fun::pong::Pong::new();
             app.mode = crate::fun::Mode::Pong;
+        }
+        "/fun" => {
+            // Gestion des modules fun dynamiques
+            match args.first().copied() {
+                Some("list") | None => {
+                    // Liste les modules chargés
+                    if let Some(registry) = &app.fun_registry {
+                        let modules = registry.list_meta();
+                        if modules.is_empty() {
+                            app.messages.push(ChatMessage::notice(
+                                "Aucun module fun dynamique chargé.\n\
+                                Utiliser 'zer0build install' pour installer des modules."
+                            ));
+                        } else {
+                            let mut s = String::from("Modules fun dynamiques :\n\n");
+                            for meta in modules {
+                                s.push_str(&format!(
+                                    "  {} v{} — {}\n    catégorie: {:?} | permissions: {:?}\n\n",
+                                    meta.name, meta.version, meta.description,
+                                    meta.category, meta.permissions
+                                ));
+                            }
+                            s.push_str(&format!(
+                                "Répertoire: {}\n\
+                                Commandes: /<module> pour activer, /fun reload pour recharger",
+                                registry.modules_dir.display()
+                            ));
+                            app.messages.push(ChatMessage::notice(s));
+                        }
+                    } else {
+                        app.messages.push(ChatMessage::notice(
+                            "Registry de modules fun non initialisé."
+                        ));
+                    }
+                }
+                Some("reload") => {
+                    // Recharge un module ou tous
+                    if let Some(registry) = &mut app.fun_registry {
+                        match args.get(1).copied() {
+                            Some(name) => {
+                                match registry.reload_module(name) {
+                                    Ok(()) => {
+                                        app.messages.push(ChatMessage::notice(
+                                            format!("✅ Module '{}' rechargé", name)
+                                        ));
+                                    }
+                                    Err(e) => {
+                                        app.messages.push(ChatMessage::notice(
+                                            format!("❌ Échec du rechargement de '{}': {}", name, e)
+                                        ));
+                                    }
+                                }
+                            }
+                            None => {
+                                match registry.load_all() {
+                                    Ok(()) => {
+                                        let count = registry.len();
+                                        app.messages.push(ChatMessage::notice(
+                                            format!("✅ {} module(s) rechargé(s)", count)
+                                        ));
+                                    }
+                                    Err(e) => {
+                                        app.messages.push(ChatMessage::notice(
+                                            format!("❌ Échec du rechargement: {}", e)
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Some("unload") => {
+                    if let Some(name) = args.get(1).copied() {
+                        if let Some(registry) = &mut app.fun_registry {
+                            match registry.unload_module(name) {
+                                Ok(()) => {
+                                    if app.active_fun_module.as_deref() == Some(name) {
+                                        app.active_fun_module = None;
+                                    }
+                                    app.messages.push(ChatMessage::notice(
+                                        format!("✅ Module '{}' déchargé", name)
+                                    ));
+                                }
+                                Err(e) => {
+                                    app.messages.push(ChatMessage::notice(
+                                        format!("❌ Échec du déchargement: {}", e)
+                                    ));
+                                }
+                            }
+                        }
+                    } else {
+                        app.messages.push(ChatMessage::notice(
+                            "Usage: /fun unload <nom>"
+                        ));
+                    }
+                }
+                Some("dir") => {
+                    if let Some(registry) = &app.fun_registry {
+                        app.messages.push(ChatMessage::notice(
+                            format!("Répertoire des modules: {}", registry.modules_dir.display())
+                        ));
+                    }
+                }
+                Some(_) => {
+                    app.messages.push(ChatMessage::notice(
+                        "Usage: /fun [list|reload [nom]|unload <nom>|dir]"
+                    ));
+                }
+            }
+        }
+        "/zer0build" => {
+            app.zer0build_overlay = !app.zer0build_overlay;
         }
         "/models" => cmd_list_models(app, ui_tx, false),
         "/ctx" => handle_ctx(app, &args),
@@ -1420,6 +1633,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
              /theme [nom [default] | default | list]  thème actif / défaut\n\
              /0cg [add|rm|list|off]  watchlist crypto (panneau latéral)\n\
              /provider add <id> <clé>   dépose la clé sur zer0-gw (sinon local)\n\
+             /provider add              assistant : choix du provider + clé (gateway)\n\
              /provider keys             clés détenues par zer0-gw\n\
              /provider use <id>         change de provider\n\
              /model                     modèle actuel + sélection (liste)\n\
@@ -1482,9 +1696,23 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
              /quit                      quitter",
             ));
         }
-        other => app
-            .messages
-            .push(ChatMessage::notice(format!("Commande inconnue: {other}"))),
+        other => {
+            // Vérifier si c'est un module fun dynamique
+            let module_name = other.trim_start_matches('/');
+            if let Some(registry) = &app.fun_registry {
+                if registry.contains(module_name) {
+                    app.active_fun_module = Some(module_name.to_string());
+                    app.mode = crate::fun::Mode::Chat;
+                    app.messages.push(ChatMessage::notice(format!(
+                        "🎮 Module '{}' activé. [Esc] pour quitter.",
+                        module_name
+                    )));
+                    return;
+                }
+            }
+            app.messages
+                .push(ChatMessage::notice(format!("Commande inconnue: {other}")));
+        }
     }
 }
 
@@ -1525,6 +1753,11 @@ fn handle_provider(app: &mut App, args: &[&str], ui_tx: &UnboundedSender<UiEvent
                 "list" => Ok(crate::commands::provider_list()),
                 "keys" => Ok(crate::commands::provider_keys()),
                 "add" => {
+                    // `/provider add` sans argument : overlay guidé.
+                    if args.len() == 1 {
+                        provider_add::start(app);
+                        return;
+                    }
                     // /provider add <id> [<base_url>] [<nom>] <clé> [--gw|--local|--force]
                     // Flagles --base-url/--name/--key lèvent l'ambiguïté positionnelle.
                     let mut route = crate::commands::GwRoute::Auto;
@@ -4033,6 +4266,24 @@ fn handle_input(ev: Event, app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
         return;
     }
 
+    // Overlay `/provider add` : capte tout (clavier + collage de la clé).
+    if app.provider_add.is_some() {
+        match ev {
+            Event::Key(k) => provider_add::handle_key(k, app, ui_tx),
+            Event::Paste(text)
+                if app
+                    .provider_add
+                    .as_ref()
+                    .map(|o| o.step.needs_text())
+                    .unwrap_or(false) =>
+            {
+                input_insert_str(app, &text);
+            }
+            _ => {}
+        }
+        return;
+    }
+
     // Sélecteur ouvert : il capte tout le clavier.
     if let Event::Key(key) = ev {
         if app.picker.is_some() {
@@ -4154,6 +4405,28 @@ fn handle_input(ev: Event, app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
             return;
         }
         // Fun modes take over input.
+        // Vérifier d'abord les modules dynamiques (même en mode Chat)
+        if let Some(module_name) = app.active_fun_module.clone() {
+            if let Some(registry) = &mut app.fun_registry {
+                // Convertir l'événement crossterm en événement zer0fun
+                let fun_event = convert_key_event(k);
+                let mut ctx = zer0fun_api::Context::default();
+                ctx.term_width = app.chat_rect.width;
+                ctx.term_height = app.chat_rect.height;
+                
+                let consumed = registry.on_event(&module_name, &fun_event, &mut ctx);
+                
+                if ctx.exit {
+                    app.active_fun_module = None;
+                    app.mode = crate::fun::Mode::Chat;
+                }
+                
+                if consumed {
+                    return;
+                }
+            }
+        }
+        
         if app.mode != crate::fun::Mode::Chat {
             match app.mode {
                 crate::fun::Mode::Radio => match k.code {
@@ -4212,6 +4485,21 @@ fn handle_input(ev: Event, app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
         if app.chats_popup.is_some() {
             if handle_chats_key(app, k.code) {
                 app.chats_popup = None;
+            }
+            return;
+        }
+        // Overlay `/zer0build` : capture les touches tant qu'il est ouvert.
+        if app.zer0build_overlay {
+            match k.code {
+                KeyCode::Esc => {
+                    app.zer0build_overlay = false;
+                }
+                KeyCode::Char('r') => {
+                    if let Some(registry) = &mut app.fun_registry {
+                        let _ = registry.load_all();
+                    }
+                }
+                _ => {}
             }
             return;
         }
@@ -4738,6 +5026,18 @@ fn draw(f: &mut Frame, app: &mut App) {
         return;
     }
 
+    // Overlay `/provider add` : plein écran lui aussi.
+    if app.provider_add.is_some() {
+        provider_add::draw(f, area, app);
+        return;
+    }
+
+    // Overlay `/zer0build` : plein écran.
+    if app.zer0build_overlay {
+        draw_zer0build_overlay(f, area, app);
+        return;
+    }
+
     // Full-screen modes.
     match app.mode {
         crate::fun::Mode::Pong => {
@@ -4755,6 +5055,14 @@ fn draw(f: &mut Frame, app: &mut App) {
             return;
         }
         crate::fun::Mode::Chat => {}
+    }
+
+    // Module fun dynamique actif : plein écran.
+    if let Some(module_name) = &app.active_fun_module {
+        if let Some(registry) = &app.fun_registry {
+            draw_fun_module(f, area, registry, module_name);
+            return;
+        }
     }
 
     // Un mod ouvert occupe une large part de droite ; pas de menu permanent
@@ -4791,6 +5099,192 @@ fn draw(f: &mut Frame, app: &mut App) {
     // Sélecteur (/model, /provider) par-dessus tout le reste.
     if let Some(p) = &app.picker {
         picker::draw(f, area, p);
+    }
+}
+
+/// Dessine l'overlay `/zer0build`.
+fn draw_zer0build_overlay(f: &mut Frame, area: Rect, app: &App) {
+    use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+    use ratatui::text::{Line, Span};
+    
+    // Effacer l'écran
+    f.render_widget(ratatui::widgets::Clear, area);
+    
+    // Titre
+    let title = " zer0build — Gestion des modules fun ";
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme::accent()));
+    
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    
+    // Contenu
+    let mut lines = Vec::new();
+    
+    // Section 1: Procédure
+    lines.push(Line::from(Span::styled("📦 PROCÉDURE COMPLÈTE", Style::default().fg(theme::accent()).add_modifier(ratatui::style::Modifier::BOLD))));
+    lines.push(Line::from(""));
+    lines.push(Line::from("  1. Créer un module :"));
+    lines.push(Line::from(Span::styled("     zer0build new <nom> --template <basic|game|visual|tool|network>", Style::default().fg(ratatui::style::Color::Gray))));
+    lines.push(Line::from(""));
+    lines.push(Line::from("  2. Compiler :"));
+    lines.push(Line::from(Span::styled("     cd <nom> && zer0build build --release", Style::default().fg(ratatui::style::Color::Gray))));
+    lines.push(Line::from(""));
+    lines.push(Line::from("  3. Installer :"));
+    lines.push(Line::from(Span::styled("     zer0build install [--force]", Style::default().fg(ratatui::style::Color::Gray))));
+    lines.push(Line::from(""));
+    lines.push(Line::from("  4. Utiliser dans zer0gh0st :"));
+    lines.push(Line::from(Span::styled("     /<nom>", Style::default().fg(ratatui::style::Color::Gray))));
+    lines.push(Line::from(""));
+    
+    // Section 2: Commandes zer0build
+    lines.push(Line::from(Span::styled("🔧 COMMANDES ZER0BUILD", Style::default().fg(theme::accent()).add_modifier(ratatui::style::Modifier::BOLD))));
+    lines.push(Line::from(""));
+    lines.push(Line::from("  new <nom> [--template T] [--description D] [--author A]"));
+    lines.push(Line::from("    Crée un nouveau projet de module"));
+    lines.push(Line::from(""));
+    lines.push(Line::from("  build [--target T] [--all] [--release]"));
+    lines.push(Line::from("    Compile le module (natif ou cross-compile)"));
+    lines.push(Line::from(""));
+    lines.push(Line::from("  install [--force] [--target-dir D]"));
+    lines.push(Line::from("    Installe le module dans zer0gh0st"));
+    lines.push(Line::from(""));
+    lines.push(Line::from("  list [--target-dir D]"));
+    lines.push(Line::from("    Liste les modules installés"));
+    lines.push(Line::from(""));
+    lines.push(Line::from("  remove <nom> [--target-dir D]"));
+    lines.push(Line::from("    Supprime un module installé"));
+    lines.push(Line::from(""));
+    lines.push(Line::from("  ai <prompt> [--name N] [--model M] [--api-key K]"));
+    lines.push(Line::from("    Génère un module via IA (OpenRouter)"));
+    lines.push(Line::from(""));
+    lines.push(Line::from("  sign <path> [--key K]"));
+    lines.push(Line::from("    Signe un module compilé"));
+    lines.push(Line::from(""));
+    lines.push(Line::from("  verify <path> [--pubkey P]"));
+    lines.push(Line::from("    Vérifie la signature d'un module"));
+    lines.push(Line::from(""));
+    
+    // Section 3: Modules installés
+    lines.push(Line::from(Span::styled("📂 MODULES INSTALLÉS", Style::default().fg(theme::accent()).add_modifier(ratatui::style::Modifier::BOLD))));
+    lines.push(Line::from(""));
+    
+    if let Some(registry) = &app.fun_registry {
+        let modules = registry.list_meta();
+        if modules.is_empty() {
+            lines.push(Line::from(Span::styled("  (aucun module installé)", Style::default().fg(ratatui::style::Color::Gray))));
+        } else {
+            for meta in modules {
+                lines.push(Line::from(format!(
+                    "  {} v{} — {}",
+                    meta.name, meta.version, meta.description
+                )));
+                lines.push(Line::from(Span::styled(
+                    format!("    catégorie: {:?} | permissions: {:?}", meta.category, meta.permissions),
+                    ratatui::style::Color::Gray
+                )));
+                lines.push(Line::from(""));
+            }
+        }
+        lines.push(Line::from(format!("  Répertoire: {}", registry.modules_dir.display())));
+    } else {
+        lines.push(Line::from(Span::styled("  (registry non initialisé)", Style::default().fg(ratatui::style::Color::Gray))));
+    }
+    
+    lines.push(Line::from(""));
+    
+    // Section 4: Commandes zer0gh0st
+    lines.push(Line::from(Span::styled("🎮 COMMANDES ZER0GH0ST", Style::default().fg(theme::accent()).add_modifier(ratatui::style::Modifier::BOLD))));
+    lines.push(Line::from(""));
+    lines.push(Line::from("  /fun list              Liste les modules chargés"));
+    lines.push(Line::from("  /fun reload [nom]      Recharge un module ou tous"));
+    lines.push(Line::from("  /fun unload <nom>      Décharge un module"));
+    lines.push(Line::from("  /fun dir               Affiche le répertoire des modules"));
+    lines.push(Line::from("  /<nom>                 Active un module (ex: /pomodoro)"));
+    lines.push(Line::from("  /zer0build             Ouvre/ferme cet overlay"));
+    lines.push(Line::from(""));
+    
+    // Footer
+    lines.push(Line::from(Span::styled("[Esc] Fermer  [r] Recharger les modules", Style::default().fg(ratatui::style::Color::Gray))));
+    
+    let paragraph = Paragraph::new(lines)
+        .wrap(Wrap { trim: true })
+        .scroll((0, 0));
+    
+    f.render_widget(paragraph, inner);
+}
+
+/// Dessine un module fun dynamique.
+fn draw_fun_module(f: &mut Frame, area: Rect, registry: &crate::fun::FunRegistry, name: &str) {
+    // Effacer la zone d'abord
+    f.render_widget(ratatui::widgets::Clear, area);
+    
+    // Créer un buffer zer0fun
+    let mut buf = zer0fun_api::Buffer::new(area.width, area.height);
+    
+    // Convertir la zone ratatui en Rect zer0fun
+    let fun_area = zer0fun_api::Rect::new(area.x, area.y, area.width, area.height);
+    
+    // Dessiner le module
+    registry.draw(name, &fun_area, &mut buf);
+    
+    // Convertir le buffer zer0fun en rendu ratatui
+    let ratatui_buf = f.buffer_mut();
+    for y in 0..area.height {
+        for x in 0..area.width {
+            if let Some(cell) = buf.get(x, y) {
+                let pos = ratatui_buf.cell_mut((area.x + x, area.y + y));
+                if let Some(pos) = pos {
+                    pos.set_symbol(&cell.symbol);
+                    let mut style = ratatui::style::Style::default();
+                    if let Some(fg) = cell.style.fg {
+                        style = style.fg(convert_color(fg));
+                    }
+                    if let Some(bg) = cell.style.bg {
+                        style = style.bg(convert_color(bg));
+                    }
+                    if cell.style.bold {
+                        style = style.add_modifier(ratatui::style::Modifier::BOLD);
+                    }
+                    if cell.style.italic {
+                        style = style.add_modifier(ratatui::style::Modifier::ITALIC);
+                    }
+                    if cell.style.underline {
+                        style = style.add_modifier(ratatui::style::Modifier::UNDERLINED);
+                    }
+                    if cell.style.reversed {
+                        style = style.add_modifier(ratatui::style::Modifier::REVERSED);
+                    }
+                    pos.set_style(style);
+                }
+            }
+        }
+    }
+}
+
+/// Convertit une couleur zer0fun en couleur ratatui.
+fn convert_color(c: zer0fun_api::Color) -> ratatui::style::Color {
+    match c {
+        zer0fun_api::Color::Black => ratatui::style::Color::Black,
+        zer0fun_api::Color::Red => ratatui::style::Color::Red,
+        zer0fun_api::Color::Green => ratatui::style::Color::Green,
+        zer0fun_api::Color::Yellow => ratatui::style::Color::Yellow,
+        zer0fun_api::Color::Blue => ratatui::style::Color::Blue,
+        zer0fun_api::Color::Magenta => ratatui::style::Color::Magenta,
+        zer0fun_api::Color::Cyan => ratatui::style::Color::Cyan,
+        zer0fun_api::Color::White => ratatui::style::Color::White,
+        zer0fun_api::Color::Gray => ratatui::style::Color::Gray,
+        zer0fun_api::Color::DarkGray => ratatui::style::Color::DarkGray,
+        zer0fun_api::Color::LightRed => ratatui::style::Color::LightRed,
+        zer0fun_api::Color::LightGreen => ratatui::style::Color::LightGreen,
+        zer0fun_api::Color::LightYellow => ratatui::style::Color::LightYellow,
+        zer0fun_api::Color::LightBlue => ratatui::style::Color::LightBlue,
+        zer0fun_api::Color::LightMagenta => ratatui::style::Color::LightMagenta,
+        zer0fun_api::Color::LightCyan => ratatui::style::Color::LightCyan,
+        zer0fun_api::Color::Rgb(r, g, b) => ratatui::style::Color::Rgb(r, g, b),
+        zer0fun_api::Color::Indexed(i) => ratatui::style::Color::Indexed(i),
     }
 }
 
@@ -5767,7 +6261,7 @@ fn handle_ctx(app: &mut App, args: &[&str]) {
 }
 
 /// Interroge le provider pour la fenêtre de contexte du modèle actif.
-fn probe_context(app: &App, ui_tx: &UnboundedSender<UiEvent>) {
+pub(super) fn probe_context(app: &App, ui_tx: &UnboundedSender<UiEvent>) {
     let Some(provider) = providers::find(&app.provider_id) else {
         return;
     };
@@ -6177,6 +6671,7 @@ mod tests {
             roles_enabled: true,
             picker: None,
             wizard: None,
+            provider_add: None,
             secret_mode: false,
             cg: None,
             pending_picker_target: None,
