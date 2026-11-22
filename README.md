@@ -738,6 +738,37 @@ Le jeton est aussi cherché dans l'environnement
 | `/radio [dossier\|fichier\|url]` | panneau audio à droite, playlist auto | natif Rust |
 | `/bintime` | panneau horloge binaire CRT | natif Rust |
 | `/pong` | Pong **contre l'agent** (plein écran) | natif Rust |
+| `/fun list` | liste les modules dynamiques chargés | zer0build |
+| `/fun reload [nom]` | recharge un module (hot-reload) | zer0build |
+| `/fun unload <nom>` | décharge un module | zer0build |
+| `/fun dir` | affiche le répertoire des modules | zer0build |
+| `/zer0build` | overlay avec toute la documentation | zer0build |
+| `/<nom>` | active un module dynamique (ex: `/pomodoro`) | zer0build |
+
+### Modules dynamiques (zer0build)
+
+Les modules fun peuvent être créés, compilés et installés dynamiquement avec **zer0build** :
+
+```bash
+# Créer un module
+zer0build new monmodule --template basic
+
+# Compiler et installer
+cd monmodule
+zer0build build --release
+zer0build install
+
+# Dans zer0gh0st
+/monmodule
+```
+
+**Caractéristiques :**
+- **Hot-reload** : recharge les modules sans redémarrer zer0gh0st
+- **Signature ed25519** : vérification de l'intégrité des modules
+- **Cross-compilation** : Linux, macOS, Windows
+- **Génération IA** : `zer0build ai "un jeu de snake"` via OpenRouter
+
+**Repo zer0build** : [https://github.com/Richerrail/zer0build.git](https://github.com/Richerrail/zer0build.git)
 
 Un mod est **fourni** : [`zer0do`](./mods/README.md) (`/0do`) — appareils du
 réseau local en Roku ECP : `scan`, `status`, `key`, `power`. Les actions exigent
