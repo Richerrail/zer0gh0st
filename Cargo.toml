@@ -55,7 +55,7 @@ pdf-extract = "0.8"
 # Modules fun dynamiques
 libloading = "0.8"
 notify = "6"
-zer0fun-api = { path = "../zer0fun-api" }
+zer0fun-api = { path = "zer0fun-api" }
 ed25519-dalek = "2.1"
 dirs = "5"
 log = "0.4"

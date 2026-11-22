@@ -968,7 +968,7 @@ fn request_stop(app: &mut App) {
 /// Convertit un événement clavier crossterm en événement zer0fun.
 fn convert_key_event(k: crossterm::event::KeyEvent) -> zer0fun_api::Event {
     use zer0fun_api::{Event, KeyEvent};
-    
+
     let key = match k.code {
         KeyCode::Char(c) => {
             // Gérer les modificateurs Ctrl
@@ -1000,7 +1000,7 @@ fn convert_key_event(k: crossterm::event::KeyEvent) -> zer0fun_api::Event {
         KeyCode::F(n) => KeyEvent::F(n),
         _ => KeyEvent::Unknown,
     };
-    
+
     Event::Key(key)
 }
 
@@ -1156,15 +1156,18 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
                         if modules.is_empty() {
                             app.messages.push(ChatMessage::notice(
                                 "Aucun module fun dynamique chargé.\n\
-                                Utiliser 'zer0build install' pour installer des modules."
+                                Utiliser 'zer0build install' pour installer des modules.",
                             ));
                         } else {
                             let mut s = String::from("Modules fun dynamiques :\n\n");
                             for meta in modules {
                                 s.push_str(&format!(
                                     "  {} v{} — {}\n    catégorie: {:?} | permissions: {:?}\n\n",
-                                    meta.name, meta.version, meta.description,
-                                    meta.category, meta.permissions
+                                    meta.name,
+                                    meta.version,
+                                    meta.description,
+                                    meta.category,
+                                    meta.permissions
                                 ));
                             }
                             s.push_str(&format!(
@@ -1176,7 +1179,7 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
                         }
                     } else {
                         app.messages.push(ChatMessage::notice(
-                            "Registry de modules fun non initialisé."
+                            "Registry de modules fun non initialisé.",
                         ));
                     }
                 }
@@ -1184,35 +1187,35 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
                     // Recharge un module ou tous
                     if let Some(registry) = &mut app.fun_registry {
                         match args.get(1).copied() {
-                            Some(name) => {
-                                match registry.reload_module(name) {
-                                    Ok(()) => {
-                                        app.messages.push(ChatMessage::notice(
-                                            format!("✅ Module '{}' rechargé", name)
-                                        ));
-                                    }
-                                    Err(e) => {
-                                        app.messages.push(ChatMessage::notice(
-                                            format!("❌ Échec du rechargement de '{}': {}", name, e)
-                                        ));
-                                    }
+                            Some(name) => match registry.reload_module(name) {
+                                Ok(()) => {
+                                    app.messages.push(ChatMessage::notice(format!(
+                                        "✅ Module '{}' rechargé",
+                                        name
+                                    )));
                                 }
-                            }
-                            None => {
-                                match registry.load_all() {
-                                    Ok(()) => {
-                                        let count = registry.len();
-                                        app.messages.push(ChatMessage::notice(
-                                            format!("✅ {} module(s) rechargé(s)", count)
-                                        ));
-                                    }
-                                    Err(e) => {
-                                        app.messages.push(ChatMessage::notice(
-                                            format!("❌ Échec du rechargement: {}", e)
-                                        ));
-                                    }
+                                Err(e) => {
+                                    app.messages.push(ChatMessage::notice(format!(
+                                        "❌ Échec du rechargement de '{}': {}",
+                                        name, e
+                                    )));
                                 }
-                            }
+                            },
+                            None => match registry.load_all() {
+                                Ok(()) => {
+                                    let count = registry.len();
+                                    app.messages.push(ChatMessage::notice(format!(
+                                        "✅ {} module(s) rechargé(s)",
+                                        count
+                                    )));
+                                }
+                                Err(e) => {
+                                    app.messages.push(ChatMessage::notice(format!(
+                                        "❌ Échec du rechargement: {}",
+                                        e
+                                    )));
+                                }
+                            },
                         }
                     }
                 }
@@ -1224,33 +1227,35 @@ fn handle_command(app: &mut App, text: &str, ui_tx: &UnboundedSender<UiEvent>) {
                                     if app.active_fun_module.as_deref() == Some(name) {
                                         app.active_fun_module = None;
                                     }
-                                    app.messages.push(ChatMessage::notice(
-                                        format!("✅ Module '{}' déchargé", name)
-                                    ));
+                                    app.messages.push(ChatMessage::notice(format!(
+                                        "✅ Module '{}' déchargé",
+                                        name
+                                    )));
                                 }
                                 Err(e) => {
-                                    app.messages.push(ChatMessage::notice(
-                                        format!("❌ Échec du déchargement: {}", e)
-                                    ));
+                                    app.messages.push(ChatMessage::notice(format!(
+                                        "❌ Échec du déchargement: {}",
+                                        e
+                                    )));
                                 }
                             }
                         }
                     } else {
-                        app.messages.push(ChatMessage::notice(
-                            "Usage: /fun unload <nom>"
-                        ));
+                        app.messages
+                            .push(ChatMessage::notice("Usage: /fun unload <nom>"));
                     }
                 }
                 Some("dir") => {
                     if let Some(registry) = &app.fun_registry {
-                        app.messages.push(ChatMessage::notice(
-                            format!("Répertoire des modules: {}", registry.modules_dir.display())
-                        ));
+                        app.messages.push(ChatMessage::notice(format!(
+                            "Répertoire des modules: {}",
+                            registry.modules_dir.display()
+                        )));
                     }
                 }
                 Some(_) => {
                     app.messages.push(ChatMessage::notice(
-                        "Usage: /fun [list|reload [nom]|unload <nom>|dir]"
+                        "Usage: /fun [list|reload [nom]|unload <nom>|dir]",
                     ));
                 }
             }
@@ -4417,20 +4422,20 @@ fn handle_input(ev: Event, app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
                     term_height: app.chat_rect.height,
                     ..Default::default()
                 };
-                
+
                 let consumed = registry.on_event(&module_name, &fun_event, &mut ctx);
-                
+
                 if ctx.exit {
                     app.active_fun_module = None;
                     app.mode = crate::fun::Mode::Chat;
                 }
-                
+
                 if consumed {
                     return;
                 }
             }
         }
-        
+
         if app.mode != crate::fun::Mode::Chat {
             match app.mode {
                 crate::fun::Mode::Radio => match k.code {
@@ -5108,39 +5113,61 @@ fn draw(f: &mut Frame, app: &mut App) {
 
 /// Dessine l'overlay `/zer0build`.
 fn draw_zer0build_overlay(f: &mut Frame, area: Rect, app: &App) {
-    use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
     use ratatui::text::{Line, Span};
-    
+    use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+
     // Effacer l'écran
     f.render_widget(ratatui::widgets::Clear, area);
-    
+
     // Titre
     let title = " zer0build — Gestion des modules fun ";
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme::accent()));
-    
+
     let inner = block.inner(area);
     f.render_widget(block, area);
-    
+
     // Contenu
     let mut lines: Vec<Line> = vec![
-        Line::from(Span::styled("📦 PROCÉDURE COMPLÈTE", Style::default().fg(theme::accent()).add_modifier(ratatui::style::Modifier::BOLD))),
+        Line::from(Span::styled(
+            "📦 PROCÉDURE COMPLÈTE",
+            Style::default()
+                .fg(theme::accent())
+                .add_modifier(ratatui::style::Modifier::BOLD),
+        )),
         Line::from(""),
         Line::from("  1. Créer un module :"),
-        Line::from(Span::styled("     zer0build new <nom> --template <basic|game|visual|tool|network>", Style::default().fg(ratatui::style::Color::Gray))),
+        Line::from(Span::styled(
+            "     zer0build new <nom> --template <basic|game|visual|tool|network>",
+            Style::default().fg(ratatui::style::Color::Gray),
+        )),
         Line::from(""),
         Line::from("  2. Compiler :"),
-        Line::from(Span::styled("     cd <nom> && zer0build build --release", Style::default().fg(ratatui::style::Color::Gray))),
+        Line::from(Span::styled(
+            "     cd <nom> && zer0build build --release",
+            Style::default().fg(ratatui::style::Color::Gray),
+        )),
         Line::from(""),
         Line::from("  3. Installer :"),
-        Line::from(Span::styled("     zer0build install [--force]", Style::default().fg(ratatui::style::Color::Gray))),
+        Line::from(Span::styled(
+            "     zer0build install [--force]",
+            Style::default().fg(ratatui::style::Color::Gray),
+        )),
         Line::from(""),
         Line::from("  4. Utiliser dans zer0gh0st :"),
-        Line::from(Span::styled("     /<nom>", Style::default().fg(ratatui::style::Color::Gray))),
+        Line::from(Span::styled(
+            "     /<nom>",
+            Style::default().fg(ratatui::style::Color::Gray),
+        )),
         Line::from(""),
-        Line::from(Span::styled("🔧 COMMANDES ZER0BUILD", Style::default().fg(theme::accent()).add_modifier(ratatui::style::Modifier::BOLD))),
+        Line::from(Span::styled(
+            "🔧 COMMANDES ZER0BUILD",
+            Style::default()
+                .fg(theme::accent())
+                .add_modifier(ratatui::style::Modifier::BOLD),
+        )),
         Line::from(""),
         Line::from("  new <nom> [--template T] [--description D] [--author A]"),
         Line::from("    Crée un nouveau projet de module"),
@@ -5166,14 +5193,22 @@ fn draw_zer0build_overlay(f: &mut Frame, area: Rect, app: &App) {
         Line::from("  verify <path> [--pubkey P]"),
         Line::from("    Vérifie la signature d'un module"),
         Line::from(""),
-        Line::from(Span::styled("📂 MODULES INSTALLÉS", Style::default().fg(theme::accent()).add_modifier(ratatui::style::Modifier::BOLD))),
+        Line::from(Span::styled(
+            "📂 MODULES INSTALLÉS",
+            Style::default()
+                .fg(theme::accent())
+                .add_modifier(ratatui::style::Modifier::BOLD),
+        )),
         Line::from(""),
     ];
-    
+
     if let Some(registry) = &app.fun_registry {
         let modules = registry.list_meta();
         if modules.is_empty() {
-            lines.push(Line::from(Span::styled("  (aucun module installé)", Style::default().fg(ratatui::style::Color::Gray))));
+            lines.push(Line::from(Span::styled(
+                "  (aucun module installé)",
+                Style::default().fg(ratatui::style::Color::Gray),
+            )));
         } else {
             for meta in modules {
                 lines.push(Line::from(format!(
@@ -5181,37 +5216,64 @@ fn draw_zer0build_overlay(f: &mut Frame, area: Rect, app: &App) {
                     meta.name, meta.version, meta.description
                 )));
                 lines.push(Line::from(Span::styled(
-                    format!("    catégorie: {:?} | permissions: {:?}", meta.category, meta.permissions),
-                    ratatui::style::Color::Gray
+                    format!(
+                        "    catégorie: {:?} | permissions: {:?}",
+                        meta.category, meta.permissions
+                    ),
+                    ratatui::style::Color::Gray,
                 )));
                 lines.push(Line::from(""));
             }
         }
-        lines.push(Line::from(format!("  Répertoire: {}", registry.modules_dir.display())));
+        lines.push(Line::from(format!(
+            "  Répertoire: {}",
+            registry.modules_dir.display()
+        )));
     } else {
-        lines.push(Line::from(Span::styled("  (registry non initialisé)", Style::default().fg(ratatui::style::Color::Gray))));
+        lines.push(Line::from(Span::styled(
+            "  (registry non initialisé)",
+            Style::default().fg(ratatui::style::Color::Gray),
+        )));
     }
-    
+
     lines.push(Line::from(""));
-    
+
     // Section 4: Commandes zer0gh0st
-    lines.push(Line::from(Span::styled("🎮 COMMANDES ZER0GH0ST", Style::default().fg(theme::accent()).add_modifier(ratatui::style::Modifier::BOLD))));
+    lines.push(Line::from(Span::styled(
+        "🎮 COMMANDES ZER0GH0ST",
+        Style::default()
+            .fg(theme::accent())
+            .add_modifier(ratatui::style::Modifier::BOLD),
+    )));
     lines.push(Line::from(""));
-    lines.push(Line::from("  /fun list              Liste les modules chargés"));
-    lines.push(Line::from("  /fun reload [nom]      Recharge un module ou tous"));
+    lines.push(Line::from(
+        "  /fun list              Liste les modules chargés",
+    ));
+    lines.push(Line::from(
+        "  /fun reload [nom]      Recharge un module ou tous",
+    ));
     lines.push(Line::from("  /fun unload <nom>      Décharge un module"));
-    lines.push(Line::from("  /fun dir               Affiche le répertoire des modules"));
-    lines.push(Line::from("  /<nom>                 Active un module (ex: /pomodoro)"));
-    lines.push(Line::from("  /zer0build             Ouvre/ferme cet overlay"));
+    lines.push(Line::from(
+        "  /fun dir               Affiche le répertoire des modules",
+    ));
+    lines.push(Line::from(
+        "  /<nom>                 Active un module (ex: /pomodoro)",
+    ));
+    lines.push(Line::from(
+        "  /zer0build             Ouvre/ferme cet overlay",
+    ));
     lines.push(Line::from(""));
-    
+
     // Footer
-    lines.push(Line::from(Span::styled("[Esc] Fermer  [r] Recharger les modules", Style::default().fg(ratatui::style::Color::Gray))));
-    
+    lines.push(Line::from(Span::styled(
+        "[Esc] Fermer  [r] Recharger les modules",
+        Style::default().fg(ratatui::style::Color::Gray),
+    )));
+
     let paragraph = Paragraph::new(lines)
         .wrap(Wrap { trim: true })
         .scroll((0, 0));
-    
+
     f.render_widget(paragraph, inner);
 }
 
@@ -5219,16 +5281,16 @@ fn draw_zer0build_overlay(f: &mut Frame, area: Rect, app: &App) {
 fn draw_fun_module(f: &mut Frame, area: Rect, registry: &crate::fun::FunRegistry, name: &str) {
     // Effacer la zone d'abord
     f.render_widget(ratatui::widgets::Clear, area);
-    
+
     // Créer un buffer zer0fun
     let mut buf = zer0fun_api::Buffer::new(area.width, area.height);
-    
+
     // Convertir la zone ratatui en Rect zer0fun
     let fun_area = zer0fun_api::Rect::new(area.x, area.y, area.width, area.height);
-    
+
     // Dessiner le module
     registry.draw(name, &fun_area, &mut buf);
-    
+
     // Convertir le buffer zer0fun en rendu ratatui
     let ratatui_buf = f.buffer_mut();
     for y in 0..area.height {
@@ -6715,6 +6777,9 @@ mod tests {
             panel_rect: Rect::default(),
             last_key_event: None,
             whale: None,
+            fun_registry: None,
+            active_fun_module: None,
+            zer0build_overlay: false,
         }
     }
 
