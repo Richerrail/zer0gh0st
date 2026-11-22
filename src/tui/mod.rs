@@ -652,9 +652,11 @@ async fn event_loop(
                 // Tick du module fun dynamique actif
                 if let Some(module_name) = &app.active_fun_module {
                     if let Some(registry) = &mut app.fun_registry {
-                        let mut ctx = zer0fun_api::Context::default();
-                        ctx.term_width = app.chat_rect.width;
-                        ctx.term_height = app.chat_rect.height;
+                        let mut ctx = zer0fun_api::Context {
+                            term_width: app.chat_rect.width,
+                            term_height: app.chat_rect.height,
+                            ..Default::default()
+                        };
                         registry.on_tick(module_name, &mut ctx);
                         if ctx.exit {
                             app.active_fun_module = None;
@@ -4410,9 +4412,11 @@ fn handle_input(ev: Event, app: &mut App, ui_tx: &UnboundedSender<UiEvent>) {
             if let Some(registry) = &mut app.fun_registry {
                 // Convertir l'événement crossterm en événement zer0fun
                 let fun_event = convert_key_event(k);
-                let mut ctx = zer0fun_api::Context::default();
-                ctx.term_width = app.chat_rect.width;
-                ctx.term_height = app.chat_rect.height;
+                let mut ctx = zer0fun_api::Context {
+                    term_width: app.chat_rect.width,
+                    term_height: app.chat_rect.height,
+                    ..Default::default()
+                };
                 
                 let consumed = registry.on_event(&module_name, &fun_event, &mut ctx);
                 
@@ -5121,55 +5125,50 @@ fn draw_zer0build_overlay(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(block, area);
     
     // Contenu
-    let mut lines = Vec::new();
-    
-    // Section 1: Procédure
-    lines.push(Line::from(Span::styled("📦 PROCÉDURE COMPLÈTE", Style::default().fg(theme::accent()).add_modifier(ratatui::style::Modifier::BOLD))));
-    lines.push(Line::from(""));
-    lines.push(Line::from("  1. Créer un module :"));
-    lines.push(Line::from(Span::styled("     zer0build new <nom> --template <basic|game|visual|tool|network>", Style::default().fg(ratatui::style::Color::Gray))));
-    lines.push(Line::from(""));
-    lines.push(Line::from("  2. Compiler :"));
-    lines.push(Line::from(Span::styled("     cd <nom> && zer0build build --release", Style::default().fg(ratatui::style::Color::Gray))));
-    lines.push(Line::from(""));
-    lines.push(Line::from("  3. Installer :"));
-    lines.push(Line::from(Span::styled("     zer0build install [--force]", Style::default().fg(ratatui::style::Color::Gray))));
-    lines.push(Line::from(""));
-    lines.push(Line::from("  4. Utiliser dans zer0gh0st :"));
-    lines.push(Line::from(Span::styled("     /<nom>", Style::default().fg(ratatui::style::Color::Gray))));
-    lines.push(Line::from(""));
-    
-    // Section 2: Commandes zer0build
-    lines.push(Line::from(Span::styled("🔧 COMMANDES ZER0BUILD", Style::default().fg(theme::accent()).add_modifier(ratatui::style::Modifier::BOLD))));
-    lines.push(Line::from(""));
-    lines.push(Line::from("  new <nom> [--template T] [--description D] [--author A]"));
-    lines.push(Line::from("    Crée un nouveau projet de module"));
-    lines.push(Line::from(""));
-    lines.push(Line::from("  build [--target T] [--all] [--release]"));
-    lines.push(Line::from("    Compile le module (natif ou cross-compile)"));
-    lines.push(Line::from(""));
-    lines.push(Line::from("  install [--force] [--target-dir D]"));
-    lines.push(Line::from("    Installe le module dans zer0gh0st"));
-    lines.push(Line::from(""));
-    lines.push(Line::from("  list [--target-dir D]"));
-    lines.push(Line::from("    Liste les modules installés"));
-    lines.push(Line::from(""));
-    lines.push(Line::from("  remove <nom> [--target-dir D]"));
-    lines.push(Line::from("    Supprime un module installé"));
-    lines.push(Line::from(""));
-    lines.push(Line::from("  ai <prompt> [--name N] [--model M] [--api-key K]"));
-    lines.push(Line::from("    Génère un module via IA (OpenRouter)"));
-    lines.push(Line::from(""));
-    lines.push(Line::from("  sign <path> [--key K]"));
-    lines.push(Line::from("    Signe un module compilé"));
-    lines.push(Line::from(""));
-    lines.push(Line::from("  verify <path> [--pubkey P]"));
-    lines.push(Line::from("    Vérifie la signature d'un module"));
-    lines.push(Line::from(""));
-    
-    // Section 3: Modules installés
-    lines.push(Line::from(Span::styled("📂 MODULES INSTALLÉS", Style::default().fg(theme::accent()).add_modifier(ratatui::style::Modifier::BOLD))));
-    lines.push(Line::from(""));
+    let mut lines: Vec<Line> = vec![
+        Line::from(Span::styled("📦 PROCÉDURE COMPLÈTE", Style::default().fg(theme::accent()).add_modifier(ratatui::style::Modifier::BOLD))),
+        Line::from(""),
+        Line::from("  1. Créer un module :"),
+        Line::from(Span::styled("     zer0build new <nom> --template <basic|game|visual|tool|network>", Style::default().fg(ratatui::style::Color::Gray))),
+        Line::from(""),
+        Line::from("  2. Compiler :"),
+        Line::from(Span::styled("     cd <nom> && zer0build build --release", Style::default().fg(ratatui::style::Color::Gray))),
+        Line::from(""),
+        Line::from("  3. Installer :"),
+        Line::from(Span::styled("     zer0build install [--force]", Style::default().fg(ratatui::style::Color::Gray))),
+        Line::from(""),
+        Line::from("  4. Utiliser dans zer0gh0st :"),
+        Line::from(Span::styled("     /<nom>", Style::default().fg(ratatui::style::Color::Gray))),
+        Line::from(""),
+        Line::from(Span::styled("🔧 COMMANDES ZER0BUILD", Style::default().fg(theme::accent()).add_modifier(ratatui::style::Modifier::BOLD))),
+        Line::from(""),
+        Line::from("  new <nom> [--template T] [--description D] [--author A]"),
+        Line::from("    Crée un nouveau projet de module"),
+        Line::from(""),
+        Line::from("  build [--target T] [--all] [--release]"),
+        Line::from("    Compile le module (natif ou cross-compile)"),
+        Line::from(""),
+        Line::from("  install [--force] [--target-dir D]"),
+        Line::from("    Installe le module dans zer0gh0st"),
+        Line::from(""),
+        Line::from("  list [--target-dir D]"),
+        Line::from("    Liste les modules installés"),
+        Line::from(""),
+        Line::from("  remove <nom> [--target-dir D]"),
+        Line::from("    Supprime un module installé"),
+        Line::from(""),
+        Line::from("  ai <prompt> [--name N] [--model M] [--api-key K]"),
+        Line::from("    Génère un module via IA (OpenRouter)"),
+        Line::from(""),
+        Line::from("  sign <path> [--key K]"),
+        Line::from("    Signe un module compilé"),
+        Line::from(""),
+        Line::from("  verify <path> [--pubkey P]"),
+        Line::from("    Vérifie la signature d'un module"),
+        Line::from(""),
+        Line::from(Span::styled("📂 MODULES INSTALLÉS", Style::default().fg(theme::accent()).add_modifier(ratatui::style::Modifier::BOLD))),
+        Line::from(""),
+    ];
     
     if let Some(registry) = &app.fun_registry {
         let modules = registry.list_meta();
